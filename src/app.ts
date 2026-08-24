@@ -5,6 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mountControlApi } from './control/control-api.js';
 import { ControlService } from './control/control-service.js';
+import { CliService } from './cli-plane/cli-service.js';
+import { mountCliExecRoutes } from './cli-plane/routes.js';
 import { DataPlane } from './data-plane/data-plane.js';
 import { GatewayServerFactory } from './data-plane/gateway-server.js';
 import { CapabilityRegistry } from './data-plane/registry.js';
@@ -101,6 +103,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     upstreamOAuth,
   );
   const secureActions = new SecureActionService(store, config.masterKey, config.publicUrl);
+  const cli = new CliService(store);
   const market = new MarketService(
     control,
     store,
@@ -118,7 +121,9 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     secureCookies: config.publicUrl.protocol === 'https:',
     logger,
     market,
+    cli,
   });
+  mountCliExecRoutes(app, { service: cli, auth, logger });
   const management = new ManagementMCP({
     service: control,
     market,
@@ -148,6 +153,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
       if (
         path.startsWith('/api') ||
         path.startsWith('/mcp') ||
+        path.startsWith('/cli') ||
         path.startsWith('/manage') ||
         path.startsWith('/oauth') ||
         path === '/healthz' ||

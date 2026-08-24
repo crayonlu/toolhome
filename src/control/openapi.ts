@@ -152,6 +152,43 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
     parameters: [idParameter('credential_id')],
   });
 
+  // ── CLI registry (Form A CLI plane) ────────────────────────────────────
+  add('/api/v1/clis', 'get', 'listClis', { summary: 'List registered CLIs' });
+  add('/api/v1/clis', 'post', 'createCli', {
+    summary: 'Register a CLI (command or image, allow-list, probe, credential)',
+    body: true,
+    success: 201,
+  });
+  add('/api/v1/clis/{cli_id}', 'get', 'getCli', {
+    summary: 'Fetch a CLI record',
+    parameters: [idParameter('cli_id')],
+  });
+  add('/api/v1/clis/{cli_id}', 'patch', 'updateCli', {
+    summary: 'Update a CLI record',
+    parameters: [idParameter('cli_id')],
+    body: true,
+  });
+  add('/api/v1/clis/{cli_id}', 'delete', 'deleteCli', {
+    summary: 'Delete a CLI record',
+    parameters: [idParameter('cli_id')],
+  });
+  add('/cli/{slug}/exec', 'post', 'execCli', {
+    summary:
+      'Run a CLI: argv array only (never a shell string); streams NDJSON stdout/stderr frames and a final exit frame',
+    parameters: [
+      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+    ],
+    body: true,
+    security: [{ controlApiKey: [] }],
+  });
+  add('/cli/{slug}/status', 'get', 'cliStatus', {
+    summary: 'Run the CLI probe and return installed/version/loggedIn/lastCheckedAt',
+    parameters: [
+      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+    ],
+    security: [{ controlApiKey: [] }],
+  });
+
   for (const kind of ['control', 'access']) {
     const segment = kind === 'control' ? 'control-keys' : 'access-keys';
     const title = kind === 'control' ? 'Control API' : 'MCP Access';

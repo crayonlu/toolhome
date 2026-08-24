@@ -149,6 +149,54 @@ toolhome api GET /api/v1/openapi.json
 toolhome api POST /api/v1/servers -d '{"slug":"test",...}'
 ```
 
+## cli (hosted CLI plane)
+
+Server-side CLI hosting (Form A): register a CLI once on the ToolHome host; client
+machines never install or log in to it. Records live in the `clis` table and execs are
+audited in the events stream.
+
+```bash
+# registry (Control API, admin key)
+toolhome api GET  /api/v1/clis                       # list registered CLIs
+toolhome api POST /api/v1/clis -d '{ "slug":"az", "name":"Azure CLI", "command":"az",
+  "executionMode":"host", "allowList":{"allow":[["account","show"],["vm","*"]],"deny":[["login"]]},
+  "probe":{"command":"az","args":["version"]}, "credentialId":"<env-credential-uuid>",
+  "timeoutMs":60000, "maxOutputBytes":65536 }'       # register (201)
+toolhome api GET  /api/v1/clis/<id>                  # fetch
+toolhome api PATCH /api/v1/clis/<id> -d '{"enabled":false}'   # update (partial)
+toolhome api DELETE /api/v1/clis/<id>                # delete
+```
+
+Exec and status live on the data plane (`POST /cli/{slug}/exec`, `GET /cli/{slug}/status`):
+
+```bash
+# exec: argv array only — never a shell string; body must be JSON
+toolhome api POST /cli/az/exec -d '{ "argv":["account","show","-o","table"], "timeoutMs":30000 }'
+# → 200 NDJSON stream: {"type":"stdout","data":...} {"type":"stderr","data":...}
+#   {"type":"exit","code":0,"durationMs":4211,"result":"ok"}
+# timeout → {"type":"exit","code":null,"durationMs":...,"result":"timeout"}
+# truncated output → exit frame carries "truncated":true
+
+toolhome api GET /cli/az/status
+# → { "installed":true, "version":"azure-cli 2.x", "loggedIn":true, "lastCheckedAt":"..." }
+```
+
+Semantics:
+
+- **argv array only**: `spawn(command, argv)` with no shell; a shell string is rejected (400).
+- **Allow-list**: `deny` rules are evaluated first; a non-empty `allow` list must match at
+  least one rule (`*` matches one argv token, rules match as argv prefixes). Denied argv is
+  rejected with 403 before any process is spawned.
+- **Env injection**: every exec gets `CI=true`, `NO_COLOR=1`, `PAGER=cat`, `TERM=dumb`
+  (unless the record sets `interactive: true`), plus any Env Credential
+  (`payload.type: 'env'`) variables attached to the record.
+- **Status probe**: the declared `probe.command` runs in the same context; its stdout is
+  parsed as `version=...` / `loggedIn=true|false` lines; `installed` = exit code 0.
+- **Isolation**: `executionMode: 'host'` spawns on the ToolHome host (trusted entries);
+  `'docker'` spawns a one-shot sibling container (`docker run --rm -i <image> <argv…>`).
+- **Audit**: every exec appends a `cli.exec` event (slug, argv, exit code, duration) visible
+  via `toolhome events` / `GET /api/v1/events`.
+
 ## global options
 
 ```

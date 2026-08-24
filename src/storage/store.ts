@@ -25,6 +25,7 @@ import type {
   UpdateServerInput,
   Visibility,
 } from '../domain/models.js';
+import type { CliRecord, CreateCliInput, UpdateCliInput } from '../cli-plane/models.js';
 
 export interface CreateKeyInput {
   kind: ApiKeyKind;
@@ -54,6 +55,14 @@ export interface Store {
   createServer(input: CreateServerInput): ServerRecord;
   updateServer(id: string, input: UpdateServerInput): ServerRecord;
   deleteServer(id: string): void;
+
+  // ── CLI registry (Form A CLI plane) ─────────────────────────────────────
+  listClis(): CliRecord[];
+  getCli(id: string): CliRecord | null;
+  getCliBySlug(slug: string): CliRecord | null;
+  createCli(input: CreateCliInput): CliRecord;
+  updateCli(id: string, input: UpdateCliInput): CliRecord;
+  deleteCli(id: string): void;
   listCredentials(): CredentialRecord[];
   getCredential(id: string): CredentialRecord | null;
   getCredentialPayload(id: string): CredentialPayload | null;

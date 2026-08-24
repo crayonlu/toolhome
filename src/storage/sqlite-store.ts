@@ -17,6 +17,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import {
+  cliRecordSchema,
+  createCliInputSchema,
+  updateCliInputSchema,
+  type CliRecord,
+  type CreateCliInput,
+  type UpdateCliInput,
+} from '../cli-plane/models.js';
+import {
   apiKeyRecordSchema,
   createServerInputSchema,
   credentialPayloadSchema,
@@ -73,6 +81,23 @@ const serverRowSchema = z.object({
   credential_id: z.string().nullable(),
   enabled: z.number(),
   settings_json: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+const cliRowSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  command: z.string(),
+  execution_mode: z.string(),
+  allow_list_json: z.string(),
+  interactive: z.number(),
+  credential_id: z.string().nullable(),
+  probe_json: z.string().nullable(),
+  enabled: z.number(),
+  timeout_ms: z.number(),
+  max_output_bytes: z.number(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -483,6 +508,24 @@ export class SqliteStore implements Store {
         completed_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_secure_actions_principal ON secure_actions(principal_id);
+
+      CREATE TABLE IF NOT EXISTS clis (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('host', 'docker')),
+        allow_list_json TEXT NOT NULL,
+        interactive INTEGER NOT NULL,
+        credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
+        probe_json TEXT,
+        enabled INTEGER NOT NULL,
+        timeout_ms INTEGER NOT NULL,
+        max_output_bytes INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_clis_slug ON clis(slug);
     `);
     // Guarded migration for existing databases created before api_keys.scope existed.
     const apiKeyColumns = this.#db
@@ -677,6 +720,98 @@ export class SqliteStore implements Store {
   deleteServer(id: string): void {
     const result = this.#db.prepare('DELETE FROM servers WHERE id = ?').run(id);
     if (result.changes === 0) throw new AppError('server_not_found', 'Server not found', 404);
+  }
+
+  listClis(): CliRecord[] {
+    return this.#db
+      .prepare('SELECT * FROM clis ORDER BY slug')
+      .all()
+      .map((row) => this.#parseCli(row));
+  }
+
+  getCli(id: string): CliRecord | null {
+    const row = this.#db.prepare('SELECT * FROM clis WHERE id = ?').get(id);
+    return row === undefined ? null : this.#parseCli(row);
+  }
+
+  getCliBySlug(slug: string): CliRecord | null {
+    const row = this.#db.prepare('SELECT * FROM clis WHERE slug = ?').get(slug);
+    return row === undefined ? null : this.#parseCli(row);
+  }
+
+  createCli(input: CreateCliInput): CliRecord {
+    const valid = createCliInputSchema.parse(input);
+    if (this.getCliBySlug(valid.slug)) {
+      throw new AppError('cli_slug_conflict', 'CLI slug exists', 409);
+    }
+    const timestamp = now();
+    const record = cliRecordSchema.parse({
+      id: randomUUID(),
+      ...valid,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    this.#db
+      .prepare(
+        `INSERT INTO clis
+        (id, slug, name, command, execution_mode, allow_list_json, interactive, credential_id,
+         probe_json, enabled, timeout_ms, max_output_bytes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.slug,
+        record.name,
+        record.command,
+        record.executionMode,
+        JSON.stringify(record.allowList),
+        record.interactive ? 1 : 0,
+        record.credentialId,
+        record.probe === null ? null : JSON.stringify(record.probe),
+        record.enabled ? 1 : 0,
+        record.timeoutMs,
+        record.maxOutputBytes,
+        record.createdAt,
+        record.updatedAt,
+      );
+    return record;
+  }
+
+  updateCli(id: string, input: UpdateCliInput): CliRecord {
+    const current = this.getCli(id);
+    if (!current) throw new AppError('cli_not_found', 'CLI not found', 404);
+    const patch = updateCliInputSchema.parse(input);
+    const record = cliRecordSchema.parse({
+      ...current,
+      ...patch,
+      updatedAt: now(),
+    });
+    this.#db
+      .prepare(
+        `UPDATE clis SET name = ?, command = ?, execution_mode = ?, allow_list_json = ?,
+         interactive = ?, credential_id = ?, probe_json = ?, enabled = ?, timeout_ms = ?,
+         max_output_bytes = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        record.name,
+        record.command,
+        record.executionMode,
+        JSON.stringify(record.allowList),
+        record.interactive ? 1 : 0,
+        record.credentialId,
+        record.probe === null ? null : JSON.stringify(record.probe),
+        record.enabled ? 1 : 0,
+        record.timeoutMs,
+        record.maxOutputBytes,
+        record.updatedAt,
+        id,
+      );
+    return record;
+  }
+
+  deleteCli(id: string): void {
+    const result = this.#db.prepare('DELETE FROM clis WHERE id = ?').run(id);
+    if (result.changes === 0) throw new AppError('cli_not_found', 'CLI not found', 404);
   }
 
   listCredentials(): CredentialRecord[] {
@@ -1530,6 +1665,26 @@ export class SqliteStore implements Store {
       credentialId: parsed.credential_id,
       enabled: parsed.enabled === 1,
       settings: parseJson(parsed.settings_json),
+      createdAt: parsed.created_at,
+      updatedAt: parsed.updated_at,
+    });
+  }
+
+  #parseCli(row: unknown): CliRecord {
+    const parsed = cliRowSchema.parse(row);
+    return cliRecordSchema.parse({
+      id: parsed.id,
+      slug: parsed.slug,
+      name: parsed.name,
+      command: parsed.command,
+      executionMode: parsed.execution_mode as 'host' | 'docker',
+      allowList: parseJson(parsed.allow_list_json),
+      interactive: parsed.interactive === 1,
+      credentialId: parsed.credential_id,
+      probe: parsed.probe_json === null ? null : parseJson(parsed.probe_json),
+      enabled: parsed.enabled === 1,
+      timeoutMs: parsed.timeout_ms,
+      maxOutputBytes: parsed.max_output_bytes,
       createdAt: parsed.created_at,
       updatedAt: parsed.updated_at,
     });

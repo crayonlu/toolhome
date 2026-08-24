@@ -7,6 +7,7 @@ import { ControlSessionService, cookieValue } from '../security/control-session.
 import type { Store } from '../storage/store.js';
 import type { ControlService } from './control-service.js';
 import type { MarketService } from '../market/market-service.js';
+import type { CliService } from '../cli-plane/cli-service.js';
 import { controlOpenApi } from './openapi.js';
 
 const keyInputSchema = z.object({ name: z.string().min(1).max(120) });
@@ -49,6 +50,7 @@ export function mountControlApi(
     secureCookies: boolean;
     logger: Logger;
     market?: MarketService;
+    cli?: CliService;
   },
 ): void {
   const route =
@@ -218,6 +220,38 @@ export function mountControlApi(
     route(async (context) =>
       options.service.setProjection(context.req.param('id'), await context.req.json()),
     ),
+  );
+
+  // ── CLI registry (Form A CLI plane) ────────────────────────────────────
+  app.get('/api/v1/clis', route(() => options.cli?.list() ?? []));
+  app.post(
+    '/api/v1/clis',
+    adminRoute(async (context) => {
+      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      return options.cli.create(await context.req.json());
+    }, 201),
+  );
+  app.get(
+    '/api/v1/clis/:id',
+    route((context) => {
+      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      return options.cli.get(context.req.param('id'));
+    }),
+  );
+  app.patch(
+    '/api/v1/clis/:id',
+    adminRoute(async (context) => {
+      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      return options.cli.update(context.req.param('id'), await context.req.json());
+    }),
+  );
+  app.delete(
+    '/api/v1/clis/:id',
+    adminRoute(async (context) => {
+      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      await options.cli.delete(context.req.param('id'));
+      return { deleted: true };
+    }),
   );
 
   app.get(
@@ -442,7 +476,7 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-function errorResponse(error: unknown, logger: Logger): Response {
+export function errorResponse(error: unknown, logger: Logger): Response {
   const appError =
     error instanceof AppError
       ? error
