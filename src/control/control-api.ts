@@ -223,32 +223,39 @@ export function mountControlApi(
   );
 
   // ── CLI registry (Form A CLI plane) ────────────────────────────────────
-  app.get('/api/v1/clis', route(() => options.cli?.list() ?? []));
+  app.get(
+    '/api/v1/clis',
+    route(() => options.cli?.list() ?? []),
+  );
   app.post(
     '/api/v1/clis',
     adminRoute(async (context) => {
-      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
       return options.cli.create(await context.req.json());
     }, 201),
   );
   app.get(
     '/api/v1/clis/:id',
     route((context) => {
-      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
       return options.cli.get(context.req.param('id'));
     }),
   );
   app.patch(
     '/api/v1/clis/:id',
     adminRoute(async (context) => {
-      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
       return options.cli.update(context.req.param('id'), await context.req.json());
     }),
   );
   app.delete(
     '/api/v1/clis/:id',
     adminRoute(async (context) => {
-      if (!options.cli) throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
       await options.cli.delete(context.req.param('id'));
       return { deleted: true };
     }),
@@ -363,14 +370,26 @@ export function mountControlApi(
 
   const market = options.market;
   if (market) {
-    app.get('/api/v1/market', route(() => market.list()));
-    app.get('/api/v1/market/installations', route(() => market.installations()));
-    app.get('/api/v1/market/updates', route(() => market.updates()));
+    app.get(
+      '/api/v1/market',
+      route(() => market.list()),
+    );
+    app.get(
+      '/api/v1/market/installations',
+      route(() => market.installations()),
+    );
+    app.get(
+      '/api/v1/market/updates',
+      route(() => market.updates()),
+    );
     app.get(
       '/api/v1/market/install/:jobId',
       route((context) => market.getJob(context.req.param('jobId'))),
     );
-    app.post('/api/v1/market/:id/update', route((context) => market.update(context.req.param('id'))));
+    app.post(
+      '/api/v1/market/:id/update',
+      route((context) => market.update(context.req.param('id'))),
+    );
     app.post(
       '/api/v1/market/:id/install',
       route(async (context) => {

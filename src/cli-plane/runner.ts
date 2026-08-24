@@ -40,7 +40,9 @@ export function execCli(
   return new Promise((resolve) => {
     const isDocker = request.executionMode === 'docker';
     const spawnCommand = isDocker ? 'docker' : request.command;
-    const spawnArgs = isDocker ? ['run', '--rm', '-i', request.command, ...request.argv] : request.argv;
+    const spawnArgs = isDocker
+      ? ['run', '--rm', '-i', request.command, ...request.argv]
+      : request.argv;
 
     let child: ChildProcessWithoutNullStreams;
     try {

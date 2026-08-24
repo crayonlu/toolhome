@@ -29,6 +29,7 @@ toolhome server endpoint <id>                 # per-server endpoint URL
 ```
 
 Server JSON (create):
+
 ```json
 {
   "slug": "firecrawl",
@@ -42,12 +43,17 @@ Server JSON (create):
 ```
 
 Home-hosted stdio:
+
 ```json
 {
   "slug": "resend",
   "name": "Resend",
   "kind": "home",
-  "transport": { "type": "stdio", "command": "/data/market/node_modules/.bin/resend-mcp", "args": [] },
+  "transport": {
+    "type": "stdio",
+    "command": "/data/market/node_modules/.bin/resend-mcp",
+    "args": []
+  },
   "credentialId": "<uuid>",
   "enabled": true
 }
@@ -67,6 +73,7 @@ toolhome credential authorize <name>         # start OAuth flow (by name or id)
 ```
 
 Authorize options:
+
 ```
 --server <slug>    specify the server (auto-resolved if omitted)
 --force            clear old client + re-authorize
@@ -76,6 +83,7 @@ Authorize options:
 ```
 
 Credential JSON (create):
+
 ```json
 { "name": "firecrawl", "payload": { "type": "bearer", "token": "fc-xxx" } }
 { "name": "apifox", "payload": { "type": "headers", "headers": { "Authorization": "Bearer xxx", "X-Apifox-Api-Version": "2025-09-01" } } }

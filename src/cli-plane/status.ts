@@ -14,7 +14,8 @@ export function parseProbeOutput(stdout: string): { version: string | null; logg
     if (versionMatch?.[1] !== undefined && versionMatch[1] !== '') {
       version = versionMatch[1];
     }
-    const loginMatch = /^loggedIn=(true|false)$/i.exec(trimmed) ?? /^logged_in=(true|false)$/i.exec(trimmed);
+    const loginMatch =
+      /^loggedIn=(true|false)$/i.exec(trimmed) ?? /^logged_in=(true|false)$/i.exec(trimmed);
     if (loginMatch?.[1] !== undefined) {
       loggedIn = loginMatch[1].toLowerCase() === 'true';
     }

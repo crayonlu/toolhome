@@ -33,7 +33,12 @@ export const createCliInputSchema = z.object({
   probe: cliProbeSchema.nullable().default(null),
   enabled: z.boolean().default(true),
   timeoutMs: z.number().int().min(100).max(3_600_000).default(60_000),
-  maxOutputBytes: z.number().int().min(1024).max(64 * 1024 * 1024).default(64 * 1024),
+  maxOutputBytes: z
+    .number()
+    .int()
+    .min(1024)
+    .max(64 * 1024 * 1024)
+    .default(64 * 1024),
 });
 
 export const updateCliInputSchema = z.object({
@@ -46,7 +51,12 @@ export const updateCliInputSchema = z.object({
   probe: cliProbeSchema.nullable().optional(),
   enabled: z.boolean().optional(),
   timeoutMs: z.number().int().min(100).max(3_600_000).optional(),
-  maxOutputBytes: z.number().int().min(1024).max(64 * 1024 * 1024).optional(),
+  maxOutputBytes: z
+    .number()
+    .int()
+    .min(1024)
+    .max(64 * 1024 * 1024)
+    .optional(),
 });
 
 export const cliRecordSchema = z.object({
@@ -71,7 +81,12 @@ export const cliExecInputSchema = z.object({
   argv: z.array(z.string()).min(1),
   stdin: z.string().nullable().optional(),
   timeoutMs: z.number().int().min(100).max(3_600_000).optional(),
-  maxOutputBytes: z.number().int().min(1024).max(64 * 1024 * 1024).optional(),
+  maxOutputBytes: z
+    .number()
+    .int()
+    .min(1024)
+    .max(64 * 1024 * 1024)
+    .optional(),
 });
 
 export type CliAllowRule = z.infer<typeof cliAllowRuleSchema>;

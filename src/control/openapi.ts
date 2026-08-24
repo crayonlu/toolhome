@@ -175,17 +175,13 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   add('/cli/{slug}/exec', 'post', 'execCli', {
     summary:
       'Run a CLI: argv array only (never a shell string); streams NDJSON stdout/stderr frames and a final exit frame',
-    parameters: [
-      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-    ],
+    parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
     body: true,
     security: [{ controlApiKey: [] }],
   });
   add('/cli/{slug}/status', 'get', 'cliStatus', {
     summary: 'Run the CLI probe and return installed/version/loggedIn/lastCheckedAt',
-    parameters: [
-      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-    ],
+    parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
     security: [{ controlApiKey: [] }],
   });
 
@@ -248,7 +244,11 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   add('/api/v1/calls/series', 'get', 'getCallSeries', {
     summary: 'Tool call counts bucketed over time for line charts',
     parameters: [
-      { name: 'bucket', in: 'query', schema: { type: 'string', description: 'e.g. 30m, 1h, 6h, 1d (default 1h)' } },
+      {
+        name: 'bucket',
+        in: 'query',
+        schema: { type: 'string', description: 'e.g. 30m, 1h, 6h, 1d (default 1h)' },
+      },
       { name: 'server_id', in: 'query', schema: { type: 'string' } },
       { name: 'tool', in: 'query', schema: { type: 'string' } },
       { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },

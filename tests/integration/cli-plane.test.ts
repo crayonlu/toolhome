@@ -49,7 +49,13 @@ async function execFrames(
   slug: string,
   body: unknown,
 ): Promise<{ response: Response; frames: CliExecFrame[] }> {
-  const response = await controlRequest(runtime.runtime, runtime.controlKey, 'POST', `/cli/${slug}/exec`, body);
+  const response = await controlRequest(
+    runtime.runtime,
+    runtime.controlKey,
+    'POST',
+    `/cli/${slug}/exec`,
+    body,
+  );
   const frames = parseFrames(await response.text());
   return { response, frames };
 }
@@ -108,7 +114,12 @@ describe('CLI registry', () => {
       expect(persisted?.name).toBe('Renamed CLI');
 
       const deleted = (await jsonResponse(
-        await controlRequest(second.runtime, second.controlKey, 'DELETE', `/api/v1/clis/${persisted?.id}`),
+        await controlRequest(
+          second.runtime,
+          second.controlKey,
+          'DELETE',
+          `/api/v1/clis/${persisted?.id}`,
+        ),
       )) as { deleted: boolean };
       expect(deleted).toEqual({ deleted: true });
 
@@ -125,7 +136,13 @@ describe('CLI registry', () => {
     const runtime = createTestRuntime();
     try {
       await jsonResponse(
-        await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/clis', cliBody()),
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody(),
+        ),
       );
       const response = await controlRequest(
         runtime.runtime,
@@ -146,7 +163,13 @@ describe('CLI exec', () => {
     const runtime = createTestRuntime();
     try {
       await jsonResponse(
-        await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/clis', cliBody()),
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody(),
+        ),
       );
       const { response, frames } = await execFrames(runtime, 'fixture', { argv: ['mix'] });
       expect(response.status).toBe(200);
@@ -165,7 +188,13 @@ describe('CLI exec', () => {
     const runtime = createTestRuntime();
     try {
       await jsonResponse(
-        await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/clis', cliBody()),
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody(),
+        ),
       );
       const response = await controlRequest(
         runtime.runtime,
@@ -292,8 +321,9 @@ describe('CLI exec', () => {
       const exit = frames.find((frame) => frame.type === 'exit');
       expect(exit).toMatchObject({ type: 'exit', truncated: true });
       const retained = frames
-        .filter((frame): frame is { type: 'stdout' | 'stderr'; data: string } =>
-          frame.type === 'stdout' || frame.type === 'stderr',
+        .filter(
+          (frame): frame is { type: 'stdout' | 'stderr'; data: string } =>
+            frame.type === 'stdout' || frame.type === 'stderr',
         )
         .reduce((sum, frame) => sum + Buffer.byteLength(frame.data), 0);
       expect(retained).toBeLessThanOrEqual(2048);
@@ -308,7 +338,13 @@ describe('CLI exec environment', () => {
     const runtime = createTestRuntime();
     try {
       await jsonResponse(
-        await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/clis', cliBody()),
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody(),
+        ),
       );
       const { frames } = await execFrames(runtime, 'fixture', {
         argv: ['env', 'CI', 'NO_COLOR', 'PAGER', 'TERM'],
@@ -329,7 +365,10 @@ describe('CLI exec environment', () => {
       const credential = (await jsonResponse(
         await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/credentials', {
           name: 'azure-sp',
-          payload: { type: 'env', variables: { AZURE_CLIENT_ID: 'sp-123', TOOLHOME_TOKEN: 's3cret' } },
+          payload: {
+            type: 'env',
+            variables: { AZURE_CLIENT_ID: 'sp-123', TOOLHOME_TOKEN: 's3cret' },
+          },
         }),
       )) as { id: string };
       await jsonResponse(
@@ -413,7 +452,13 @@ describe('CLI status and audit', () => {
     const runtime = createTestRuntime();
     try {
       await jsonResponse(
-        await controlRequest(runtime.runtime, runtime.controlKey, 'POST', '/api/v1/clis', cliBody()),
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody(),
+        ),
       );
       await execFrames(runtime, 'fixture', { argv: ['echo', 'hello'] });
       const events = (await jsonResponse(

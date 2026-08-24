@@ -87,7 +87,11 @@ export interface Store {
   getServerProjection(serverId: string): ServerProjection | null;
   setServerProjection(serverId: string, defaultVisibility: Visibility): ServerProjection;
   listToolProjections(serverId?: string): ToolProjection[];
-  setToolProjection(serverId: string, toolName: string, visibility: ToolProjection['visibility']): void;
+  setToolProjection(
+    serverId: string,
+    toolName: string,
+    visibility: ToolProjection['visibility'],
+  ): void;
   getProjectionIndex(): ProjectionIndex;
 
   // ── Tool call observability ─────────────────────────────────────────────
@@ -107,7 +111,9 @@ export interface Store {
     patch: Partial<Pick<MarketInstallation, 'entryVersion' | 'recipeRevision'>>,
   ): MarketInstallation;
   deleteInstallation(id: string): void;
-  createInstallJob(input: Omit<InstallJobRecord, 'id' | 'createdAt' | 'updatedAt'>): InstallJobRecord;
+  createInstallJob(
+    input: Omit<InstallJobRecord, 'id' | 'createdAt' | 'updatedAt'>,
+  ): InstallJobRecord;
   getInstallJob(id: string): InstallJobRecord | null;
   updateInstallJob(id: string, patch: Partial<InstallJobRecord>): InstallJobRecord;
   markInterruptedInstallJobs(): number;
