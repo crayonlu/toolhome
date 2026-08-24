@@ -287,9 +287,9 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'MCP Home Control API',
+      title: 'ToolHome Control API',
       version: '0.1.0',
-      description: 'Complete single-user management API for MCP Home.',
+      description: 'Complete single-user management API for ToolHome.',
     },
     servers: [{ url: publicUrl.toString().replace(/\/$/, '') }],
     paths,

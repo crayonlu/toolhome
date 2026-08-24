@@ -31,7 +31,7 @@ const taskStateSchema = z
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const fixturePath = fileURLToPath(new URL('../tests/fixtures/stdio-server.ts', import.meta.url));
-const dataDirectory = mkdtempSync(join(tmpdir(), 'mcp-home-real-'));
+const dataDirectory = mkdtempSync(join(tmpdir(), 'toolhome-real-'));
 const controlKey = 'real-bootstrap-control-key-0000000000000000000001';
 const masterKey = 'real-master-encryption-key-000000000000000000000001';
 const remote = await startRemoteFixture();
@@ -188,7 +188,7 @@ try {
       await aggregate.client.callTool({ name: 'remote.start-task', arguments: {} }),
     ),
   );
-  assert.match(created.taskId, /^mcp-home-task:remote:/);
+  assert.match(created.taskId, /^toolhome-task:remote:/);
   const task = taskStateSchema.parse(
     await aggregate.tasks.request(
       { method: 'tasks/get', params: { taskId: created.taskId } },
@@ -258,7 +258,7 @@ try {
     ).source,
     'legacy-client-extension',
   );
-  assert(legacyHarness.clientRequests.includes('mcp-home/home/fixture/client-resource'));
+  assert(legacyHarness.clientRequests.includes('toolhome/home/fixture/client-resource'));
 
   const denied = await fetch(new URL('/api/v1/servers', baseUrl), {
     headers: { authorization: `Bearer ${access.secret}` },
@@ -268,7 +268,7 @@ try {
     'Real environment: process boundary, aggregate/individual, modern/legacy, progress, cancellation, list changes, MRTR, Tasks and auth passed.\n',
   );
 } catch (error) {
-  if (output !== '') process.stderr.write(`MCP Home process output:\n${output}\n`);
+  if (output !== '') process.stderr.write(`ToolHome process output:\n${output}\n`);
   throw error;
 } finally {
   for (const openClient of clients.reverse()) {
@@ -309,7 +309,7 @@ async function waitForHealth(url: URL, processHandle: ChildProcess): Promise<voi
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (processHandle.exitCode !== null) {
-      throw new Error(`MCP Home exited before becoming healthy: ${processHandle.exitCode}`);
+      throw new Error(`ToolHome exited before becoming healthy: ${processHandle.exitCode}`);
     }
     try {
       const response = await fetch(url);
@@ -319,7 +319,7 @@ async function waitForHealth(url: URL, processHandle: ChildProcess): Promise<voi
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error('MCP Home did not become healthy');
+  throw new Error('ToolHome did not become healthy');
 }
 
 async function stopChild(processHandle: ChildProcess): Promise<void> {

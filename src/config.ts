@@ -88,7 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     port: parsed.MCP_HOME_PORT,
     publicUrl,
     dataDir,
-    databasePath: resolve(dataDir, 'mcp-home.sqlite'),
+    databasePath: resolve(dataDir, 'toolhome.sqlite'),
     masterKey: parsed.MCP_HOME_MASTER_KEY,
     ...(bootstrap === undefined ? {} : { bootstrapControlKey: bootstrap }),
     allowedHosts: configuredHosts.length === 0 ? [publicUrl.hostname] : configuredHosts,

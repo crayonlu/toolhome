@@ -324,7 +324,7 @@ export class DataPlane {
     const headers =
       appError.status === 401
         ? {
-            'WWW-Authenticate': `Bearer realm="mcp-home", resource_metadata="${this.#oauth.resourceMetadataUrl(this.#oauth.mcpResource(slug))}", scope="mcp:use"`,
+            'WWW-Authenticate': `Bearer realm="toolhome", resource_metadata="${this.#oauth.resourceMetadataUrl(this.#oauth.mcpResource(slug))}", scope="mcp:use"`,
           }
         : undefined;
     return new Response(

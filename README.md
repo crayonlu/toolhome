@@ -1,25 +1,25 @@
-# MCP Home
+# ToolHome
 
 > **🌐 Language: English · [中文](README.zh.md)**
 
-MCP Home is a single-user, self-hosted Remote MCP control plane and protocol gateway. Manage your upstream MCP servers and credentials in one place, then point any harness at stable, standard MCP URLs.
+ToolHome is a single-user, self-hosted Remote MCP control plane and protocol gateway. Manage your upstream MCP servers and credentials in one place, then point any harness at stable, standard MCP URLs.
 
 It exposes two data-plane entry points:
 
 - `POST /mcp`: aggregates all enabled servers, namespacing tool names and URIs automatically.
 - `POST /mcp/{server_slug}`: a per-server entry point that preserves original names, URIs, and extension semantics.
 
-MCP Home does not write harness-specific adapters for Claude Code, Codex, Cursor, or anything else. Any harness that speaks standard Streamable HTTP MCP with Bearer auth works.
+ToolHome does not write harness-specific adapters for Claude Code, Codex, Cursor, or anything else. Any harness that speaks standard Streamable HTTP MCP with Bearer auth works.
 
 ## For AI Agents
 
-Install the MCP Home skill to teach your agent how to deploy and manage MCP Home:
+Install the ToolHome skill to teach your agent how to deploy and manage ToolHome:
 
 ```bash
-npx skills add crayonlu/mcp-home -g -y
+npx skills add crayonlu/toolhome -g -y
 ```
 
-This gives the agent knowledge of all CLI commands, OAuth flows, Market installation, troubleshooting, and deployment patterns. The agent will know when and how to use MCP Home without manual instructions.
+This gives the agent knowledge of all CLI commands, OAuth flows, Market installation, troubleshooting, and deployment patterns. The agent will know when and how to use ToolHome without manual instructions.
 
 ## Web Console
 
@@ -43,12 +43,12 @@ Mobile:
 
 ## Project Scope
 
-MCP Home manages two kinds of MCPs:
+ToolHome manages two kinds of MCPs:
 
 - **Remote-native**: upstreams that already speak Streamable HTTP, hosted on the public internet, a private network, or another server.
-- **Home-hosted**: stdio MCPs spawned on the MCP Home host and exposed remotely to harnesses.
+- **Home-hosted**: stdio MCPs spawned on the ToolHome host and exposed remotely to harnesses.
 
-MCPs that must run on the harness machine and depend on its browser or desktop state are out of scope. For example, a Chrome DevTools MCP on a harness laptop should stay configured locally on that harness. If it runs on the MCP Home host, it can be managed as a Home-hosted Server — but it operates on the host environment.
+MCPs that must run on the harness machine and depend on its browser or desktop state are out of scope. For example, a Chrome DevTools MCP on a harness laptop should stay configured locally on that harness. If it runs on the ToolHome host, it can be managed as a Home-hosted Server — but it operates on the host environment.
 
 The first release explicitly excludes multi-tenancy, profiles, workspaces, and project management.
 
@@ -66,9 +66,9 @@ The per-server entry proxies losslessly; the aggregate virtualizes conflicting n
 
 Downstream 2026 requests stay stateless; 2025-era clients use a persistent session bound to the authenticated principal, preserving initialize capability declarations and bidirectional request semantics. Parts of the Final Tasks extension not yet registered by SDK 2.0 are filled in by an isolated compatibility layer that still speaks the official `tasks/*` wire contract.
 
-Aggregated tool names are `{server_slug}.{upstream_name}`. Unknown extension methods use `mcp-home/{server_slug}/{upstream_method}` on the aggregate and pass through untouched on per-server entries. MCP Apps that use original tool names are routed by App resource context or globally unique names; use a per-server entry when names collide.
+Aggregated tool names are `{server_slug}.{upstream_name}`. Unknown extension methods use `toolhome/{server_slug}/{upstream_method}` on the aggregate and pass through untouched on per-server entries. MCP Apps that use original tool names are routed by App resource context or globally unique names; use a per-server entry when names collide.
 
-When a modern harness calls a legacy upstream, MCP Home suspends push-style Elicitation, Sampling, and Roots in Tool, Prompt, and Resource Read calls, converts them to modern `input_required` multi-turn interactions, then resumes the same upstream request. Legacy extensions that issue private server-to-client requests inside a custom method have no standard representation in the closed MRTR type set; use a legacy harness or upgrade the upstream protocol for those.
+When a modern harness calls a legacy upstream, ToolHome suspends push-style Elicitation, Sampling, and Roots in Tool, Prompt, and Resource Read calls, converts them to modern `input_required` multi-turn interactions, then resumes the same upstream request. Legacy extensions that issue private server-to-client requests inside a custom method have no standard representation in the closed MRTR type set; use a legacy harness or upgrade the upstream protocol for those.
 
 See [architecture](docs/architecture.md) and [protocol compatibility](docs/protocol-compatibility.md) for details.
 
@@ -112,7 +112,7 @@ export MCP_HOME_ALLOWED_HOSTS="mcp.example.com"
 docker compose up -d --build
 ```
 
-Put an HTTPS reverse proxy in front of MCP Home in production. OAuth callbacks, URL-based Client IDs, and remote harness connections should all use a stable HTTPS `MCP_HOME_PUBLIC_URL`. The value must be a canonical origin — no path, query, fragment, username, or password. Data lives in `/data/mcp-home.sqlite` (SQLite, WAL mode).
+Put an HTTPS reverse proxy in front of ToolHome in production. OAuth callbacks, URL-based Client IDs, and remote harness connections should all use a stable HTTPS `MCP_HOME_PUBLIC_URL`. The value must be a canonical origin — no path, query, fragment, username, or password. Data lives in `/data/toolhome.sqlite` (SQLite, WAL mode).
 
 npm packages for Home-hosted stdio servers are installed by the **Market** into the data volume (`MCP_HOME_MARKET_DIR`, default `<dataDir>/market`) — no Dockerfile changes needed. Don't run arbitrary npm packages in the container: use the Market's curated catalog instead.
 
@@ -121,7 +121,7 @@ npm packages for Home-hosted stdio servers are installed by the **Market** into 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to main or tag:
 
 1. **test**: server check + test, web typecheck + test
-2. **docker**: build dists -> `docker build` -> push `ghcr.io/crayonlu/mcp-home:latest` (tags also get `:v*`)
+2. **docker**: build dists -> `docker build` -> push `ghcr.io/crayonlu/toolhome:latest` (tags also get `:v*`)
 3. **deploy**: SSH to server `docker compose pull && up -d`
 
 Deployment requires three GitHub Secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY` (SSH private key). The GHCR package must be set to Public (after first push, in Package Settings).
@@ -190,7 +190,7 @@ Put secrets in Credentials, not in Remote URL query strings or stdio arguments �
 
 ## CLI
 
-After building, run `mcp-home`; from source, use `npm run cli --`.
+After building, run `toolhome`; from source, use `npm run cli --`.
 
 ```bash
 npm run cli -- auth login \
@@ -271,7 +271,7 @@ npm run test
 npm run test:real
 ```
 
-`npm run test:real` prefers to launch the built MCP Home process and connects Home-hosted stdio and Remote-native HTTP fixtures. It uses the official MCP Client to verify aggregate/per-server entries, modern/legacy harnesses, Progress, cancellation, list-changed, MRTR, Tasks, and auth boundaries; it falls back to source entry points when no build artifact exists, which is handy for local debugging.
+`npm run test:real` prefers to launch the built ToolHome process and connects Home-hosted stdio and Remote-native HTTP fixtures. It uses the official MCP Client to verify aggregate/per-server entries, modern/legacy harnesses, Progress, cancellation, list-changed, MRTR, Tasks, and auth boundaries; it falls back to source entry points when no build artifact exists, which is handy for local debugging.
 
 `/healthz` reports process liveness only; `/readyz` returns `503` while runtime state is unavailable.
 

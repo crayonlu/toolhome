@@ -41,7 +41,7 @@ export function mountUpstreamOAuthRoutes(
     if (context.req.query('error')) {
       return htmlPage(
         'Authorization was not completed',
-        'Return to MCP Home and start the authorization flow again.',
+        'Return to ToolHome and start the authorization flow again.',
         400,
       );
     }
@@ -50,7 +50,7 @@ export function mountUpstreamOAuthRoutes(
     if (!code || !state) {
       return htmlPage(
         'Invalid authorization callback',
-        'The callback is missing required parameters. Return to MCP Home and try again.',
+        'The callback is missing required parameters. Return to ToolHome and try again.',
         400,
       );
     }
@@ -73,7 +73,7 @@ export function mountUpstreamOAuthRoutes(
       });
       return htmlPage(
         'Authorization failed',
-        'The authorization response could not be verified. Return to MCP Home and try again.',
+        'The authorization response could not be verified. Return to ToolHome and try again.',
         400,
       );
     }
@@ -87,7 +87,7 @@ function htmlPage(title: string, message: string, status: number): Response {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(title)} · MCP Home</title>
+    <title>${escapeHtml(title)} · ToolHome</title>
     <style>
       :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       * { box-sizing: border-box; }
@@ -103,7 +103,7 @@ function htmlPage(title: string, message: string, status: number): Response {
       }
     </style>
   </head>
-  <body><main><p>MCP Home</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body>
+  <body><main><p>ToolHome</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body>
 </html>`,
     {
       status,

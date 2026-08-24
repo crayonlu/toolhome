@@ -1,6 +1,6 @@
 # Protocol compatibility
 
-MCP Home 的原则是：独立入口无损，聚合入口只做可逆路由变换。
+ToolHome 的原则是：独立入口无损，聚合入口只做可逆路由变换。
 
 | Capability                     | Individual endpoint          | Aggregate endpoint                              |
 | ------------------------------ | ---------------------------- | ----------------------------------------------- |
@@ -16,17 +16,17 @@ MCP Home 的原则是：独立入口无损，聚合入口只做可逆路由变�
 | Tasks extension                | 原 task ID                   | 可逆虚拟 task ID                                |
 | MCP Apps                       | 原 `ui://` 和 tool 名        | 虚拟 `ui://`；原名调用按 App 上下文或唯一性路由 |
 | Logging                        | setLevel 与相关通知          | setLevel fan-out；相关通知转发                  |
-| Unknown extension              | method 原样                  | `mcp-home/{slug}/{method}`                      |
+| Unknown extension              | method 原样                  | `toolhome/{slug}/{method}`                      |
 
 ## 版本策略
 
-MCP Home 使用 MCP TypeScript SDK 2.0.0，同时服务 2026-07-28 modern 协议和 2025-era legacy 协议。每个 upstream Server 可以选择 `auto`、`modern` 或 `legacy`。
+ToolHome 使用 MCP TypeScript SDK 2.0.0，同时服务 2026-07-28 modern 协议和 2025-era legacy 协议。每个 upstream Server 可以选择 `auto`、`modern` 或 `legacy`。
 
 `auto` 不会用 2026 body 直接污染旧 Server：SDK 先执行 discovery probe，并在需要时使用独立的 stdio probe 进程或干净的 legacy initialize 路径。
 
 ## ClientCapabilities isolation
 
-2026-07-28 把 ClientCapabilities 放到每个请求的 `_meta` envelope。MCP Home 从当前请求 context 读取它，并使用能力 JSON fingerprint 选择 upstream connection。2025-era 使用 stateful Streamable HTTP Session 保留 initialize 中声明的 capabilities；Session ID 与认证 principal 绑定，不能跨 Access Key 或 OAuth client 复用。
+2026-07-28 把 ClientCapabilities 放到每个请求的 `_meta` envelope。ToolHome 从当前请求 context 读取它，并使用能力 JSON fingerprint 选择 upstream connection。2025-era 使用 stateful Streamable HTTP Session 保留 initialize 中声明的 capabilities；Session ID 与认证 principal 绑定，不能跨 Access Key 或 OAuth client 复用。
 
 这保证：
 
@@ -36,7 +36,7 @@ MCP Home 使用 MCP TypeScript SDK 2.0.0，同时服务 2026-07-28 modern 协议
 
 ## 跨协议时代交互
 
-现代协议移除了 server-to-client JSON-RPC request，改用 `input_required` 多轮返回；旧式上游仍可能在一个 Tool、Prompt 或 Resource Read 执行过程中主动请求 Elicitation、Sampling 或 Roots。MCP Home 对这三个允许 MRTR 的方法维护一个有界、可取消的 suspended round：
+现代协议移除了 server-to-client JSON-RPC request，改用 `input_required` 多轮返回；旧式上游仍可能在一个 Tool、Prompt 或 Resource Read 执行过程中主动请求 Elicitation、Sampling 或 Roots。ToolHome 对这三个允许 MRTR 的方法维护一个有界、可取消的 suspended round：
 
 1. 保持原来的旧式上游请求和连接槽，不重新执行副作用。
 2. 收集一个或多个 push request，返回现代 `input_required`。
@@ -48,17 +48,17 @@ MCP Home 使用 MCP TypeScript SDK 2.0.0，同时服务 2026-07-28 modern 协议
 
 ## Tasks
 
-最终 Tasks extension ID 为 `io.modelcontextprotocol/tasks`。它没有 `tasks/list`；控制面只有 `tasks/get`、`tasks/update`、`tasks/cancel`。Task 使用扁平字段 `taskId`、`status`、`statusMessage?`、`createdAt`、`lastUpdatedAt`、`ttlMs`、`pollIntervalMs?`。聚合 tool call 返回 task 时，MCP Home 把 task ID 编码为带 slug 的虚拟 ID，后续控制请求由虚拟 ID 确定 upstream。
+最终 Tasks extension ID 为 `io.modelcontextprotocol/tasks`。它没有 `tasks/list`；控制面只有 `tasks/get`、`tasks/update`、`tasks/cancel`。Task 使用扁平字段 `taskId`、`status`、`statusMessage?`、`createdAt`、`lastUpdatedAt`、`ttlMs`、`pollIntervalMs?`。聚合 tool call 返回 task 时，ToolHome 把 task ID 编码为带 slug 的虚拟 ID，后续控制请求由虚拟 ID 确定 upstream。
 
 Task control request 必须携带 `Mcp-Name` header，值与 request body 的 `taskId` 一致。非安全 ASCII 值使用 MCP 的 base64 header encoding。
 
-TypeScript SDK 2.0.0 尚未把最终 Tasks extension 注册进 2026 core method registry。MCP Home 在 HTTP 边界把这三个已验证请求映射为内部 extension method，使 SDK fallback 能处理它们；对 Harness 和 upstream 暴露的 method、header 与 body 均保持官方 wire contract。
+TypeScript SDK 2.0.0 尚未把最终 Tasks extension 注册进 2026 core method registry。ToolHome 在 HTTP 边界把这三个已验证请求映射为内部 extension method，使 SDK fallback 能处理它们；对 Harness 和 upstream 暴露的 method、header 与 body 均保持官方 wire contract。
 
-Task status notification 是可选优化；轮询 task method 是兼容基线。当前官方 SDK 对 extension notification filter 的高阶支持仍有限，因此 MCP Home 不把 task notification 作为正确性前提。
+Task status notification 是可选优化；轮询 task method 是兼容基线。当前官方 SDK 对 extension notification filter 的高阶支持仍有限，因此 ToolHome 不把 task notification 作为正确性前提。
 
 ## MCP Apps
 
-普通资源使用 `mcp-home://`，App 资源使用 `ui://mcp-home/...`，因此 Host 仍能识别 MCP Apps。Tool metadata 的 `ui.resourceUri` 和旧 `ui/resourceUri` 都会改写。
+普通资源使用 `toolhome://`，App 资源使用 `ui://toolhome/...`，因此 Host 仍能识别 MCP Apps。Tool metadata 的 `ui.resourceUri` 和旧 `ui/resourceUri` 都会改写。
 
 App 内代码可能以原始名称调用 tool。聚合入口按以下顺序路由：
 

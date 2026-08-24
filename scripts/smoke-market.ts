@@ -46,14 +46,14 @@ async function call(
 }
 
 async function main(): Promise<void> {
-  const directory = mkdtempSync(join(tmpdir(), 'mcp-home-smoke-'));
+  const directory = mkdtempSync(join(tmpdir(), 'toolhome-smoke-'));
   mkdirSync(directory, { recursive: true });
   const runtime = createApplication({
     host: '127.0.0.1',
     port: 3344,
     publicUrl,
     dataDir: directory,
-    databasePath: join(directory, 'mcp-home.sqlite'),
+    databasePath: join(directory, 'toolhome.sqlite'),
     masterKey: 'smoke-master-key-0000000000000000000000000001',
     bootstrapControlKey: controlKey,
     allowedHosts: ['127.0.0.1'],

@@ -1,6 +1,6 @@
-# MCP Home architecture
+# ToolHome architecture
 
-MCP Home 是单进程模块化单体。控制面、数据面、上游连接和持久化在代码层解耦，但首版不引入消息队列或额外基础设施。
+ToolHome 是单进程模块化单体。控制面、数据面、上游连接和持久化在代码层解耦，但首版不引入消息队列或额外基础设施。
 
 ```mermaid
 flowchart LR
@@ -63,11 +63,11 @@ DCR 不维护易丢失的进程内 client registry。注册 metadata 被编码�
 聚合入口执行以下可逆映射：
 
 - Tool / Prompt：`{slug}.{name}`。
-- Resource：`mcp-home://{slug}/resource/{encoded}`。
-- MCP App Resource：`ui://mcp-home/{slug}/resource/{encoded}`，保留 `ui://` scheme。
+- Resource：`toolhome://{slug}/resource/{encoded}`。
+- MCP App Resource：`ui://toolhome/{slug}/resource/{encoded}`，保留 `ui://` scheme。
 - Resource Template：编码原始 RFC 6570 template，并重新暴露变量。
-- Task ID：`mcp-home-task:{slug}:{encoded}`。
-- 未知扩展 method：`mcp-home/{slug}/{method}`。
+- Task ID：`toolhome-task:{slug}:{encoded}`。
+- 未知扩展 method：`toolhome/{slug}/{method}`。
 
 资源内容中的 resource link、embedded resource 和 MCP Apps metadata 使用同一映射。调用时反向解析，再发送给对应 upstream。
 
@@ -91,7 +91,7 @@ OAuth token 与 protected resource 绑定，因此一个 OAuth Credential 只能
 
 ## 扩展桥
 
-官方 TypeScript SDK 2.0.0 尚未为最终 Tasks extension 提供完整高阶 API。MCP Home 在 transport 层补一个小型、隔离的 JSON-RPC requester：
+官方 TypeScript SDK 2.0.0 尚未为最终 Tasks extension 提供完整高阶 API。ToolHome 在 transport 层补一个小型、隔离的 JSON-RPC requester：
 
 - 仅对 modern `tasks/get`、`tasks/update`、`tasks/cancel` 绕过旧 method registry。
 - 写入完整 2026 request envelope。

@@ -11,7 +11,8 @@ import {
   ToolSchema,
 } from '@modelcontextprotocol/core';
 import { randomUUID } from 'node:crypto';
-import { chmodSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
@@ -215,8 +216,28 @@ function now(): string {
   return new Date().toISOString();
 }
 
+// The 0.4.0 rename moved the default database file from `mcp-home.sqlite` to
+// `toolhome.sqlite`. Move a pre-existing legacy database (and its WAL sidecars)
+// so upgrades keep their data without any manual step.
+function migrateLegacyDatabasePath(databasePath: string): void {
+  if (existsSync(databasePath)) return;
+  const legacyBase = basename(databasePath).replace(/^toolhome\.sqlite$/, 'mcp-home.sqlite');
+  if (legacyBase === basename(databasePath)) return;
+  const legacyPath = join(dirname(databasePath), legacyBase);
+  if (!existsSync(legacyPath)) return;
+  renameSync(legacyPath, databasePath);
+  for (const suffix of ['-wal', '-shm']) {
+    const legacySidecar = join(dirname(databasePath), `${legacyBase}${suffix}`);
+    if (existsSync(legacySidecar)) {
+      renameSync(legacySidecar, join(dirname(databasePath), `${basename(databasePath)}${suffix}`));
+    }
+  }
+}
+
 const masterKeyCheckSchema = z.object({
-  kind: z.literal('mcp-home-master-key-check'),
+  // Accept the pre-0.4.0 'mcp-home-master-key-check' marker written into
+  // existing databases so upgrades keep booting with the same master key.
+  kind: z.union([z.literal('toolhome-master-key-check'), z.literal('mcp-home-master-key-check')]),
   version: z.literal(1),
 });
 
@@ -253,6 +274,7 @@ export class SqliteStore implements Store {
 
   constructor(databasePath: string, secrets: SecretBox) {
     this.#secrets = secrets;
+    migrateLegacyDatabasePath(databasePath);
     this.#db = new DatabaseSync(databasePath);
     chmodSync(databasePath, 0o600);
     this.#db.exec(
@@ -532,7 +554,7 @@ export class SqliteStore implements Store {
         .prepare('INSERT INTO metadata (metadata_key, metadata_value) VALUES (?, ?)')
         .run(
           'master-key-check',
-          this.#secrets.encrypt({ kind: 'mcp-home-master-key-check', version: 1 }),
+          this.#secrets.encrypt({ kind: 'toolhome-master-key-check', version: 1 }),
         );
       return;
     }

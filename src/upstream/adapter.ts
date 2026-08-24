@@ -37,7 +37,7 @@ const samplingResultSchema = z.union([
   CreateMessageResultWithToolsSchema,
   CreateMessageResultSchema,
 ]);
-const legacyRoundStatePrefix = 'mcp-home-legacy-round:';
+const legacyRoundStatePrefix = 'toolhome-legacy-round:';
 const mrtrMethods = new Set(['tools/call', 'prompts/get', 'resources/read']);
 const discoveryCapabilities: ClientCapabilities = {
   extensions: {
@@ -659,7 +659,7 @@ export class UpstreamAdapter {
         ? { pin: '2026-07-28' }
         : this.server.transport.protocolMode;
     const client = new Client(
-      { name: 'mcp-home', version: '0.1.0' },
+      { name: 'toolhome', version: '0.1.0' },
       {
         capabilities,
         versionNegotiation: { mode },

@@ -6,7 +6,7 @@ import { loadConfig } from '../../src/config.js';
 
 describe('runtime configuration', () => {
   it('requires a canonical public origin and distinct root secrets', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-config-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-config-'));
     try {
       const base = {
         MCP_HOME_DATA_DIR: directory,

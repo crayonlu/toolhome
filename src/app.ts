@@ -164,9 +164,9 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
   } else {
     app.get('/', (context) =>
       context.json({
-        name: 'MCP Home',
+        name: 'ToolHome',
         version: packageVersion(),
-        message: 'MCP Home is running. Manage it with the mcp-home CLI.',
+        message: 'ToolHome is running. Manage it with the toolhome CLI.',
         endpoints: { mcp: '/mcp', controlApi: '/api/v1', openapi: '/api/v1/openapi.json' },
       }),
     );

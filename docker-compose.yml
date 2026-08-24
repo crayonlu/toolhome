@@ -1,6 +1,6 @@
 services:
-  mcp-home:
-    image: ghcr.io/crayonlu/mcp-home:latest
+  toolhome:
+    image: ghcr.io/crayonlu/toolhome:latest
     build: .
     init: true
     restart: unless-stopped
@@ -19,7 +19,7 @@ services:
       MCP_HOME_UV_INDEX_URL: ${MCP_HOME_UV_INDEX_URL:-}
       MCP_HOME_CALLS_RETENTION_DAYS: ${MCP_HOME_CALLS_RETENTION_DAYS:-30}
     volumes:
-      - mcp-home-data:/data
+      - toolhome-data:/data
       # docker-kind Market entries (e.g. markitdown) spawn sibling containers
       # via the host socket; the runtime user must be in the host docker group.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -32,4 +32,4 @@ services:
         max-file: '3'
 
 volumes:
-  mcp-home-data:
+  toolhome-data:

@@ -114,9 +114,9 @@ export class OAuthServer {
   constructor(publicUrl: URL, masterKey: string, controlAuth: AuthService) {
     this.#publicUrl = publicUrl;
     this.#controlAuth = controlAuth;
-    this.#key = createHash('sha256').update(`mcp-home.oauth:${masterKey}`).digest();
+    this.#key = createHash('sha256').update(`toolhome.oauth:${masterKey}`).digest();
     this.#registrationKey = createHash('sha256')
-      .update(`mcp-home.oauth.registration:${masterKey}`)
+      .update(`toolhome.oauth.registration:${masterKey}`)
       .digest();
     this.#issuer = new URL('/', this.#publicUrl).toString().replace(/\/$/, '');
   }
@@ -294,7 +294,7 @@ export class OAuthServer {
       const verified = await jwtVerify(token, this.#key, {
         algorithms: ['HS256'],
         issuer: this.#issuer,
-        audience: 'mcp-home-oauth-refresh',
+        audience: 'toolhome-oauth-refresh',
       });
       const claims = refreshClaimsSchema.parse(verified.payload);
       if (claims.clientId !== clientId) return oauthError('invalid_grant', 'Client mismatch', 400);
@@ -328,7 +328,7 @@ export class OAuthServer {
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(subject)
       .setIssuer(this.#issuer)
-      .setAudience('mcp-home-oauth-refresh')
+      .setAudience('toolhome-oauth-refresh')
       .setIssuedAt()
       .setExpirationTime('30d')
       .sign(this.#key);
@@ -425,7 +425,7 @@ export class OAuthServer {
       value.search !== '' ||
       value.hash !== ''
     ) {
-      throw new AppError('invalid_target', 'OAuth resource must be an MCP Home endpoint', 400);
+      throw new AppError('invalid_target', 'OAuth resource must be a ToolHome endpoint', 400);
     }
     return value.toString();
   }
@@ -447,7 +447,7 @@ export class OAuthServer {
   }
 
   #authorizationPage(request: PendingAuthorization): string {
-    return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorize MCP Home</title><style>body{font:16px system-ui;background:#f4f5f2;color:#18211c;display:grid;place-items:center;min-height:100vh;margin:0}.card{width:min(430px,calc(100% - 40px));background:#fff;border:1px solid #d8ddd8;border-radius:16px;padding:30px}h1{margin-top:0;font-size:24px}p{color:#59635d;line-height:1.6}dl{background:#f6f7f5;border:1px solid #e3e6e3;padding:16px;border-radius:10px}dt{font-size:12px;color:#707a74}dd{margin:3px 0 12px;word-break:break-all}input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cbd2cc;border-radius:8px;margin:7px 0 16px}.actions{display:flex;gap:10px}.actions button{flex:1;padding:11px;border:1px solid #1f6845;border-radius:8px;background:#1f6845;color:white;font-weight:700}.actions .deny{border-color:#d7dcd8;background:#fff;color:#465149}</style><div class="card"><h1>授权 MCP Client</h1><p><strong>${escapeHtml(request.clientName)}</strong> 请求访问你的 MCP Home。</p><dl><dt>Resource</dt><dd>${escapeHtml(request.resource)}</dd><dt>Scope</dt><dd>${escapeHtml(request.scope)}</dd><dt>Redirect</dt><dd>${escapeHtml(request.redirect_uri)}</dd></dl><form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${escapeHtml(request.id)}"><label>Control API Key<input type="password" name="control_key" autocomplete="off" required></label><div class="actions"><button class="deny" name="decision" value="deny">拒绝</button><button name="decision" value="approve">允许</button></div></form></div></html>`;
+    return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorize ToolHome</title><style>body{font:16px system-ui;background:#f4f5f2;color:#18211c;display:grid;place-items:center;min-height:100vh;margin:0}.card{width:min(430px,calc(100% - 40px));background:#fff;border:1px solid #d8ddd8;border-radius:16px;padding:30px}h1{margin-top:0;font-size:24px}p{color:#59635d;line-height:1.6}dl{background:#f6f7f5;border:1px solid #e3e6e3;padding:16px;border-radius:10px}dt{font-size:12px;color:#707a74}dd{margin:3px 0 12px;word-break:break-all}input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cbd2cc;border-radius:8px;margin:7px 0 16px}.actions{display:flex;gap:10px}.actions button{flex:1;padding:11px;border:1px solid #1f6845;border-radius:8px;background:#1f6845;color:white;font-weight:700}.actions .deny{border-color:#d7dcd8;background:#fff;color:#465149}</style><div class="card"><h1>授权 MCP Client</h1><p><strong>${escapeHtml(request.clientName)}</strong> 请求访问你的 ToolHome。</p><dl><dt>Resource</dt><dd>${escapeHtml(request.resource)}</dd><dt>Scope</dt><dd>${escapeHtml(request.scope)}</dd><dt>Redirect</dt><dd>${escapeHtml(request.redirect_uri)}</dd></dl><form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${escapeHtml(request.id)}"><label>Control API Key<input type="password" name="control_key" autocomplete="off" required></label><div class="actions"><button class="deny" name="decision" value="deny">拒绝</button><button name="decision" value="approve">允许</button></div></form></div></html>`;
   }
 }
 

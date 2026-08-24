@@ -41,7 +41,7 @@ export class CursorCodec {
   }
 
   #mac(body: string): string {
-    return createHmac('sha256', this.#key).update(`mcp-home.cursor:${body}`).digest('base64url');
+    return createHmac('sha256', this.#key).update(`toolhome.cursor:${body}`).digest('base64url');
   }
 
   #invalid(): never {

@@ -23,17 +23,17 @@ fetch
 ## Installation
 
 ```bash
-mcp-home market list                                    # browse with install status
-mcp-home market install resend --set RESEND_API_KEY=re_xxx
-mcp-home market install context7 --set CONTEXT7_API_KEY=xxx
-mcp-home market install deepwiki                        # no config needed
-mcp-home market install fetch                           # uvx (Python), no config
-mcp-home market uninstall resend
+toolhome market list                                    # browse with install status
+toolhome market install resend --set RESEND_API_KEY=re_xxx
+toolhome market install context7 --set CONTEXT7_API_KEY=xxx
+toolhome market install deepwiki                        # no config needed
+toolhome market install fetch                           # uvx (Python), no config
+toolhome market uninstall resend
 ```
 
 ### How It Works
 
-**Remote entries**: Creates a credential (bearer/headers/oauth) + a remote server with the upstream URL. For OAuth entries, run `mcp-home credential authorize <name>` after install.
+**Remote entries**: Creates a credential (bearer/headers/oauth) + a remote server with the upstream URL. For OAuth entries, run `toolhome credential authorize <name>` after install.
 
 **Home-stdio entries**: Runs `npm install --prefix <marketDir> <package>`, creates an env credential, and creates a home server with the stdio command pointing to the installed binary. The install is async with progress logging.
 
@@ -54,8 +54,8 @@ Home-stdio packages install to `MCP_HOME_MARKET_DIR` (default `<dataDir>/market`
 For servers not in the catalog, use the standard CLI:
 
 ```bash
-echo '{"name":"custom","payload":{"type":"bearer","token":"xxx"}}' | mcp-home credential add -
-echo '{"slug":"custom","name":"Custom","kind":"remote","transport":{"type":"streamable-http","url":"https://example.com/mcp"},"credentialId":"<id>","enabled":true}' | mcp-home server add -
+echo '{"name":"custom","payload":{"type":"bearer","token":"xxx"}}' | toolhome credential add -
+echo '{"slug":"custom","name":"Custom","kind":"remote","transport":{"type":"streamable-http","url":"https://example.com/mcp"},"credentialId":"<id>","enabled":true}' | toolhome server add -
 ```
 
 ## Market Catalog Source

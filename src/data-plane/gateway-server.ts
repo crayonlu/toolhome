@@ -135,11 +135,11 @@ export class GatewayServerFactory {
   aggregate(): Server {
     const aggregate = this.#registry.aggregate();
     const server = new Server(
-      { name: 'mcp-home', version: '0.1.0', title: 'MCP Home' },
+      { name: 'toolhome', version: '0.1.0', title: 'ToolHome' },
       {
         capabilities: aggregate.capabilities,
         instructions:
-          'MCP Home aggregates enabled servers. Tools and prompts use server_slug.name. Resources use mcp-home:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
+          'ToolHome aggregates enabled servers. Tools and prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
         requestState: { verify: this.#stateCodec.verify },
         inputRequired: { legacyShim: true },
       },
@@ -156,7 +156,7 @@ export class GatewayServerFactory {
           ...this.#nextCursor(page),
           ttlMs: 0,
           cacheScope: 'private',
-          _meta: { 'mcp-home/server-count': entries.length },
+          _meta: { 'toolhome/server-count': entries.length },
         };
       });
       server.setRequestHandler(
@@ -401,7 +401,7 @@ export class GatewayServerFactory {
         const params = taskParamsSchema.parse(request.params);
         const route = parseVirtualTaskId(params.taskId);
         if (!route) {
-          throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid MCP Home task ID');
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid ToolHome task ID');
         }
         const entry = this.#registry.entryBySlug(route.slug);
         const raw = await this.#execute(
@@ -419,7 +419,7 @@ export class GatewayServerFactory {
       if (!route) {
         throw new ProtocolError(
           ProtocolErrorCode.MethodNotFound,
-          'Aggregate extension methods must use mcp-home/{server_slug}/{upstream_method}',
+          'Aggregate extension methods must use toolhome/{server_slug}/{upstream_method}',
         );
       }
       const entry = this.#registry.entryBySlug(route.slug);
@@ -461,7 +461,7 @@ export class GatewayServerFactory {
     const snapshot = entry.snapshot;
     const server = new Server(
       {
-        name: `mcp-home/${slug}`,
+        name: `toolhome/${slug}`,
         title: entry.server.name,
         version: '0.1.0',
       },
@@ -1215,7 +1215,7 @@ export class GatewayServerFactory {
 
   #resourceRoute(uri: string): { entry: RegistryEntry; upstreamUri: string } {
     const parsed = parseVirtualResourceUri(uri) ?? expandVirtualResourceTemplate(uri);
-    if (!parsed) throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid MCP Home URI');
+    if (!parsed) throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid ToolHome URI');
     return {
       entry: this.#registry.entryBySlug(parsed.slug),
       upstreamUri: parsed.upstreamUri,

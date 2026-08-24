@@ -108,7 +108,7 @@ describe('market', () => {
       expect(elicit.status).toBe(200);
       const body = (await elicit.json()) as { status: string; actionUrl: string };
       expect(body.status).toBe('awaiting_secret');
-      expect(body.actionUrl).toMatch(/^http:\/\/mcp-home\.test\/market\/actions\//);
+      expect(body.actionUrl).toMatch(/^http:\/\/toolhome\.test\/market\/actions\//);
       // The response carries only job + action URL — no secret, no values echo.
       expect(Object.keys(body).sort()).toEqual(['actionId', 'actionUrl', 'jobId', 'status']);
 
@@ -161,7 +161,7 @@ describe('market', () => {
   });
 
   it('installs a uvx entry via uv tool install', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-uv-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-uv-'));
     const uvPath = join(fakeBin, 'uv');
     const argsLog = join(fakeBin, 'uv-args.log');
     writeFileSync(uvPath, `#!/bin/sh\necho "$@" > "${argsLog}"\nexit 0\n`);
@@ -202,7 +202,7 @@ describe('market', () => {
   });
 
   it('installs a docker entry via docker run and reports the image transport', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-docker-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-docker-'));
     const dockerPath = join(fakeBin, 'docker');
     writeFileSync(
       dockerPath,
@@ -230,7 +230,7 @@ describe('market', () => {
   });
 
   it('builds a docker entry image from the inline Dockerfile when not pullable', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-docker-build-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-docker-build-'));
     const dockerPath = join(fakeBin, 'docker');
     writeFileSync(
       dockerPath,
@@ -247,7 +247,7 @@ describe('market', () => {
       const server = serverRecordSchema.parse(result.server);
       expect(server.slug).toBe('markitdown');
       const dockerfile = readFileSync(
-        join('/tmp/mcp-home-test-market/dockerfiles/markitdown/Dockerfile'),
+        join('/tmp/toolhome-test-market/dockerfiles/markitdown/Dockerfile'),
         'utf8',
       );
       expect(dockerfile).toContain('FROM python:3.13-slim');
@@ -259,7 +259,7 @@ describe('market', () => {
   });
 
   it('installs an npm home-stdio entry with an env credential (mosaic)', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-npm-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-npm-'));
     const npmPath = join(fakeBin, 'npm');
     writeFileSync(npmPath, '#!/bin/sh\necho "npm $@" >&2\nexit 0\n');
     chmodSync(npmPath, 0o755);
@@ -294,7 +294,7 @@ describe('market', () => {
   });
 
   it('updates an installed entry to the catalog pin, keeping the credential', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-uv-update-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-uv-update-'));
     const uvPath = join(fakeBin, 'uv');
     const argsLog = join(fakeBin, 'uv-args.log');
     writeFileSync(uvPath, `#!/bin/sh\necho "$@" >> "${argsLog}"\nexit 0\n`);
@@ -387,13 +387,13 @@ describe('market', () => {
   });
 
   it('marks install jobs interrupted across a process restart instead of losing them', async () => {
-    const fakeBin = mkdtempSync(join(tmpdir(), 'mcp-home-uv-slow-'));
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-uv-slow-'));
     const uvPath = join(fakeBin, 'uv');
     writeFileSync(uvPath, '#!/bin/sh\nsleep 60\nexit 0\n');
     chmodSync(uvPath, 0o755);
     const previousPath = process.env.PATH;
     process.env.PATH = `${fakeBin}:${previousPath}`;
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-restart-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-restart-'));
     const first = createTestRuntime({ directory, persist: true });
     let jobId: string;
     try {

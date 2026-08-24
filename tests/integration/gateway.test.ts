@@ -240,9 +240,9 @@ describe('MCP gateway', () => {
       );
       const appTool = tools.tools.find((tool) => tool.name === 'remote.open-dashboard');
       const appUi = appTool?._meta?.ui;
-      expect(appTool?._meta?.['ui/resourceUri']).toMatch(/^ui:\/\/mcp-home\/remote\/resource\//);
+      expect(appTool?._meta?.['ui/resourceUri']).toMatch(/^ui:\/\/toolhome\/remote\/resource\//);
       expect(isRecord(appUi) ? appUi.resourceUri : undefined).toMatch(
-        /^ui:\/\/mcp-home\/remote\/resource\//,
+        /^ui:\/\/toolhome\/remote\/resource\//,
       );
 
       const remoteEcho = structuredResult(
@@ -279,13 +279,13 @@ describe('MCP gateway', () => {
         (item) => item.name === 'Fixture data' && item.uri.includes('remote'),
       );
       const remoteApp = resources.resources.find((item) =>
-        item.uri.startsWith('ui://mcp-home/remote/'),
+        item.uri.startsWith('ui://toolhome/remote/'),
       );
       const homeInteractive = resources.resources.find(
         (item) => item.name === 'Interactive fixture resource' && item.uri.includes('home'),
       );
-      expect(remoteData?.uri).toMatch(/^mcp-home:\/\/remote\/resource\//);
-      expect(remoteApp?.uri).toMatch(/^ui:\/\/mcp-home\/remote\/resource\//);
+      expect(remoteData?.uri).toMatch(/^toolhome:\/\/remote\/resource\//);
+      expect(remoteApp?.uri).toMatch(/^ui:\/\/toolhome\/remote\/resource\//);
       if (!remoteData || !remoteApp || !homeInteractive) {
         throw new Error('Virtual fixture resources unavailable');
       }
@@ -329,7 +329,7 @@ describe('MCP gateway', () => {
       if (!template) throw new Error('Virtual resource template unavailable');
       const expanded = template.uriTemplate.replace(/\{\?[^}]+\}$/, '?id=42');
       const templatedResource = await aggregate.client.readResource({ uri: expanded });
-      expect(templatedResource.contents[0]?.uri).toMatch(/^mcp-home:\/\/remote\/resource\//);
+      expect(templatedResource.contents[0]?.uri).toMatch(/^toolhome:\/\/remote\/resource\//);
       const templatedContent = z
         .object({ text: z.string() })
         .passthrough()
@@ -342,11 +342,11 @@ describe('MCP gateway', () => {
       );
       const prompt = await aggregate.client.getPrompt({
         name: 'remote.greet',
-        arguments: { name: 'MCP Home' },
+        arguments: { name: 'ToolHome' },
       });
       expect(prompt.messages[0]?.content).toMatchObject({
         type: 'text',
-        text: 'Hello MCP Home from remote',
+        text: 'Hello ToolHome from remote',
       });
       const interactivePrompt = await aggregate.client.getPrompt({
         name: 'home.confirm-prompt',
@@ -373,13 +373,13 @@ describe('MCP gateway', () => {
 
       const extension = await aggregate.client.request(
         {
-          method: 'mcp-home/remote/fixture/echo',
+          method: 'toolhome/remote/fixture/echo',
           params: { value: 'extension-value' },
         },
         customResultSchema,
       );
       expect(extension.echoed).toEqual({ value: 'extension-value' });
-      expect(aggregate.customNotifications).toContain('mcp-home/remote/fixture/event');
+      expect(aggregate.customNotifications).toContain('toolhome/remote/fixture/event');
 
       const progress: number[] = [];
       const progressResult = structuredResult(
@@ -425,7 +425,7 @@ describe('MCP gateway', () => {
           }),
         ),
       );
-      expect(createdTask.taskId).toMatch(/^mcp-home-task:remote:/);
+      expect(createdTask.taskId).toMatch(/^toolhome-task:remote:/);
       const task = taskSchema.parse(
         await aggregate.tasks.request(
           { method: 'tasks/get', params: { taskId: createdTask.taskId } },
@@ -495,11 +495,11 @@ describe('MCP gateway', () => {
           arguments: {},
         }),
       );
-      expect(legacyHarness.clientRequests).toContain('mcp-home/home/fixture/client-resource');
+      expect(legacyHarness.clientRequests).toContain('toolhome/home/fixture/client-resource');
       expect(clientExtension).toMatchObject({
         result: {
           received: {
-            content: [{ uri: 'mcp-home://home/resource/fixture%3A%2F%2Fdata' }],
+            content: [{ uri: 'toolhome://home/resource/fixture%3A%2F%2Fdata' }],
           },
         },
         source: 'legacy-client-extension',

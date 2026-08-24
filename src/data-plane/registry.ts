@@ -95,7 +95,7 @@ export class CapabilityRegistry {
     const extensions: NonNullable<ServerCapabilities['extensions']> = {};
     for (const { server, snapshot } of entries) {
       for (const [name, settings] of Object.entries(snapshot.capabilities.extensions ?? {})) {
-        const key = aggregateAwareExtensions.has(name) ? name : `mcp-home/${server.slug}/${name}`;
+        const key = aggregateAwareExtensions.has(name) ? name : `toolhome/${server.slug}/${name}`;
         const value = aggregateAwareExtensions.has(name)
           ? settings
           : { ...settings, upstreamExtension: name, upstreamServer: server.slug };

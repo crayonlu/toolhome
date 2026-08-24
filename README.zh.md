@@ -1,22 +1,22 @@
-# MCP Home
+# ToolHome
 
 > **🌐 中文 · [English](README.md)**
 
-MCP Home 是一个单用户、可自托管的 Remote MCP 控制面与协议网关。你在一个地方管理上游 MCP Server 和凭据，再把稳定的标准 MCP URL 配置给任意 Harness。
+ToolHome 是一个单用户、可自托管的 Remote MCP 控制面与协议网关。你在一个地方管理上游 MCP Server 和凭据，再把稳定的标准 MCP URL 配置给任意 Harness。
 
 它同时暴露两种数据面入口：
 
 - `POST /mcp`：聚合所有已启用 Server，名称和 URI 自动命名空间化。
 - `POST /mcp/{server_slug}`：单个 Server 的独立入口，保留原始名称、URI 和扩展语义。
 
-MCP Home 不为 Claude Code、Codex、Cursor 或其他 Harness 编写专属适配层。Harness 只需支持标准 Streamable HTTP MCP 与 Bearer 鉴权。
+ToolHome 不为 Claude Code、Codex、Cursor 或其他 Harness 编写专属适配层。Harness 只需支持标准 Streamable HTTP MCP 与 Bearer 鉴权。
 
 ## AI Agent 快速开始
 
-安装 MCP Home skill，让 AI agent 自动掌握 MCP Home 的部署和操作：
+安装 ToolHome skill，让 AI agent 自动掌握 ToolHome 的部署和操作：
 
 ```bash
-npx skills add crayonlu/mcp-home -g -y
+npx skills add crayonlu/toolhome -g -y
 ```
 
 安装后 agent 会获得全部 CLI 命令、OAuth 授权流程、Market 安装、排错和部署模式的知识，无需手动编写指令。
@@ -43,12 +43,12 @@ npx skills add crayonlu/mcp-home -g -y
 
 ## 项目边界
 
-MCP Home 管理两类 MCP：
+ToolHome 管理两类 MCP：
 
 - Remote-native：上游本身提供 Streamable HTTP，可位于公网、内网或其他服务器。
-- Home-hosted：由 MCP Home 所在机器启动并托管的 stdio MCP，再通过远程入口提供给 Harness。
+- Home-hosted：由 ToolHome 所在机器启动并托管的 stdio MCP，再通过远程入口提供给 Harness。
 
-必须运行在 Harness 所在本机、依赖该机器浏览器或桌面状态的 MCP 不属于本项目。例如 Harness 笔记本上的 Chrome DevTools MCP 应继续由该 Harness 本地配置。若它运行在 MCP Home 宿主机上，则可以作为 Home-hosted Server 管理，但它访问的是宿主机环境。
+必须运行在 Harness 所在本机、依赖该机器浏览器或桌面状态的 MCP 不属于本项目。例如 Harness 笔记本上的 Chrome DevTools MCP 应继续由该 Harness 本地配置。若它运行在 ToolHome 宿主机上，则可以作为 Home-hosted Server 管理，但它访问的是宿主机环境。
 
 首版明确不包含多租户、Profile、Workspace 或 Project 管理。
 
@@ -66,9 +66,9 @@ MCP Home 管理两类 MCP：
 
 下游 2026 请求保持无状态；2025-era 使用与认证 principal 绑定的持久 Session，保留 initialize 能力声明和双向请求语义。最终 Tasks extension 在 SDK 2.0 尚未注册的部分由隔离兼容层补齐，对外仍是官方 `tasks/*` wire contract。
 
-聚合工具名为 `{server_slug}.{upstream_name}`。未知扩展方法在聚合入口使用 `mcp-home/{server_slug}/{upstream_method}`；独立入口原样透传。MCP App 若使用原始工具名，MCP Home 会根据 App 资源上下文或全局唯一名称路由；存在同名歧义时应使用独立入口。
+聚合工具名为 `{server_slug}.{upstream_name}`。未知扩展方法在聚合入口使用 `toolhome/{server_slug}/{upstream_method}`；独立入口原样透传。MCP App 若使用原始工具名，ToolHome 会根据 App 资源上下文或全局唯一名称路由；存在同名歧义时应使用独立入口。
 
-当现代 Harness 调用旧式上游时，MCP Home 会把 Tool、Prompt 和 Resource Read 中的 push-style Elicitation、Sampling、Roots 暂停并转换成现代 `input_required` 多轮交互，再恢复同一个上游请求。旧式自定义扩展若在自定义 method 内主动发起私有 server-to-client request，则没有可映射到现代 MRTR 封闭类型集的标准表示；这类扩展应使用 legacy Harness 或升级上游协议。
+当现代 Harness 调用旧式上游时，ToolHome 会把 Tool、Prompt 和 Resource Read 中的 push-style Elicitation、Sampling、Roots 暂停并转换成现代 `input_required` 多轮交互，再恢复同一个上游请求。旧式自定义扩展若在自定义 method 内主动发起私有 server-to-client request，则没有可映射到现代 MRTR 封闭类型集的标准表示；这类扩展应使用 legacy Harness 或升级上游协议。
 
 更多细节见 [架构说明](docs/architecture.md) 和 [协议兼容说明](docs/protocol-compatibility.md)。
 
@@ -112,7 +112,7 @@ export MCP_HOME_ALLOWED_HOSTS="mcp.example.com"
 docker compose up -d --build
 ```
 
-生产环境应在 MCP Home 前放置 HTTPS 反向代理。OAuth 回调、URL-based Client ID 和远程 Harness 接入都应使用稳定的 HTTPS `MCP_HOME_PUBLIC_URL`。该值必须是规范 origin，不能包含路径、查询、fragment 或用户名密码。数据保存在 `/data/mcp-home.sqlite`，SQLite 使用 WAL 模式。
+生产环境应在 ToolHome 前放置 HTTPS 反向代理。OAuth 回调、URL-based Client ID 和远程 Harness 接入都应使用稳定的 HTTPS `MCP_HOME_PUBLIC_URL`。该值必须是规范 origin，不能包含路径、查询、fragment 或用户名密码。数据保存在 `/data/toolhome.sqlite`，SQLite 使用 WAL 模式。
 
 Home-hosted stdio Server 的 npm 包通过 **Market** 安装到数据卷（`MCP_HOME_MARKET_DIR`，默认 `<dataDir>/market`），无需修改 Dockerfile。不要在容器内直接运行任意 npm 包：请通过 Market 的 curated 目录安装。
 
@@ -121,7 +121,7 @@ Home-hosted stdio Server 的 npm 包通过 **Market** 安装到数据卷（`MCP_
 GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 或打 tag 时自动执行：
 
 1. **test**：服务端 check + test，前端 typecheck + test
-2. **docker**：构建 dist -> `docker build` -> 推送 `ghcr.io/crayonlu/mcp-home:latest`（tag 额外打 `:v*` 版本标签）
+2. **docker**：构建 dist -> `docker build` -> 推送 `ghcr.io/crayonlu/toolhome:latest`（tag 额外打 `:v*` 版本标签）
 3. **deploy**：SSH 到服务器 `docker compose pull && up -d`
 
 部署需要三个 GitHub Secret：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_KEY`（SSH 私钥）。GHCR 镜像包需设为 Public（首次推送后在 Package Settings 里改）。
@@ -167,7 +167,7 @@ npm run cli -- market uninstall resend
 
 Access Key 只能调用 MCP 数据面，不能读取 Server 或 Credential 配置。Control Key 只能调用控制面，不能作为 MCP 身份使用。
 
-MCP Home 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据发现授权服务器，使用 Authorization Code + PKCE 获取只绑定到具体 MCP endpoint 的 access token。
+ToolHome 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据发现授权服务器，使用 Authorization Code + PKCE 获取只绑定到具体 MCP endpoint 的 access token。
 
 下游 Dynamic Client Registration 返回由主密钥签名的无状态 Client ID，不依赖进程内注册表；使用同一主密钥重启后仍然有效。同时支持 HTTPS URL-based Client Metadata，并限制响应大小、重定向和非公网目标。
 
@@ -190,7 +190,7 @@ Secret 应放入 Credential，而不是 Remote URL query 或 stdio arguments；�
 
 ## CLI
 
-构建后可以运行 `mcp-home`；源码开发时使用 `npm run cli --`。
+构建后可以运行 `toolhome`；源码开发时使用 `npm run cli --`。
 
 ```bash
 npm run cli -- auth login \
@@ -271,7 +271,7 @@ npm run test
 npm run test:real
 ```
 
-`npm run test:real` 优先启动构建后的真实 MCP Home 进程，并连接 Home-hosted stdio 与 Remote-native HTTP fixture。它使用官方 MCP Client 验证聚合/独立入口、modern/legacy Harness、Progress、取消、list-changed、MRTR、Tasks 和鉴权边界；没有构建产物时回退到源码入口，便于本地诊断。
+`npm run test:real` 优先启动构建后的真实 ToolHome 进程，并连接 Home-hosted stdio 与 Remote-native HTTP fixture。它使用官方 MCP Client 验证聚合/独立入口、modern/legacy Harness、Progress、取消、list-changed、MRTR、Tasks 和鉴权边界；没有构建产物时回退到源码入口，便于本地诊断。
 
 `/healthz` 只表示进程存活；`/readyz` 在运行状态不可用时返回 `503`。
 

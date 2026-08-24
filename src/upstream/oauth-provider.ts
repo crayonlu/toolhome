@@ -59,9 +59,9 @@ export class StoredOAuthProvider implements OAuthClientProvider {
       token_endpoint_auth_method: payload.clientSecret ? 'client_secret_basic' : 'none',
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-      client_name: 'MCP Home',
+      client_name: 'ToolHome',
       client_uri: this.#publicUrl.toString(),
-      software_id: 'mcp-home',
+      software_id: 'toolhome',
       software_version: '0.1.0',
       ...(payload.scope === undefined ? {} : { scope: payload.scope }),
     };

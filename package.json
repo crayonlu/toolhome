@@ -1,9 +1,10 @@
 {
-  "name": "mcp-home",
-  "version": "0.3.1",
-  "description": "Self-hosted home for remote-native and home-hosted MCP servers.",
+  "name": "toolhome",
+  "version": "0.4.0",
+  "description": "Self-hosted home for remote-native and home-hosted MCP servers and CLIs.",
   "type": "module",
   "bin": {
+    "toolhome": "./dist/server/cli/main.js",
     "mcp-home": "./dist/server/cli/main.js"
   },
   "files": [
@@ -15,6 +16,7 @@
     "gateway",
     "proxy",
     "oauth",
+    "cli",
     "self-hosted"
   ],
   "license": "MIT",

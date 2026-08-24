@@ -6,7 +6,7 @@
 
 **Fix**: Update to the latest image. Verify:
 ```bash
-mcp-home server list --output json | jq '.[0].runtime.status'
+toolhome server list --output json | jq '.[0].runtime.status'
 ```
 If `runtime` is missing, the server is running an old version. Pull the latest image.
 
@@ -16,8 +16,8 @@ If `runtime` is missing, the server is running an old version. Pull the latest i
 
 **Fix**: Switch to DCR for that server:
 ```bash
-mcp-home api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":false}}'
-mcp-home credential authorize <name> --force
+toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":false}}'
+toolhome credential authorize <name> --force
 ```
 
 See `oauth-guide.md` for per-provider compatibility.
@@ -28,8 +28,8 @@ See `oauth-guide.md` for per-provider compatibility.
 
 **Fix**: Switch to URL-based (the default):
 ```bash
-mcp-home api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":true}}'
-mcp-home credential authorize <name> --force
+toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":true}}'
+toolhome credential authorize <name> --force
 ```
 
 ## OAuth "invalid_redirect_uri"
@@ -46,8 +46,8 @@ mcp-home credential authorize <name> --force
 
 **Fix**: Wipe the market directory and reinstall:
 ```bash
-docker exec mcp-home rm -rf /data/market/node_modules /data/market/package-lock.json
-mcp-home market install <id> --set KEY=value
+docker exec toolhome rm -rf /data/market/node_modules /data/market/package-lock.json
+toolhome market install <id> --set KEY=value
 ```
 
 ## Fetch Server Won't Start (package name squatting)
@@ -58,9 +58,9 @@ mcp-home market install <id> --set KEY=value
 
 **Fix**: Ensure the catalog entry uses `kind: "uvx"` (installs via `uv tool install`, runs via `uvx`). Remove any npm-installed copy:
 ```bash
-docker exec mcp-home rm -rf /data/market/node_modules/mcp-server-fetch /data/market/node_modules/.bin/mcp-server-fetch
-mcp-home server delete <fetch-server-id>
-mcp-home market install fetch
+docker exec toolhome rm -rf /data/market/node_modules/mcp-server-fetch /data/market/node_modules/.bin/mcp-server-fetch
+toolhome server delete <fetch-server-id>
+toolhome market install fetch
 ```
 
 ## Fetch Server "Unreachable" with `ImportError: McpError`
@@ -71,13 +71,13 @@ mcp-home market install fetch
 
 **Fix**: Reinstall with the pinned dependency (the catalog already ships `uvWith: ['mcp<2']`):
 ```bash
-mcp-home market uninstall fetch
-mcp-home market install fetch
+toolhome market uninstall fetch
+toolhome market install fetch
 ```
 If upgrading an existing broken install without the pin, fix the tool env directly:
 ```bash
-docker exec mcp-home sh -c 'uv tool install mcp-server-fetch --with "mcp<2"'
-mcp-home server restart fetch
+docker exec toolhome sh -c 'uv tool install mcp-server-fetch --with "mcp<2"'
+toolhome server restart fetch
 ```
 
 ## Cloudflare Proxy SSE Delay (~25s per request)
@@ -86,23 +86,23 @@ mcp-home server restart fetch
 
 **Cause**: Cloudflare buffers SSE POST responses.
 
-**Fix**: Set the DNS record for the MCP Home subdomain to "DNS only" (grey cloud), bypassing Cloudflare's proxy. The origin server has a valid TLS certificate (Let's Encrypt via the reverse proxy).
+**Fix**: Set the DNS record for the ToolHome subdomain to "DNS only" (grey cloud), bypassing Cloudflare's proxy. The origin server has a valid TLS certificate (Let's Encrypt via the reverse proxy).
 
 ## Credential Shows "Expired"
 
-**Cause**: OAuth access tokens expire (typically 1 hour). MCP Home refreshes lazily.
+**Cause**: OAuth access tokens expire (typically 1 hour). ToolHome refreshes lazily.
 
 **Fix**: The web console auto-refreshes expired OAuth credentials on page load. Manually:
 ```bash
-mcp-home credential test <id>
-mcp-home server refresh <server-id>
+toolhome credential test <id>
+toolhome server refresh <server-id>
 ```
 
 ## Upstream "unreachable" Intermittently
 
-**Cause**: Network flakiness between the MCP Home server and the upstream (common for overseas providers from China-based servers).
+**Cause**: Network flakiness between the ToolHome server and the upstream (common for overseas providers from China-based servers).
 
-**Fix**: MCP Home auto-reconnects. Check `mcp-home doctor` periodically. For persistent issues, consider relocating the MCP Home server closer to the upstreams, or using a proxy.
+**Fix**: ToolHome auto-reconnects. Check `toolhome doctor` periodically. For persistent issues, consider relocating the ToolHome server closer to the upstreams, or using a proxy.
 
 ## Delete Access Key Returns 404
 
@@ -114,10 +114,10 @@ mcp-home server refresh <server-id>
 
 **Cause**: The server has limited RAM (<2GB). In-container `npm ci` + `vite build` + `tsc` thrashes memory.
 
-**Fix**: Use the prebuilt GHCR image (`ghcr.io/crayonlu/mcp-home:latest`) instead of building locally. The CI pipeline builds on GitHub runners (ample RAM) and pushes the image.
+**Fix**: Use the prebuilt GHCR image (`ghcr.io/crayonlu/toolhome:latest`) instead of building locally. The CI pipeline builds on GitHub runners (ample RAM) and pushes the image.
 
 ## CLI "command.opts is not a function"
 
 **Cause**: Commander action handler parameter ordering bug (fixed in recent versions).
 
-**Fix**: Update to the latest version: `npm install -g mcp-home@latest`.
+**Fix**: Update to the latest version: `npm install -g toolhome@latest`.

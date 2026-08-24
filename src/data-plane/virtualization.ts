@@ -19,9 +19,9 @@ export function splitAggregateName(value: string): { slug: string; original: str
 export function virtualResourceUri(slug: string, upstreamUri: string): string {
   if (upstreamUri.startsWith('ui://')) {
     const encoded = Buffer.from(upstreamUri, 'utf8').toString('base64url');
-    return `ui://mcp-home/${slug}/resource/${encoded}`;
+    return `ui://toolhome/${slug}/resource/${encoded}`;
   }
-  return `mcp-home://${slug}/resource/${encodeURIComponent(upstreamUri)}`;
+  return `toolhome://${slug}/resource/${encodeURIComponent(upstreamUri)}`;
 }
 
 export function virtualResourceTemplate(slug: string, upstreamTemplate: string): string {
@@ -29,11 +29,11 @@ export function virtualResourceTemplate(slug: string, upstreamTemplate: string):
   const encoded = Buffer.from(upstreamTemplate, 'utf8').toString('base64url');
   const variables = [...new Set(template.variableNames)];
   const suffix = `${slug}/template/${encoded}${variables.length === 0 ? '' : `{?${variables.join(',')}}`}`;
-  return upstreamTemplate.startsWith('ui://') ? `ui://mcp-home/${suffix}` : `mcp-home://${suffix}`;
+  return upstreamTemplate.startsWith('ui://') ? `ui://toolhome/${suffix}` : `toolhome://${suffix}`;
 }
 
 export function parseVirtualResourceUri(uri: string): { slug: string; upstreamUri: string } | null {
-  const uiMatch = /^ui:\/\/mcp-home\/([a-z0-9]+(?:-[a-z0-9]+)*)\/resource\/([A-Za-z0-9_-]+)$/.exec(
+  const uiMatch = /^ui:\/\/toolhome\/([a-z0-9]+(?:-[a-z0-9]+)*)\/resource\/([A-Za-z0-9_-]+)$/.exec(
     uri,
   );
   if (uiMatch) {
@@ -47,7 +47,7 @@ export function parseVirtualResourceUri(uri: string): { slug: string; upstreamUr
       return null;
     }
   }
-  const prefix = 'mcp-home://';
+  const prefix = 'toolhome://';
   if (!uri.startsWith(prefix)) return null;
   const remainder = uri.slice(prefix.length);
   const marker = '/resource/';
@@ -67,7 +67,7 @@ export function parseVirtualResourceTemplate(
   uriTemplate: string,
 ): { slug: string; upstreamTemplate: string } | null {
   const match =
-    /^(?:mcp-home:\/\/|ui:\/\/mcp-home\/)([a-z0-9]+(?:-[a-z0-9]+)*)\/template\/([A-Za-z0-9_-]+)(?:\{\?[^}]+\})?$/.exec(
+    /^(?:toolhome:\/\/|ui:\/\/toolhome\/)([a-z0-9]+(?:-[a-z0-9]+)*)\/template\/([A-Za-z0-9_-]+)(?:\{\?[^}]+\})?$/.exec(
       uriTemplate,
     );
   if (!match) return null;
@@ -91,8 +91,8 @@ export function expandVirtualResourceTemplate(
   } catch {
     return null;
   }
-  const isHome = parsed.protocol === 'mcp-home:';
-  const isUi = parsed.protocol === 'ui:' && parsed.hostname === 'mcp-home';
+  const isHome = parsed.protocol === 'toolhome:';
+  const isUi = parsed.protocol === 'ui:' && parsed.hostname === 'toolhome';
   if (!isHome && !isUi) return null;
   const segments = parsed.pathname.split('/').filter(Boolean);
   const slug = isHome ? parsed.hostname : segments[0];
@@ -118,13 +118,13 @@ export function expandVirtualResourceTemplate(
 }
 
 export function aggregateExtensionMethod(slug: string, method: string): string {
-  return `mcp-home/${slug}/${method}`;
+  return `toolhome/${slug}/${method}`;
 }
 
 export function splitAggregateExtensionMethod(
   method: string,
 ): { slug: string; upstreamMethod: string } | null {
-  const prefix = 'mcp-home/';
+  const prefix = 'toolhome/';
   if (!method.startsWith(prefix)) return null;
   const rest = method.slice(prefix.length);
   const slash = rest.indexOf('/');
@@ -133,13 +133,13 @@ export function splitAggregateExtensionMethod(
 }
 
 export function virtualTaskId(slug: string, upstreamTaskId: string): string {
-  return `mcp-home-task:${slug}:${Buffer.from(upstreamTaskId, 'utf8').toString('base64url')}`;
+  return `toolhome-task:${slug}:${Buffer.from(upstreamTaskId, 'utf8').toString('base64url')}`;
 }
 
 export function parseVirtualTaskId(
   taskId: string,
 ): { slug: string; upstreamTaskId: string } | null {
-  const match = /^mcp-home-task:([a-z0-9]+(?:-[a-z0-9]+)*):([A-Za-z0-9_-]+)$/.exec(taskId);
+  const match = /^toolhome-task:([a-z0-9]+(?:-[a-z0-9]+)*):([A-Za-z0-9_-]+)$/.exec(taskId);
   if (!match) return null;
   const slug = match[1];
   const encoded = match[2];

@@ -1,17 +1,18 @@
 ---
-name: mcp-home
+name: toolhome
 description: >
-  Deploy and manage a self-hosted MCP gateway that aggregates upstream MCP
-  servers behind stable URLs. Use when the user wants to set up MCP Home,
-  add or manage MCP servers and credentials, authorize OAuth upstreams,
-  install from the Market catalog, configure harnesses (Claude Code, Cursor,
-  Codex, Grok) to connect through a single gateway URL, or troubleshoot MCP
-  Home issues. Covers CLI, web console, Docker deployment, and CI/CD.
+  Deploy and manage a self-hosted ToolHome instance: a remote MCP control
+  plane that aggregates upstream MCP servers behind stable URLs. Use when
+  the user wants to set up ToolHome, add or manage MCP servers and
+  credentials, authorize OAuth upstreams, install from the Market catalog,
+  configure harnesses (Claude Code, Cursor, Codex, Grok) to connect through
+  a single gateway URL, or troubleshoot ToolHome issues. Covers CLI, web
+  console, Docker deployment, and CI/CD.
 ---
 
-# MCP Home
+# ToolHome
 
-MCP Home is a single-user, self-hosted Remote MCP control plane and protocol gateway. Manage upstream MCP servers and credentials in one place, then point any harness at stable, standard MCP URLs.
+ToolHome is a single-user, self-hosted Remote MCP control plane and protocol gateway. Manage upstream MCP servers and credentials in one place, then point any harness at stable, standard MCP URLs.
 
 ## When to Use This Skill
 
@@ -20,23 +21,23 @@ MCP Home is a single-user, self-hosted Remote MCP control plane and protocol gat
 - User needs to authorize OAuth for MCP upstreams (Cloudflare, Notion, Linear, etc.)
 - User wants to install MCP servers from a catalog (Market)
 - User wants to connect Claude Code, Cursor, Codex, or Grok to a self-hosted MCP gateway
-- User is troubleshooting MCP Home (status, OAuth, connectivity)
+- User is troubleshooting ToolHome (status, OAuth, connectivity)
 
 ## Installation
 
-MCP Home has three components. Install what you need:
+ToolHome has three components. Install what you need:
 
 ### 1. Deploy the server (Docker)
 
 ```bash
 docker run -d \
-  --name mcp-home \
+  --name toolhome \
   -p 3344:3344 \
-  -v mcp-home-data:/data \
+  -v toolhome-data:/data \
   -e MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)" \
   -e MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)" \
   -e MCP_HOME_PUBLIC_URL="https://mcp.example.com" \
-  ghcr.io/crayonlu/mcp-home:latest
+  ghcr.io/crayonlu/toolhome:latest
 ```
 
 Or with Docker Compose (see `references/deployment.md`). After startup, open the web console at `MCP_HOME_PUBLIC_URL` and sign in with the bootstrap Control Key.
@@ -44,8 +45,8 @@ Or with Docker Compose (see `references/deployment.md`). After startup, open the
 ### 2. Install the CLI (npm)
 
 ```bash
-npm install -g mcp-home
-mcp-home auth login --url https://mcp.example.com --control-key "$MCP_HOME_CONTROL_KEY"
+npm install -g toolhome
+toolhome auth login --url https://mcp.example.com --control-key "$MCP_HOME_CONTROL_KEY"
 ```
 
 The CLI manages servers, credentials, OAuth, Market, and diagnostics from any terminal.
@@ -53,7 +54,7 @@ The CLI manages servers, credentials, OAuth, Market, and diagnostics from any te
 ### 3. Install this skill (for AI agents)
 
 ```bash
-npx skills add crayonlu/mcp-home -g -y
+npx skills add crayonlu/toolhome -g -y
 ```
 
 Teaches the agent all CLI commands, OAuth flows, Market installation, and troubleshooting.
@@ -61,53 +62,53 @@ Teaches the agent all CLI commands, OAuth flows, Market installation, and troubl
 ## CLI Quick Reference
 
 ```bash
-mcp-home status                         # overview
-mcp-home doctor                         # health check
-mcp-home server list                    # list servers
-mcp-home server add ./server.json       # add a server
-mcp-home credential list                # list credentials
-mcp-home credential authorize <name>    # OAuth authorization (opens browser, waits)
-mcp-home access-key create laptop       # create an MCP Access Key for harnesses
-mcp-home endpoint aggregate             # show the aggregate endpoint URL
-mcp-home market list                    # browse the Market catalog
-mcp-home market install resend --set RESEND_API_KEY=re_xxx  # install from Market
-mcp-home calls list --limit 10                              # recent tool calls
-mcp-home calls stats                                        # call statistics
+toolhome status                         # overview
+toolhome doctor                         # health check
+toolhome server list                    # list servers
+toolhome server add ./server.json       # add a server
+toolhome credential list                # list credentials
+toolhome credential authorize <name>    # OAuth authorization (opens browser, waits)
+toolhome access-key create laptop       # create an MCP Access Key for harnesses
+toolhome endpoint aggregate             # show the aggregate endpoint URL
+toolhome market list                    # browse the Market catalog
+toolhome market install resend --set RESEND_API_KEY=re_xxx  # install from Market
+toolhome calls list --limit 10                              # recent tool calls
+toolhome calls stats                                        # call statistics
 ```
 
 ## Common Workflows
 
-### Deploy MCP Home
+### Deploy ToolHome
 
 1. Generate two random keys (master + bootstrap control, each 32+ chars)
 2. Start the Docker container with the keys and public URL
 3. Open the web console, sign in with the bootstrap key
 4. Create a new Control Key, revoke bootstrap
-5. Run `mcp-home doctor` to verify health
+5. Run `toolhome doctor` to verify health
 
 ### Add an Upstream Server
 
 1. Create a credential:
    ```bash
-   echo '{"name":"firecrawl","payload":{"type":"bearer","token":"fc-xxx"}}' | mcp-home credential add -
+   echo '{"name":"firecrawl","payload":{"type":"bearer","token":"fc-xxx"}}' | toolhome credential add -
    ```
-2. Get the credential ID from `mcp-home credential list`
+2. Get the credential ID from `toolhome credential list`
 3. Create a server:
    ```bash
-   echo '{"slug":"firecrawl","name":"Firecrawl","kind":"remote","transport":{"type":"streamable-http","url":"https://mcp.firecrawl.dev/v2/mcp"},"credentialId":"<id>","enabled":true}' | mcp-home server add -
+   echo '{"slug":"firecrawl","name":"Firecrawl","kind":"remote","transport":{"type":"streamable-http","url":"https://mcp.firecrawl.dev/v2/mcp"},"credentialId":"<id>","enabled":true}' | toolhome server add -
    ```
-4. Verify: `mcp-home doctor`
+4. Verify: `toolhome doctor`
 
 ### Authorize OAuth Upstream
 
 ```bash
-mcp-home credential authorize cloudflare
+toolhome credential authorize cloudflare
 ```
 
 This resolves the credential by name, opens the browser, and waits until authorization succeeds, fails, or times out (default 600s). For force re-authorization:
 
 ```bash
-mcp-home credential authorize cloudflare --force
+toolhome credential authorize cloudflare --force
 ```
 
 If OAuth fails with "Invalid client" or "Incompatible auth server", switch the registration method per-server:
@@ -119,13 +120,13 @@ See `references/oauth-guide.md` for per-provider compatibility.
 ### Install from Market
 
 ```bash
-mcp-home market list                                    # browse 24+ curated entries
-mcp-home market install resend --set RESEND_API_KEY=re_xxx   # home-stdio (npm)
-mcp-home market install context7 --set CONTEXT7_API_KEY=xxx  # remote (bearer)
-mcp-home market install deepwiki                        # remote (no auth)
-mcp-home market install fetch                           # uvx (Python, no config)
-mcp-home market install markitdown                       # docker (sibling container)
-mcp-home market uninstall resend                        # remove
+toolhome market list                                    # browse 24+ curated entries
+toolhome market install resend --set RESEND_API_KEY=re_xxx   # home-stdio (npm)
+toolhome market install context7 --set CONTEXT7_API_KEY=xxx  # remote (bearer)
+toolhome market install deepwiki                        # remote (no auth)
+toolhome market install fetch                           # uvx (Python, no config)
+toolhome market install markitdown                       # docker (sibling container)
+toolhome market uninstall resend                        # remove
 ```
 
 Market installs are async with progress: the CLI shows `npm install` steps, the web console shows a live log. Every curated entry is pinned to an exact artifact version (`package@x.y.z` / `package==x.y.z`); installs never drift with `latest`, and each install writes a persistent record (source, version, recipe revision). If an install needs a secret, the CLI/console prints a one-time action URL instead of accepting the secret on the command line.
@@ -137,7 +138,7 @@ Market installs are async with progress: the CLI shows `npm install` steps, the 
 Create an **agent-scoped control key** (web console → Settings → Control Keys, or CLI):
 
 ```bash
-mcp-home control-key create agent-key --scope agent
+toolhome control-key create agent-key --scope agent
 ```
 
 Agent keys can read state and run safe operations (enable/disable/refresh/restart, market install, tool visibility) but are denied credentials, control/access keys, secret exports, and server deletion (HTTP 403). Existing keys keep full admin scope.
@@ -158,7 +159,7 @@ The management surface exposes `home_status`, `server_list`, `server_get`, `mark
 Create an MCP Access Key:
 
 ```bash
-mcp-home access-key create laptop
+toolhome access-key create laptop
 # Returns: mch_mcp_xxx (shown once, copy it)
 ```
 
@@ -185,10 +186,10 @@ Aggregate tool names are `{server_slug}.{tool_name}`. Per-server preserves origi
 ### Diagnose Issues
 
 ```bash
-mcp-home doctor              # check all servers
-mcp-home server status <id>  # detailed runtime state + last error
-mcp-home server logs <id>    # recent log entries
-mcp-home events              # recent events with level filter
+toolhome doctor              # check all servers
+toolhome server status <id>  # detailed runtime state + last error
+toolhome server logs <id>    # recent log entries
+toolhome events              # recent events with level filter
 ```
 
 ## Configuration

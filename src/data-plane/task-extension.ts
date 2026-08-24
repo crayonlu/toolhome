@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
 
-const internalPrefix = 'mcp-home.internal/tasks/';
+const internalPrefix = 'toolhome.internal/tasks/';
 const taskMethods = new Set(['tasks/get', 'tasks/update', 'tasks/cancel']);
 
 export interface AdaptedTaskRequest {

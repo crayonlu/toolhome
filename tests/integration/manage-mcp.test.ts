@@ -251,7 +251,7 @@ describe('management MCP', () => {
         await manage.client.callTool({ name: 'market_install', arguments: { entry_id: 'exa' } }),
       );
       expect(elicit.status).toBe('awaiting_secret');
-      expect(String(elicit.actionUrl)).toMatch(/^http:\/\/mcp-home\.test\/market\/actions\//);
+      expect(String(elicit.actionUrl)).toMatch(/^http:\/\/toolhome\.test\/market\/actions\//);
       expect(JSON.stringify(elicit)).not.toContain('EXA_API_KEY');
 
       // Completing the action through the control session stores the secret and installs.

@@ -69,7 +69,7 @@ export function createFixtureServer(options: FixtureServerOptions): Server {
           'io.modelcontextprotocol/ui': {
             mimeTypes: ['text/html;profile=mcp-app'],
           },
-          'dev.mcp-home.fixture': { version: 1 },
+          'dev.toolhome.fixture': { version: 1 },
         },
       },
       instructions: `Fixture server ${options.name}`,

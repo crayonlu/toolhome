@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +8,7 @@ import { SecretBox } from '../../src/security/secret-box.js';
 import type { ToolCallDraft } from '../../src/domain/models.js';
 
 function createStore() {
-  const directory = mkdtempSync(join(tmpdir(), 'mcp-home-store-'));
+  const directory = mkdtempSync(join(tmpdir(), 'toolhome-store-'));
   const databasePath = join(directory, 'test.sqlite');
   const store = new SqliteStore(
     databasePath,
@@ -85,6 +85,50 @@ function draft(overrides: Partial<ToolCallDraft> = {}): ToolCallDraft {
     ...overrides,
   };
 }
+
+describe('legacy database rename (0.3.x → 0.4.0)', () => {
+  it('migrates an existing mcp-home.sqlite database to toolhome.sqlite', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-migrate-'));
+    try {
+      const legacyPath = join(directory, 'mcp-home.sqlite');
+      const newPath = join(directory, 'toolhome.sqlite');
+      const secrets = new SecretBox('store-test-master-key-0000000000000000000000001');
+      const legacy = new SqliteStore(legacyPath, secrets);
+      legacy.close();
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(newPath)).toBe(false);
+
+      const migrated = new SqliteStore(newPath, secrets);
+      migrated.close();
+      expect(existsSync(legacyPath)).toBe(false);
+      expect(existsSync(newPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a database whose master-key check still uses the legacy kind marker', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-legacy-kind-'));
+    try {
+      const path = join(directory, 'toolhome.sqlite');
+      const secrets = new SecretBox('store-test-master-key-0000000000000000000000001');
+      const store = new SqliteStore(path, secrets);
+      store.close();
+      // Overwrite the marker with the pre-0.4.0 kind, as an upgraded database would have.
+      const db = new DatabaseSync(path);
+      db.prepare("UPDATE metadata SET metadata_value = ? WHERE metadata_key = 'master-key-check'").run(
+        secrets.encrypt({ kind: 'mcp-home-master-key-check', version: 1 }),
+      );
+      db.close();
+
+      const reopened = new SqliteStore(path, secrets);
+      expect(reopened.listServers()).toEqual([]);
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('tool visibility projection store', () => {
   it('defaults to visible, supports per-tool overrides and inherit removal', () => {

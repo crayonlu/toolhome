@@ -8,7 +8,7 @@ const server = serve({
   port: runtime.config.port,
 });
 
-runtime.logger.info('MCP Home is listening', {
+runtime.logger.info('ToolHome is listening', {
   address: `${runtime.config.host}:${runtime.config.port}`,
   publicUrl: runtime.config.publicUrl.toString(),
 });
@@ -17,7 +17,7 @@ let closing = false;
 const shutdown = async (signal: string): Promise<void> => {
   if (closing) return;
   closing = true;
-  runtime.logger.info('MCP Home is shutting down', { signal });
+  runtime.logger.info('ToolHome is shutting down', { signal });
   const serverClosed = new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
@@ -28,7 +28,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
 const requestShutdown = (signal: string): void => {
   void shutdown(signal).catch((error) => {
-    runtime.logger.error('MCP Home shutdown failed', {
+    runtime.logger.error('ToolHome shutdown failed', {
       error: error instanceof Error ? error.message : String(error),
     });
     process.exitCode = 1;

@@ -51,7 +51,7 @@ export async function connectTestClient(
   const taskStatuses: string[] = [];
   const listChanges = { prompts: 0, resources: 0, tools: 0 };
   const client = new Client(
-    { name: 'mcp-home-test', version: '1.0.0' },
+    { name: 'toolhome-test', version: '1.0.0' },
     {
       capabilities: testClientCapabilities,
       versionNegotiation: {

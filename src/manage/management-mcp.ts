@@ -121,11 +121,11 @@ export class ManagementMCP {
 
   #createServer(): Server {
     const server = new Server(
-      { name: 'mcp-home-management', version: '0.1.0', title: 'MCP Home Management' },
+      { name: 'toolhome-management', version: '0.1.0', title: 'ToolHome Management' },
       {
         capabilities: { tools: {} },
         instructions:
-          'Manage an MCP Home instance: inspect servers, search the market, read tool visibility and call history, and run reversible operations (enable/disable/refresh/restart, market install, tool visibility). Secrets are never accepted through tool arguments — installs that need them return a one-time action URL to complete in the web console.',
+          'Manage a ToolHome instance: inspect servers, search the market, read tool visibility and call history, and run reversible operations (enable/disable/refresh/restart, market install, tool visibility). Secrets are never accepted through tool arguments — installs that need them return a one-time action URL to complete in the web console.',
       },
     );
     server.setRequestHandler('tools/list', async () => ({ tools: this.#tools() }));

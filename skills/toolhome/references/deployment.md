@@ -5,8 +5,8 @@
 ```yaml
 # docker-compose.yml
 services:
-  mcp-home:
-    image: ghcr.io/crayonlu/mcp-home:latest
+  toolhome:
+    image: ghcr.io/crayonlu/toolhome:latest
     init: true
     restart: unless-stopped
     ports:
@@ -33,7 +33,7 @@ docker compose up -d
 The repo includes `.github/workflows/ci.yml` with three jobs:
 
 1. **test**: server check + test, web typecheck + test
-2. **docker**: build dists -> docker build -> push `ghcr.io/crayonlu/mcp-home:latest`
+2. **docker**: build dists -> docker build -> push `ghcr.io/crayonlu/toolhome:latest`
 3. **deploy**: SSH to server -> `docker compose pull && up -d`
 
 ### Required GitHub Secrets
@@ -47,7 +47,7 @@ The repo includes `.github/workflows/ci.yml` with three jobs:
 ### GHCR Package Visibility
 
 After first CI push, set the package to Public:
-`github.com/<user>?tab=packages -> mcp-home -> Package settings -> Change visibility -> Public`
+`github.com/<user>?tab=packages -> toolhome -> Package settings -> Change visibility -> Public`
 
 ### Deployment Flow
 
@@ -61,7 +61,7 @@ git tag v* -> test -> docker build + push :v* tag (no deploy)
 Put an HTTPS reverse proxy (nginx/Caddy/openresty) in front. Key requirements:
 
 - **WebSocket/SSE support**: MCP uses Streamable HTTP with SSE responses. The proxy must not buffer SSE.
-- **No CDN proxy for the domain**: If behind Cloudflare (orange cloud), SSE POST responses get buffered for ~25s. Use DNS-only (grey cloud) for the MCP Home subdomain.
+- **No CDN proxy for the domain**: If behind Cloudflare (orange cloud), SSE POST responses get buffered for ~25s. Use DNS-only (grey cloud) for the ToolHome subdomain.
 - **Valid TLS certificate**: OAuth callbacks and URL-based client metadata require HTTPS.
 
 ### nginx Example
@@ -81,7 +81,7 @@ location / {
 
 | Path | Content | Persist? |
 |---|---|---|
-| `/data/mcp-home.sqlite` | SQLite database (servers, credentials, keys, events) | Yes (volume) |
+| `/data/toolhome.sqlite` | SQLite database (servers, credentials, keys, events) | Yes (volume) |
 | `/data/market/` | Market-installed npm packages | Yes (volume) |
 | `/app/dist/` | Server code (baked in image) | No (image) |
 | `/app/web-dist/` | Web console (baked in image) | No (image) |

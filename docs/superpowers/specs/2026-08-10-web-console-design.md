@@ -1,11 +1,11 @@
-# MCP Home Web Console — 设计方案
+# ToolHome Web Console — 设计方案
 
 **日期**: 2026-08-10
 **状态**: 待评审
 
 ## 1. 目标
 
-为 MCP Home（自托管 MCP 网关）设计并实现一个 Web 控制台，替代被删除的旧版（`4af9bc7` "drop the web console, keep CLI only"）。设计气质为**现代、克制、高级、无边界**；功能与 CLI **完全对齐、不简化**。
+为 ToolHome（自托管 MCP 网关）设计并实现一个 Web 控制台，替代被删除的旧版（`4af9bc7` "drop the web console, keep CLI only"）。设计气质为**现代、克制、高级、无边界**；功能与 CLI **完全对齐、不简化**。
 
 ## 2. 设计方向
 

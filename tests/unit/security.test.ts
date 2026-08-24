@@ -51,7 +51,7 @@ describe('security primitives', () => {
   });
 
   it('stores only encrypted credentials and rolls transactions back atomically', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-store-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-store-'));
     const databasePath = join(directory, 'store.sqlite');
     const store = new SqliteStore(
       databasePath,
@@ -94,7 +94,7 @@ describe('security primitives', () => {
   });
 
   it('fails fast when the configured master key cannot decrypt stored credentials', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-key-check-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-key-check-'));
     const databasePath = join(directory, 'store.sqlite');
     const store = new SqliteStore(
       databasePath,
@@ -119,7 +119,7 @@ describe('security primitives', () => {
   });
 
   it('detects a changed master key before any credentials exist', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-empty-key-check-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-empty-key-check-'));
     const databasePath = join(directory, 'store.sqlite');
     new SqliteStore(
       databasePath,
@@ -139,7 +139,7 @@ describe('security primitives', () => {
   });
 
   it('binds OAuth access tokens to one exact MCP resource', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mcp-home-oauth-'));
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-oauth-'));
     const store = new SqliteStore(
       join(directory, 'oauth.sqlite'),
       new SecretBox('unit-test-oauth-key-00000000000000000000001'),

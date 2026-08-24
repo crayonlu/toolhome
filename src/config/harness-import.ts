@@ -5,7 +5,7 @@ import { marketCatalog } from '../market/catalog.js';
 
 /**
  * Translates a harness MCP config (Claude Desktop / Cursor `mcpServers` JSON)
- * into MCP Home servers + credentials.
+ * into ToolHome servers + credentials.
  *
  * Parsing rules:
  * - `url` (+ `headers`)      -> remote streamable-http; `Authorization: Bearer X`

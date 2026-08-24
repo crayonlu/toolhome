@@ -16,7 +16,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 
-const originalTaskResultKey = 'mcp-home.dev/originalTaskResult';
+const originalTaskResultKey = 'toolhome.dev/originalTaskResult';
 const taskMethods = new Set(['tasks/get', 'tasks/update', 'tasks/cancel']);
 
 interface ExtensionRequest {
@@ -74,7 +74,7 @@ export class ExtensionTransportBridge {
 
   async request(request: ExtensionRequest, options: RequestOptions): Promise<unknown> {
     if (this.#closed) throw new AppError('upstream_closed', 'Upstream transport is closed', 503);
-    const id = `mcp-home-extension-${randomUUID()}`;
+    const id = `toolhome-extension-${randomUUID()}`;
     const metadata = isRecord(request.params?._meta) ? request.params._meta : {};
     const message = JSONRPCRequestSchema.parse({
       jsonrpc: '2.0',
@@ -85,7 +85,7 @@ export class ExtensionTransportBridge {
         _meta: {
           ...metadata,
           [PROTOCOL_VERSION_META_KEY]: this.#protocolVersion,
-          [CLIENT_INFO_META_KEY]: { name: 'mcp-home', version: '0.1.0' },
+          [CLIENT_INFO_META_KEY]: { name: 'toolhome', version: '0.1.0' },
           [CLIENT_CAPABILITIES_META_KEY]: this.#clientCapabilities,
         },
       },

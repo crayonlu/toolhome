@@ -35,7 +35,7 @@ const localConfigSchema = z.object({
     ) {
       context.addIssue({
         code: 'custom',
-        message: 'MCP Home URL must be an HTTP(S) origin',
+        message: 'ToolHome URL must be an HTTP(S) origin',
       });
     }
   }),
@@ -49,10 +49,10 @@ interface GlobalOptions {
 }
 
 const program = new Command()
-  .name('mcp-home')
-  .description('Complete CLI for the MCP Home Control API')
+  .name('toolhome')
+  .description('Complete CLI for the ToolHome Control API')
   .version(packageVersion())
-  .option('--url <url>', 'MCP Home base URL')
+  .option('--url <url>', 'ToolHome base URL')
   .option('--key <key>', 'Control API key')
   .option('--output <format>', 'human or json', parseOutput, 'human');
 
@@ -477,12 +477,21 @@ function loadLocalConfig(): z.infer<typeof localConfigSchema> | null {
   try {
     return localConfigSchema.parse(JSON.parse(readFileSync(configPath(), 'utf8')));
   } catch {
-    return null;
+    // 0.4.0 moved the default location from ~/.config/mcp-home to ~/.config/toolhome;
+    // read a pre-existing legacy config so saved logins survive the rename.
+    if (process.env.MCP_HOME_CONFIG) return null;
+    try {
+      return localConfigSchema.parse(
+        JSON.parse(readFileSync(resolve(homedir(), '.config', 'mcp-home', 'config.json'), 'utf8')),
+      );
+    } catch {
+      return null;
+    }
   }
 }
 
 function configPath(): string {
-  return process.env.MCP_HOME_CONFIG ?? resolve(homedir(), '.config', 'mcp-home', 'config.json');
+  return process.env.MCP_HOME_CONFIG ?? resolve(homedir(), '.config', 'toolhome', 'config.json');
 }
 
 function readJson(path: string): unknown {

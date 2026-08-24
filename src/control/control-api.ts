@@ -470,7 +470,7 @@ function errorResponse(error: unknown, logger: Logger): Response {
         'content-type': 'application/json',
         'cache-control': 'no-store',
         ...(appError.status === 401
-          ? { 'www-authenticate': 'Bearer realm="mcp-home-control"' }
+          ? { 'www-authenticate': 'Bearer realm="toolhome-control"' }
           : {}),
       },
     },

@@ -14,15 +14,15 @@ export class ControlSessionService {
   readonly #key: Uint8Array;
 
   constructor(masterKey: string) {
-    this.#key = createHash('sha256').update(`mcp-home.session:${masterKey}`).digest();
+    this.#key = createHash('sha256').update(`toolhome.session:${masterKey}`).digest();
   }
 
   async issue(principal: AuthPrincipal): Promise<string> {
     return new SignJWT({ name: principal.name, kind: 'control' })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(principal.id)
-      .setIssuer('mcp-home')
-      .setAudience('mcp-home-control')
+      .setIssuer('toolhome')
+      .setAudience('toolhome-control')
       .setIssuedAt()
       .setExpirationTime('8h')
       .sign(this.#key);
@@ -32,8 +32,8 @@ export class ControlSessionService {
     try {
       const result = await jwtVerify(token, this.#key, {
         algorithms: ['HS256'],
-        issuer: 'mcp-home',
-        audience: 'mcp-home-control',
+        issuer: 'toolhome',
+        audience: 'toolhome-control',
       });
       const claims = claimsSchema.parse(result.payload);
       return { id: claims.sub, name: claims.name, kind: 'control', scope: null };

@@ -73,8 +73,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/crayonlu/mcp-home:latest
-            ghcr.io/crayonlu/mcp-home:${{ github.ref_name }}
+            ghcr.io/crayonlu/toolhome:latest
+            ghcr.io/crayonlu/toolhome:${{ github.ref_name }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.repository }}
