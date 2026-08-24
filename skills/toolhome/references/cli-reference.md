@@ -161,7 +161,8 @@ toolhome api POST /api/v1/servers -d '{"slug":"test",...}'
 
 Server-side CLI hosting (Form A): register a CLI once on the ToolHome host; client
 machines never install or log in to it. Records live in the `clis` table and execs are
-audited in the events stream.
+audited in the events stream. The web console has a parallel **CLIs** page
+(register/edit/delete, enable toggle, and a Run sheet that streams exec output).
 
 ```bash
 # registry (Control API, admin key)

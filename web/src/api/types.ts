@@ -3,6 +3,44 @@ export type Transport =
   | { type: 'streamable-http'; url: string }
   | { type: 'stdio'; command: string; args?: string[] }
 
+// ── CLI plane (Form A) ────────────────────────────────────────────────────
+
+export type CliExecutionMode = 'host' | 'docker'
+
+export interface CliAllowList {
+  allow: string[][]
+  deny: string[][]
+}
+
+export interface CliProbe {
+  command: string
+  args: string[]
+}
+
+export interface CliRecord {
+  id: string
+  slug: string
+  name: string
+  command: string
+  executionMode: CliExecutionMode
+  allowList: CliAllowList
+  interactive: boolean
+  credentialId: string | null
+  probe: CliProbe | null
+  enabled: boolean
+  timeoutMs: number
+  maxOutputBytes: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CliStatus {
+  installed: boolean | null
+  version: string | null
+  loggedIn: boolean
+  lastCheckedAt: string
+}
+
 export interface ServerSettings {
   connectTimeoutMs: number
   requestTimeoutMs: number

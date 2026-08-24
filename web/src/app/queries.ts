@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api, postNdjson } from '../api/client'
 import type {
   ApiKeyRecord,
   AuthorizeResult,
   CallStats,
   CallSeries,
   CapabilitySnapshot,
+  CliRecord,
+  CliStatus,
   CredentialRecord,
   CredentialTestResult,
   Diagnostics,
@@ -24,6 +26,62 @@ import type {
 
 export function useOverview() {
   return useQuery({ queryKey: ['overview'], queryFn: () => api.get<Overview>('/api/v1/overview') })
+}
+
+// ── CLI plane ─────────────────────────────────────────────────────────────
+
+export function useClis() {
+  return useQuery({
+    queryKey: ['clis'],
+    queryFn: () => api.get<CliRecord[]>('/api/v1/clis'),
+    refetchInterval: 8000,
+  })
+}
+
+export function useCreateCli() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: unknown) => api.post<CliRecord>('/api/v1/clis', input),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['clis'] })
+    },
+  })
+}
+
+export function useUpdateCli() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: unknown }) =>
+      api.patch<CliRecord>(`/api/v1/clis/${id}`, input),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['clis'] })
+    },
+  })
+}
+
+export function useDeleteCli() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.delete(`/api/v1/clis/${id}`),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['clis'] })
+    },
+  })
+}
+
+export function useCliExec() {
+  return useMutation({
+    mutationFn: ({ slug, input }: { slug: string; input: unknown }) =>
+      postNdjson(`/cli/${slug}/exec`, input),
+  })
+}
+
+export function useCliStatus(slug: string | undefined) {
+  return useQuery({
+    queryKey: ['cli-status', slug],
+    queryFn: () => api.get<CliStatus>(`/cli/${slug}/status`),
+    enabled: Boolean(slug),
+  })
 }
 
 export function useServers() {

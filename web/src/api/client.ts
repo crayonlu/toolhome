@@ -76,6 +76,37 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
-  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
+  put: <T>(path: string) => request<T>('PUT', path),
   delete: <T>(path: string) => request<T>('DELETE', path),
+}
+
+/** POST a JSON body and collect an NDJSON response into parsed frames. */
+export async function postNdjson<T>(path: string, body?: unknown): Promise<T[]> {
+  const key = readKey()
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(key ? { Authorization: `Bearer ${key}` } : {}),
+    },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = `Request failed (${response.status})`
+    let code: string | undefined
+    try {
+      const data = JSON.parse(text) as { error?: { code?: string; message?: string } }
+      if (data.error?.message) message = data.error.message
+      code = data.error?.code
+    } catch {
+      // non-JSON error body
+    }
+    throw new ApiError(response.status, message, code)
+  }
+  const text = await response.text()
+  return text
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as T)
 }

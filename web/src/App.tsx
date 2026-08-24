@@ -10,6 +10,7 @@ import { LoginPage } from './features/login/LoginPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ServersPage } from './features/servers/ServersPage'
 import { ServerDetailPage } from './features/servers/ServerDetailPage'
+import { ClisPage } from './features/clis/ClisPage'
 import { CredentialsPage } from './features/credentials/CredentialsPage'
 import { AccessKeysPage } from './features/access-keys/AccessKeysPage'
 import { EndpointsPage } from './features/endpoints/EndpointsPage'
@@ -63,6 +64,7 @@ export function App() {
                   <Route index element={<DashboardPage />} />
                   <Route path="/servers" element={<ServersPage />} />
                   <Route path="/servers/:id" element={<ServerDetailPage />} />
+                  <Route path="/clis" element={<ClisPage />} />
                   <Route path="/credentials" element={<CredentialsPage />} />
                   <Route path="/access-keys" element={<AccessKeysPage />} />
                   <Route path="/market" element={<MarketPage />} />

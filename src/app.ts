@@ -153,7 +153,8 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
       if (
         path.startsWith('/api') ||
         path.startsWith('/mcp') ||
-        path.startsWith('/cli') ||
+        path === '/cli' ||
+        path.startsWith('/cli/') ||
         path.startsWith('/manage') ||
         path.startsWith('/oauth') ||
         path === '/healthz' ||

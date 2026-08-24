@@ -11,6 +11,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  SquareTerminal,
   Sun,
   SunMoon,
 } from 'lucide-react'
@@ -32,6 +33,7 @@ interface NavItem {
 const desktopNav: NavItem[] = [
   { to: '/', key: 'nav.overview', icon: LayoutDashboard, end: true },
   { to: '/servers', key: 'nav.servers', icon: Server },
+  { to: '/clis', key: 'nav.clis', icon: SquareTerminal },
   { to: '/calls', key: 'nav.calls', icon: PhoneCall },
   { to: '/credentials', key: 'nav.credentials', icon: KeyRound },
   { to: '/access-keys', key: 'nav.accessKeys', icon: Link2 },
@@ -131,6 +133,7 @@ function SideNav() {
 function pageKeyFor(path: string): string {
   if (path === '/') return 'nav.overview'
   if (path.startsWith('/servers')) return 'nav.servers'
+  if (path.startsWith('/clis')) return 'nav.clis'
   if (path.startsWith('/credentials')) return 'nav.credentials'
   if (path.startsWith('/access-keys')) return 'nav.accessKeys'
   if (path.startsWith('/market')) return 'nav.market'
