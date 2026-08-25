@@ -2,6 +2,7 @@ import { Activity, KeyRound, Link2, Server, SquareTerminal } from 'lucide-react'
 import { Link } from 'react-router';
 import { useOverview } from '../../app/queries';
 import { useI18n } from '../../i18n';
+import { usePlane } from '../../app/plane';
 import { CopyButton } from '../../components/ui/CopyButton';
 import { StatusDot } from '../../components/ui/Badge';
 
@@ -36,6 +37,7 @@ function StatCard({
 
 export function DashboardPage() {
   const { t } = useI18n();
+  const { plane } = usePlane();
   const { data: overview, isLoading } = useOverview();
 
   if (isLoading || !overview) {
@@ -55,19 +57,39 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <StatCard
-          label={t('nav.servers')}
-          value={`${servers.ready}/${servers.total}`}
-          icon={Server}
-          to="/servers"
-          tone={servers.unhealthy > 0 ? 'danger' : 'success'}
-        />
-        <StatCard
-          label={t('nav.clis')}
-          value={overview.clis.total}
-          icon={SquareTerminal}
-          to="/clis"
-        />
+        {plane === 'mcp' ? (
+          <>
+            <StatCard
+              label={t('nav.servers')}
+              value={`${servers.ready}/${servers.total}`}
+              icon={Server}
+              to="/servers"
+              tone={servers.unhealthy > 0 ? 'danger' : 'success'}
+            />
+            <StatCard
+              label={t('nav.clis')}
+              value={overview.clis.total}
+              icon={SquareTerminal}
+              to="/clis"
+            />
+          </>
+        ) : (
+          <>
+            <StatCard
+              label={t('nav.clis')}
+              value={overview.clis.total}
+              icon={SquareTerminal}
+              to="/clis"
+              tone={overview.clis.enabled === 0 ? 'neutral' : 'success'}
+            />
+            <StatCard
+              label={t('nav.servers')}
+              value={`${servers.ready}/${servers.total}`}
+              icon={Server}
+              to="/servers"
+            />
+          </>
+        )}
         <StatCard
           label={t('nav.credentials')}
           value={overview.credentials}

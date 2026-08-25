@@ -15,10 +15,11 @@ import {
   Sun,
   SunMoon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMediaQuery } from './useMediaQuery';
 import { useTheme } from './theme';
+import { usePlane, type Plane } from './plane';
 import { useI18n } from '../i18n';
 import { clearKey } from '../api/client';
 import { Sheet } from '../components/ui/Sheet';
@@ -28,12 +29,14 @@ interface NavItem {
   key: string;
   icon: typeof Server;
   end?: boolean;
+  /** Planes the item belongs to; undefined means every plane. */
+  planes?: Plane[];
 }
 
 const desktopNav: NavItem[] = [
   { to: '/', key: 'nav.overview', icon: LayoutDashboard, end: true },
-  { to: '/servers', key: 'nav.servers', icon: Server },
-  { to: '/clis', key: 'nav.clis', icon: SquareTerminal },
+  { to: '/servers', key: 'nav.servers', icon: Server, planes: ['mcp'] },
+  { to: '/clis', key: 'nav.clis', icon: SquareTerminal, planes: ['cli'] },
   { to: '/calls', key: 'nav.calls', icon: PhoneCall },
   { to: '/credentials', key: 'nav.credentials', icon: KeyRound },
   { to: '/access-keys', key: 'nav.accessKeys', icon: Link2 },
@@ -44,12 +47,25 @@ const desktopNav: NavItem[] = [
   { to: '/settings', key: 'nav.settings', icon: Settings },
 ];
 
-const mobileTabs: NavItem[] = desktopNav.filter((item) =>
-  ['/', '/servers', '/credentials'].includes(item.to),
-);
-const mobileMore: NavItem[] = desktopNav.filter(
-  (item) => !mobileTabs.some((tab) => tab.to === item.to),
-);
+/** Pages that exist per plane; switching flips between the pair. */
+const PLANE_REDIRECTS: Record<Plane, Record<string, string>> = {
+  mcp: { '/clis': '/servers' },
+  cli: { '/servers': '/clis' },
+};
+
+function navFor(plane: Plane): NavItem[] {
+  return desktopNav.filter((item) => item.planes === undefined || item.planes.includes(plane));
+}
+
+/** Mobile bottom bar shows the first three nav entries of the active plane. */
+function mobileTabsFor(plane: Plane): NavItem[] {
+  return navFor(plane).slice(0, 3);
+}
+
+function mobileMoreFor(plane: Plane): NavItem[] {
+  const tabs = mobileTabsFor(plane);
+  return navFor(plane).filter((item) => !tabs.some((tab) => tab.to === item.to));
+}
 
 function ThemeSwitch() {
   const { theme, setTheme } = useTheme();
@@ -76,6 +92,40 @@ function LangSwitch() {
     >
       {locale === 'zh' ? 'EN' : '中'}
     </button>
+  );
+}
+
+function PlaneSwitch() {
+  const { t } = useI18n();
+  const { plane, setPlane } = usePlane();
+  const options: { value: Plane; label: string; icon: typeof Server }[] = [
+    { value: 'mcp', label: 'MCP', icon: Server },
+    { value: 'cli', label: 'CLI', icon: SquareTerminal },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label={t('nav.plane')}
+      className="flex h-8 items-center gap-0.5 bg-surface-2 p-0.5"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={plane === option.value}
+          onClick={() => setPlane(option.value)}
+          className={`flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 text-xs font-medium transition-colors ${
+            plane === option.value
+              ? 'bg-surface text-ink shadow-sm'
+              : 'text-ink-3 hover:text-ink-2'
+          }`}
+        >
+          <option.icon className="size-3.5" />
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -107,11 +157,11 @@ function Brand() {
   );
 }
 
-function SideNav() {
+function SideNav({ plane }: { plane: Plane }) {
   const { t } = useI18n();
   return (
     <nav className="flex flex-1 flex-col gap-0.5 px-2">
-      {desktopNav.map((item) => (
+      {navFor(plane).map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
@@ -150,15 +200,28 @@ export function AppShell() {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const location = useLocation();
   const navigate = useNavigate();
+  const { plane } = usePlane();
   const [moreOpen, setMoreOpen] = useState(false);
   const pageKey = useMemo(() => pageKeyFor(location.pathname), [location.pathname]);
+
+  // A plane switch must not strand the user on the other plane's pages.
+  useEffect(() => {
+    const redirect =
+      PLANE_REDIRECTS[plane][location.pathname] ??
+      (location.pathname.startsWith('/servers/') && plane === 'cli' ? '/clis' : undefined) ??
+      (location.pathname.startsWith('/servers') && plane === 'cli' ? '/clis' : undefined);
+    if (redirect !== undefined) navigate(redirect, { replace: true });
+  }, [plane, location.pathname, navigate]);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
       {!isMobile && (
         <aside className="glass hidden w-[200px] shrink-0 flex-col md:flex">
           <Brand />
-          <SideNav />
+          <div className="px-3 pb-1">
+            <PlaneSwitch />
+          </div>
+          <SideNav plane={plane} />
           <div className="flex items-center gap-1 border-t border-ink-3/10 p-2">
             <ThemeSwitch />
             <LangSwitch />
@@ -176,6 +239,12 @@ export function AppShell() {
           <LangSwitch />
         </header>
 
+        {isMobile && (
+          <div className="px-4 pb-1">
+            <PlaneSwitch />
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-5 md:px-8 md:py-6">
             <Outlet />
@@ -185,7 +254,7 @@ export function AppShell() {
 
       {isMobile && (
         <nav className="glass-strong fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-ink-3/10 pb-[env(safe-area-inset-bottom)]">
-          {mobileTabs.map((item) => (
+          {mobileTabsFor(plane).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -213,7 +282,7 @@ export function AppShell() {
 
       <Sheet open={moreOpen} onOpenChange={setMoreOpen} title={t('nav.more')} side="bottom">
         <div className="flex flex-col gap-0.5 pb-[env(safe-area-inset-bottom)]">
-          {mobileMore.map((item) => (
+          {mobileMoreFor(plane).map((item) => (
             <button
               key={item.to}
               type="button"

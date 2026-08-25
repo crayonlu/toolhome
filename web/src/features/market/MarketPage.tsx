@@ -4,11 +4,11 @@ import { useNavigate } from 'react-router';
 import { useMarket, useMarketUninstall } from '../../app/queries';
 import { api } from '../../api/client';
 import { useI18n } from '../../i18n';
+import { usePlane } from '../../app/plane';
 import { useToast } from '../../components/ui/Toast';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { Badge, EmptyState, StatusDot } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { TabsView } from '../../components/ui/Tabs';
 import { InstallSheet } from './InstallSheet';
 import { isInstallSuccessful, type InstallStatus } from './install-job';
 import type { MarketEntry } from '../../api/types';
@@ -32,9 +32,9 @@ export function MarketPage() {
   const { toast } = useToast();
   const confirm = useConfirm();
   const navigate = useNavigate();
+  const { plane } = usePlane();
   const { data: entries, isLoading, refetch } = useMarket();
   const uninstall = useMarketUninstall();
-  const [plane, setPlane] = useState<'mcp' | 'cli'>('mcp');
   const [installTarget, setInstallTarget] = useState<MarketEntry | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const planeEntries = (entries ?? []).filter((entry) => (entry.plane ?? 'mcp') === plane);
@@ -98,23 +98,10 @@ export function MarketPage() {
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('market.title')}</h1>
+        <span className="text-[13px] font-medium text-ink-3">
+          {plane === 'mcp' ? 'MCP' : 'CLI'}
+        </span>
       </div>
-
-      <TabsView
-        tabs={[
-          {
-            value: 'mcp',
-            label: `MCP (${(entries ?? []).filter((entry) => (entry.plane ?? 'mcp') === 'mcp').length})`,
-          },
-          {
-            value: 'cli',
-            label: `CLI (${(entries ?? []).filter((entry) => entry.plane === 'cli').length})`,
-          },
-        ]}
-        value={plane}
-        onChange={(next) => setPlane(next as 'mcp' | 'cli')}
-        render={() => null}
-      />
 
       {isLoading ? (
         <div className="text-sm text-ink-3">{t('common.loading')}</div>

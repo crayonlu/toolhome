@@ -13,6 +13,7 @@ export const zh: Dict = {
   'nav.calls': '调用',
   'nav.settings': '设置',
   'nav.more': '更多',
+  'nav.plane': '能力平面',
   'app.title': 'ToolHome',
   'common.add': '添加',
   'common.create': '创建',

@@ -2,6 +2,7 @@ import { Activity } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useCallSeries, useCallStats, useCalls, useServers } from '../../app/queries';
 import { useI18n } from '../../i18n';
+import { usePlane } from '../../app/plane';
 import { Badge, EmptyState } from '../../components/ui/Badge';
 import { SelectField, type SelectOption } from '../../components/ui/SelectField';
 import { CallChart } from '../../components/ui/CallChart';
@@ -45,6 +46,7 @@ function summaryCard(label: string, value: string, sub?: string) {
 
 export function CallsPage() {
   const { t, locale } = useI18n();
+  const { plane } = usePlane();
   const { data: servers } = useServers();
   const [serverId, setServerId] = useState('');
   const [endpointType, setEndpointType] = useState('');
@@ -66,10 +68,10 @@ export function CallsPage() {
   }, [windowMs]);
 
   const filter = {
-    server_id: serverId || undefined,
+    server_id: plane === 'cli' ? undefined : serverId || undefined,
     tool: tool || undefined,
     status: status || undefined,
-    endpoint_type: endpointType || undefined,
+    endpoint_type: endpointType || (plane === 'cli' ? 'cli' : undefined),
     from,
   };
   const calls = useCalls({ limit: '50', ...filter });
@@ -119,23 +121,32 @@ export function CallsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <SelectField
-          label={t('calls.server')}
-          value={serverId}
-          onChange={setServerId}
-          options={serverOptions}
-        />
+        {plane === 'mcp' && (
+          <SelectField
+            label={t('calls.server')}
+            value={serverId}
+            onChange={setServerId}
+            options={serverOptions}
+          />
+        )}
         <SelectField
           label={t('calls.type')}
           value={endpointType}
           onChange={setEndpointType}
-          options={[
-            { value: '', label: 'all' },
-            { value: 'aggregate', label: `MCP · ${t('calls.aggregate')}` },
-            { value: 'individual', label: `MCP · ${t('calls.individual')}` },
-            { value: 'management', label: 'MCP · management' },
-            { value: 'cli', label: 'CLI exec' },
-          ]}
+          options={
+            plane === 'cli'
+              ? [
+                  { value: '', label: `CLI exec · ${t('common.all')}` },
+                  { value: 'aggregate', label: `MCP · ${t('calls.aggregate')}` },
+                  { value: 'individual', label: `MCP · ${t('calls.individual')}` },
+                ]
+              : [
+                  { value: '', label: 'all' },
+                  { value: 'aggregate', label: `MCP · ${t('calls.aggregate')}` },
+                  { value: 'individual', label: `MCP · ${t('calls.individual')}` },
+                  { value: 'management', label: 'MCP · management' },
+                ]
+          }
         />
         <label className="flex flex-col gap-1.5">
           <span className="text-[13px] font-medium text-ink-2">{t('calls.tool')}</span>

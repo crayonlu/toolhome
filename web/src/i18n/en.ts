@@ -13,6 +13,7 @@ export const en: Dict = {
   'nav.calls': 'Calls',
   'nav.settings': 'Settings',
   'nav.more': 'More',
+  'nav.plane': 'Plane',
   'app.title': 'ToolHome',
   'common.add': 'Add',
   'common.create': 'Create',
