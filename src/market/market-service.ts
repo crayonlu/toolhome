@@ -167,11 +167,7 @@ export class MarketService {
   async close(): Promise<void> {
     this.#closing = true;
     for (const child of this.#installerProcesses) {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        // process already exited
-      }
+      this.#killInstallerProcess(child, 'SIGTERM');
     }
     await Promise.allSettled([...this.#activeTasks]);
   }
@@ -1014,6 +1010,22 @@ export class MarketService {
     };
   }
 
+  #killInstallerProcess(
+    child: import('node:child_process').ChildProcess,
+    signal: NodeJS.Signals,
+  ): void {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      try {
+        child.kill(signal);
+      } catch {
+        // process already exited
+      }
+    }
+  }
+
   #runInstallerCommand(
     job: LiveJob,
     command: string,
@@ -1022,6 +1034,7 @@ export class MarketService {
   ): Promise<{ code: number; output: string }> {
     return new Promise((resolve) => {
       const child = spawn(command, args, {
+        detached: true,
         env: { ...process.env, ...(options.env ?? {}) },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -1033,7 +1046,10 @@ export class MarketService {
       };
       child.stdout.on('data', (chunk) => append(String(chunk)));
       child.stderr.on('data', (chunk) => append(String(chunk)));
-      const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? 300_000);
+      const timer = setTimeout(
+        () => this.#killInstallerProcess(child, 'SIGKILL'),
+        options.timeoutMs ?? 300_000,
+      );
       const cleanup = (): void => {
         this.#installerProcesses.delete(child);
       };
