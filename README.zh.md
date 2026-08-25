@@ -2,14 +2,14 @@
 
 > **🌐 中文 · [English](README.md)**
 
-ToolHome 是一个单用户、可自托管的 Remote MCP 控制面与协议网关。你在一个地方管理上游 MCP Server 和凭据，再把稳定的标准 MCP URL 配置给任意 Harness。
+ToolHome 是一个单用户、可自托管的 MCP 与 Hosted CLI 控制面。你可以在一个地方管理上游 MCP 能力、Azure `az`、GitHub `gh`、Tailscale 等平台 CLI，以及加密保存的凭据。
 
-它同时暴露两种数据面入口：
+它同时暴露两种数据面：
 
-- `POST /mcp`：聚合所有已启用 Server，名称和 URI 自动命名空间化。
-- `POST /mcp/{server_slug}`：单个 Server 的独立入口，保留原始名称、URI 和扩展语义。
+- **MCP**：`POST /mcp` 聚合启用的 Server；`POST /mcp/{server_slug}` 保留单个 Server 的原始名称和扩展语义。
+- **Hosted CLI**：`POST /cli/{slug}/exec` 在 ToolHome 宿主机或固定版本的 sibling 容器中执行受 allow-list 限制的 argv，并以 NDJSON 流返回 stdout/stderr/exit；`GET /cli/{slug}/status` 执行声明的状态探针。
 
-ToolHome 不为 Claude Code、Codex、Cursor 或其他 Harness 编写专属适配层。Harness 只需支持标准 Streamable HTTP MCP 与 Bearer 鉴权。
+ToolHome 不为 Claude Code、Codex、Cursor 或其他 Harness 编写专属适配层。MCP 客户端使用标准 Streamable HTTP 与 Bearer 鉴权；管理面和 Hosted CLI 使用 Control Key。
 
 ## AI Agent 快速开始
 
@@ -43,14 +43,12 @@ npx skills add crayonlu/toolhome -g -y
 
 ## 项目边界
 
-ToolHome 管理两类 MCP：
+ToolHome 有两个一等平面：
 
-- Remote-native：上游本身提供 Streamable HTTP，可位于公网、内网或其他服务器。
-- Home-hosted：由 ToolHome 所在机器启动并托管的 stdio MCP，再通过远程入口提供给 Harness。
+- **MCP**：Remote-native 使用 Streamable HTTP；Home-hosted 使用 ToolHome 宿主机上的 stdio。
+- **Hosted CLI**：CLI 必须代表外部平台或 SaaS 控制面，例如 Azure `az`、GitHub `gh`、Tailscale。它支持完整 argv、stdin、timeout、输出限制、allow/deny 规则和 NDJSON 输出。`npm`、`go`、`cargo`、`uv`、`pipx`、`docker`、`cursor` 等安装器或开发工具只是实现细节，不是 Hosted CLI 产品。
 
-必须运行在 Harness 所在本机、依赖该机器浏览器或桌面状态的 MCP 不属于本项目。例如 Harness 笔记本上的 Chrome DevTools MCP 应继续由该 Harness 本地配置。若它运行在 ToolHome 宿主机上，则可以作为 Home-hosted Server 管理，但它访问的是宿主机环境。
-
-首版明确不包含多租户、Profile、Workspace 或 Project 管理。
+必须运行在 Harness 所在本机、依赖该机器浏览器或桌面状态的 MCP/CLI 仍属于 Harness 本地配置。首版明确不包含多租户、Profile、Workspace 或 Project 管理。
 
 ## 协议能力
 
@@ -107,14 +105,14 @@ Vite 会把 `/api` 请求代理到 `http://127.0.0.1:3344`。
 ```bash
 export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
 export MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_PUBLIC_URL="https://mcp.example.com"
-export MCP_HOME_ALLOWED_HOSTS="mcp.example.com"
+export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
+export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
 ```
 
 生产环境应在 ToolHome 前放置 HTTPS 反向代理。OAuth 回调、URL-based Client ID 和远程 Harness 接入都应使用稳定的 HTTPS `MCP_HOME_PUBLIC_URL`。该值必须是规范 origin，不能包含路径、查询、fragment 或用户名密码。数据保存在 `/data/toolhome.sqlite`，SQLite 使用 WAL 模式。
 
-Home-hosted stdio Server 的 npm 包通过 **Market** 安装到数据卷（`MCP_HOME_MARKET_DIR`，默认 `<dataDir>/market`），无需修改 Dockerfile。不要在容器内直接运行任意 npm 包：请通过 Market 的 curated 目录安装。
+Market 安装器隐藏在 curated 能力条目之后，可以使用 npm、Go、GitHub Release archive、uvx 或 Docker recipe；产品表面仍然只有 MCP Server 和 Hosted 平台 CLI。Uvx 条目直接执行持久化 ToolHome 工具目录中的已安装二进制，不会在每次刷新时重新解析包。Docker 条目需要 `docker-compose.yml` 中的 Docker socket 挂载。Hosted CLI 的状态目录由条目显式声明为 Docker named volume，ToolHome 不会默认挂载用户本机的认证目录。
 
 ## CI/CD
 
@@ -128,18 +126,19 @@ GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 或打 tag 时�
 
 ## Market
 
-Market 提供 curated 的常用 MCP 目录，一键安装并自动创建 Credential 与 Server：
+Market 提供 curated 的 MCP Server 和 Hosted 平台 CLI。一键安装会创建加密 Credential，以及对应的 Server 或 CLI record：
 
 ```bash
 npm run cli -- market list
 npm run cli -- market install resend --set RESEND_API_KEY=re_xxx
-npm run cli -- market uninstall resend
+npm run cli -- market install gh-cli --set GH_TOKEN=ghp_xxx
+npm run cli -- market uninstall gh-cli
 ```
 
-- 条目分 `remote`（官方 Streamable HTTP 端点，OAuth 或 API key）、`home-stdio`（npm 包，装到 Market 目录）与 `uvx`（PyPI 上的 Python 包）。
-- 安装 home-stdio 条目会执行 `npm install --prefix <marketDir>`，并创建 env Credential 与对应 Server。
-- 安装 uvx 条目会执行 `uv tool install`，并创建 command 为 `uvx <package>` 的 Server（uv 运行时已内置进 Docker 镜像）。
-- Web 控制台的 Market 页提供图形化安装/卸载；OAuth 条目安装后需走授权流。
+- MCP 条目可以是 remote、npm、uvx 或 Docker 实现。
+- Hosted CLI 条目包含 Azure `az`、GitHub `gh`、Tailscale；它们固定平台 artifact 版本，声明 argv allow-list，并声明如何把已保存凭据映射给 CLI。
+- CLI 可以使用 bearer token（`GH_TOKEN`）、Env Credential 中选定的变量（Azure service principal），或共享 MCP OAuth 授权流程完成后的 access token。
+- Web 控制台的 Market 页提供相同流程；MCP/CLI 是平面 switch，切换后只显示当前平面的条目和记录。
 
 ## Harness 接入
 
@@ -147,7 +146,7 @@ npm run cli -- market uninstall resend
 
 ```json
 {
-  "url": "https://mcp.example.com/mcp",
+  "url": "https://tool.cyncyn.xyz/mcp",
   "headers": {
     "Authorization": "Bearer mch_mcp_..."
   }
@@ -158,7 +157,7 @@ npm run cli -- market uninstall resend
 
 ```json
 {
-  "url": "https://mcp.example.com/mcp/github",
+  "url": "https://tool.cyncyn.xyz/mcp/github",
   "headers": {
     "Authorization": "Bearer mch_mcp_..."
   }
@@ -194,7 +193,7 @@ Secret 应放入 Credential，而不是 Remote URL query 或 stdio arguments；�
 
 ```bash
 npm run cli -- auth login \
-  --url https://mcp.example.com \
+  --url https://tool.cyncyn.xyz \
   --control-key "$MCP_HOME_CONTROL_KEY"
 
 npm run cli -- server list
@@ -242,7 +241,7 @@ npm run cli -- config import backup.json
 | `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | 数据库首次启动时写入的 Control Key                | 首次必填                |
 | `MCP_HOME_ALLOWED_HOSTS`         | 允许的 Host，逗号分隔                             | Public URL hostname     |
 | `MCP_HOME_LOG_LEVEL`             | `debug`、`info`、`warn`、`error`                  | `info`                  |
-| `MCP_HOME_WEB_DIR`               | Web 控制台静态文件目录                            | 未启用                 |
+| `MCP_HOME_WEB_DIR`               | Web 控制台静态文件目录                            | 未启用                  |
 | `MCP_HOME_MARKET_DIR`            | Market npm 安装目录                               | `<dataDir>/market`      |
 | `MCP_HOME_OAUTH_URL_CLIENT_ID`   | 是否启用 URL-based Client Metadata                | `true`                  |
 

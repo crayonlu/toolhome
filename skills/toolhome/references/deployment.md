@@ -10,7 +10,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3344:3344"
+      - '127.0.0.1:3344:3344'
     volumes:
       - ./data:/data
     env_file: .env
@@ -20,8 +20,8 @@ services:
 # .env
 MCP_HOME_MASTER_KEY=<32+ char random>
 MCP_HOME_BOOTSTRAP_CONTROL_KEY=<32+ char random, different from master>
-MCP_HOME_PUBLIC_URL=https://mcp.example.com
-MCP_HOME_ALLOWED_HOSTS=mcp.example.com
+MCP_HOME_PUBLIC_URL=https://tool.cyncyn.xyz
+MCP_HOME_ALLOWED_HOSTS=tool.cyncyn.xyz
 ```
 
 ```bash
@@ -38,11 +38,11 @@ The repo includes `.github/workflows/ci.yml` with three jobs:
 
 ### Required GitHub Secrets
 
-| Secret | Value |
-|---|---|
-| `DEPLOY_HOST` | Server IP or hostname |
-| `DEPLOY_USER` | SSH username |
-| `DEPLOY_KEY` | SSH private key (no passphrase) |
+| Secret        | Value                           |
+| ------------- | ------------------------------- |
+| `DEPLOY_HOST` | Server IP or hostname           |
+| `DEPLOY_USER` | SSH username                    |
+| `DEPLOY_KEY`  | SSH private key (no passphrase) |
 
 ### GHCR Package Visibility
 
@@ -79,12 +79,14 @@ location / {
 
 ## Data Persistence
 
-| Path | Content | Persist? |
-|---|---|---|
-| `/data/toolhome.sqlite` | SQLite database (servers, credentials, keys, events) | Yes (volume) |
-| `/data/market/` | Market-installed npm packages | Yes (volume) |
-| `/app/dist/` | Server code (baked in image) | No (image) |
-| `/app/web-dist/` | Web console (baked in image) | No (image) |
+| Path                                                | Content                                                                            | Persist?     |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------ |
+| `/data/toolhome.sqlite`                             | SQLite database (servers, credentials, keys, events)                               | Yes (volume) |
+| `/data/market/`                                     | Market-installed npm/Go/GitHub Release artifacts                                                  | Yes (volume) |
+| `/data/.uv/`                                        | uv tool and cache state                                                            | Yes (volume) |
+| Docker named volumes declared by Hosted CLI entries | Platform CLI state, such as Azure `/root/.azure` or Tailscale `/var/lib/tailscale` | Yes (volume) |
+| `/app/dist/`                                        | Server code (baked in image)                                                       | No (image)   |
+| `/app/web-dist/`                                    | Web console (baked in image)                                                       | No (image)   |
 
 ## Local Development
 
@@ -102,3 +104,5 @@ docker compose up -d --build   # build image locally
 ```
 
 The Dockerfile copies prebuilt `dist/` and `web/dist/` from the build context (not built in-container, to avoid memory issues on low-RAM hosts).
+
+For Docker-backed MCP or Hosted CLI entries, keep the Docker socket mount and `group_add` configuration. The curated Tailscale CLI uses userspace networking inside the sibling container and persists its identity in the declared named volume, so it does not require a host TUN device, extra capabilities, or a special network mode. A basic `docker run --rm -i` container is sufficient for the curated read-only platform CLI entries.

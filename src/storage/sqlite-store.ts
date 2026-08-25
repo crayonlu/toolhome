@@ -17,6 +17,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import {
+  assertCliRuntimeConfig,
   cliRecordSchema,
   createCliInputSchema,
   updateCliInputSchema,
@@ -87,7 +88,11 @@ const cliRowSchema = z.object({
   command: z.string(),
   execution_mode: z.string(),
   entrypoint: z.string().nullable(),
+  auth_strategy: z.string().nullable(),
+  container_volumes_json: z.string().nullable(),
+  platform: z.string().nullable(),
   allow_list_json: z.string(),
+  credential_bindings_json: z.string(),
   interactive: z.number(),
   credential_id: z.string().nullable(),
   probe_json: z.string().nullable(),
@@ -514,7 +519,11 @@ export class SqliteStore implements Store {
         command TEXT NOT NULL,
         execution_mode TEXT NOT NULL CHECK (execution_mode IN ('host', 'docker')),
         entrypoint TEXT,
+        auth_strategy TEXT NOT NULL DEFAULT 'none',
+        container_volumes_json TEXT NOT NULL DEFAULT '[]',
+        platform TEXT,
         allow_list_json TEXT NOT NULL,
+        credential_bindings_json TEXT NOT NULL DEFAULT '{}',
         interactive INTEGER NOT NULL,
         credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
         probe_json TEXT,
@@ -535,10 +544,27 @@ export class SqliteStore implements Store {
         "ALTER TABLE api_keys ADD COLUMN scope TEXT DEFAULT 'admin' CHECK (scope IN ('admin', 'agent'))",
       );
     }
-    // Guarded migration for existing CLI records created before Docker entrypoints were stored.
+    // Guarded migration for existing CLI records created before Docker entrypoints and
+    // platform credential bindings were stored.
     const cliColumns = this.#db.prepare('PRAGMA table_info(clis)').all() as { name: string }[];
     if (!cliColumns.some((column) => column.name === 'entrypoint')) {
       this.#db.exec('ALTER TABLE clis ADD COLUMN entrypoint TEXT');
+    }
+    if (!cliColumns.some((column) => column.name === 'auth_strategy')) {
+      this.#db.exec("ALTER TABLE clis ADD COLUMN auth_strategy TEXT NOT NULL DEFAULT 'none'");
+    }
+    if (!cliColumns.some((column) => column.name === 'container_volumes_json')) {
+      this.#db.exec(
+        "ALTER TABLE clis ADD COLUMN container_volumes_json TEXT NOT NULL DEFAULT '[]'",
+      );
+    }
+    if (!cliColumns.some((column) => column.name === 'platform')) {
+      this.#db.exec('ALTER TABLE clis ADD COLUMN platform TEXT');
+    }
+    if (!cliColumns.some((column) => column.name === 'credential_bindings_json')) {
+      this.#db.exec(
+        "ALTER TABLE clis ADD COLUMN credential_bindings_json TEXT NOT NULL DEFAULT '{}'",
+      );
     }
     // Guarded migration: install_jobs created before the 'updating' status have a
     // CHECK constraint without it. SQLite cannot alter CHECK constraints, so
@@ -816,6 +842,7 @@ export class SqliteStore implements Store {
       throw new AppError('cli_slug_conflict', 'CLI slug exists', 409);
     }
     const timestamp = now();
+    assertCliRuntimeConfig(valid);
     const record = cliRecordSchema.parse({
       id: randomUUID(),
       ...valid,
@@ -825,9 +852,10 @@ export class SqliteStore implements Store {
     this.#db
       .prepare(
         `INSERT INTO clis
-        (id, slug, name, command, execution_mode, entrypoint, allow_list_json, interactive, credential_id,
-         probe_json, enabled, timeout_ms, max_output_bytes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, slug, name, command, execution_mode, entrypoint, auth_strategy, container_volumes_json,
+         platform, allow_list_json, credential_bindings_json, interactive, credential_id, probe_json,
+         enabled, timeout_ms, max_output_bytes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -836,7 +864,11 @@ export class SqliteStore implements Store {
         record.command,
         record.executionMode,
         record.entrypoint,
+        record.authStrategy,
+        JSON.stringify(record.containerVolumes),
+        record.platform,
         JSON.stringify(record.allowList),
+        JSON.stringify(record.credentialBindings),
         record.interactive ? 1 : 0,
         record.credentialId,
         record.probe === null ? null : JSON.stringify(record.probe),
@@ -858,9 +890,11 @@ export class SqliteStore implements Store {
       ...patch,
       updatedAt: now(),
     });
+    assertCliRuntimeConfig(record);
     this.#db
       .prepare(
-        `UPDATE clis SET name = ?, command = ?, execution_mode = ?, entrypoint = ?, allow_list_json = ?,
+        `UPDATE clis SET name = ?, command = ?, execution_mode = ?, entrypoint = ?, auth_strategy = ?,
+         container_volumes_json = ?, platform = ?, allow_list_json = ?, credential_bindings_json = ?,
          interactive = ?, credential_id = ?, probe_json = ?, enabled = ?, timeout_ms = ?,
          max_output_bytes = ?, updated_at = ? WHERE id = ?`,
       )
@@ -869,7 +903,11 @@ export class SqliteStore implements Store {
         record.command,
         record.executionMode,
         record.entrypoint,
+        record.authStrategy,
+        JSON.stringify(record.containerVolumes),
+        record.platform,
         JSON.stringify(record.allowList),
+        JSON.stringify(record.credentialBindings),
         record.interactive ? 1 : 0,
         record.credentialId,
         record.probe === null ? null : JSON.stringify(record.probe),
@@ -1792,9 +1830,14 @@ export class SqliteStore implements Store {
       command: parsed.command,
       executionMode: parsed.execution_mode as 'host' | 'docker',
       entrypoint: parsed.entrypoint,
+      authStrategy: (parsed.auth_strategy ?? 'none') as
+        'none' | 'azure-service-principal' | 'tailscale-auth-key',
+      containerVolumes: parseJson(parsed.container_volumes_json ?? '[]'),
+      platform: parsed.platform,
       allowList: parseJson(parsed.allow_list_json),
       interactive: parsed.interactive === 1,
       credentialId: parsed.credential_id,
+      credentialBindings: parseJson(parsed.credential_bindings_json),
       probe: parsed.probe_json === null ? null : parseJson(parsed.probe_json),
       enabled: parsed.enabled === 1,
       timeoutMs: parsed.timeout_ms,

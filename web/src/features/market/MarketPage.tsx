@@ -117,7 +117,7 @@ export function MarketPage() {
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{entry.name}</span>
                     {(entry.plane ?? 'mcp') === 'cli' ? (
-                      <Badge tone="accent">{entry.kind === 'cli-image' ? 'image' : 'binary'}</Badge>
+                      <Badge tone="accent">{entry.platform ?? 'CLI'}</Badge>
                     ) : entry.kind === 'remote' ? (
                       <Badge tone="accent">{t('market.remote')}</Badge>
                     ) : (

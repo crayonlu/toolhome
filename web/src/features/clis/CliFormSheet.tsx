@@ -15,6 +15,8 @@ export interface CliFormValue {
   command: string;
   executionMode: 'host' | 'docker';
   entrypoint: string | null;
+  authStrategy: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
+  containerVolumes: { source: string; target: string; readOnly: boolean }[];
   allowList: { allow: string[][]; deny: string[][] };
   interactive: boolean;
   credentialId: string | null;
@@ -55,6 +57,11 @@ export function CliFormSheet({
   const [command, setCommand] = useState('');
   const [executionMode, setExecutionMode] = useState<'host' | 'docker'>('host');
   const [entrypoint, setEntrypoint] = useState('');
+  const [authStrategy, setAuthStrategy] = useState<
+    'none' | 'azure-service-principal' | 'tailscale-auth-key'
+  >('none');
+  const [volumeSource, setVolumeSource] = useState('');
+  const [volumeTarget, setVolumeTarget] = useState('');
   const [allowText, setAllowText] = useState('');
   const [denyText, setDenyText] = useState('');
   const [interactive, setInteractive] = useState(false);
@@ -73,6 +80,9 @@ export function CliFormSheet({
     setCommand(initial?.command ?? '');
     setExecutionMode(initial?.executionMode ?? 'host');
     setEntrypoint(initial?.entrypoint ?? '');
+    setAuthStrategy(initial?.authStrategy ?? 'none');
+    setVolumeSource(initial?.containerVolumes[0]?.source ?? '');
+    setVolumeTarget(initial?.containerVolumes[0]?.target ?? '');
     setAllowText(formatRules(initial?.allowList.allow ?? []));
     setDenyText(formatRules(initial?.allowList.deny ?? []));
     setInteractive(initial?.interactive ?? false);
@@ -92,6 +102,11 @@ export function CliFormSheet({
       command,
       executionMode,
       entrypoint: entrypoint || null,
+      authStrategy,
+      containerVolumes:
+        volumeSource && volumeTarget
+          ? [{ source: volumeSource, target: volumeTarget, readOnly: false }]
+          : [],
       allowList: { allow: parseRules(allowText), deny: parseRules(denyText) },
       interactive,
       credentialId: credentialId || null,
@@ -136,13 +151,41 @@ export function CliFormSheet({
           ]}
         />
         {executionMode === 'docker' && (
-          <TextField
-            label={t('cli.entrypoint')}
-            value={entrypoint}
-            onChange={setEntrypoint}
-            mono
-            placeholder="gh"
-          />
+          <>
+            <TextField
+              label={t('cli.entrypoint')}
+              value={entrypoint}
+              onChange={setEntrypoint}
+              mono
+              placeholder="gh"
+            />
+            <SelectField
+              label="Authentication bootstrap"
+              value={authStrategy}
+              onChange={(value) =>
+                setAuthStrategy(value as 'none' | 'azure-service-principal' | 'tailscale-auth-key')
+              }
+              options={[
+                { value: 'none', label: 'None' },
+                { value: 'azure-service-principal', label: 'Azure service principal' },
+                { value: 'tailscale-auth-key', label: 'Tailscale auth key' },
+              ]}
+            />
+            <TextField
+              label="Docker named volume source"
+              value={volumeSource}
+              onChange={setVolumeSource}
+              mono
+              placeholder="toolhome-cli-state"
+            />
+            <TextField
+              label="State volume target"
+              value={volumeTarget}
+              onChange={setVolumeTarget}
+              mono
+              placeholder="/root/.config/tool"
+            />
+          </>
         )}
         <TextareaField
           label={t('cli.allowRules')}

@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  installArtifact,
+  installerForEntry,
+  type InstalledArtifactRuntime,
+  type InstallerCommandOptions,
+  type InstallerContext,
+} from './installers.js';
 import { marketCatalog, entryPlane, type MarketEntry } from './catalog.js';
 import { AppError } from '../domain/errors.js';
 import type { ControlService } from '../control/control-service.js';
@@ -9,10 +15,13 @@ import type {
   CredentialPayload,
   InstallJobRecord,
   MarketInstallation,
+  ServerRecord,
   SecureActionRecord,
+  TransportConfig,
 } from '../domain/models.js';
 import type { Store } from '../storage/store.js';
 import type { SecureActionService } from '../security/secure-action.js';
+import { validateCliCredentialBindings } from '../security/credential-materializer.js';
 import { fingerprint } from '../upstream/stable-json.js';
 
 export interface InstallJobView {
@@ -42,6 +51,9 @@ export class MarketService {
   readonly #marketDir: string;
   readonly #uvEnv: Record<string, string>;
   readonly #jobs = new Map<string, LiveJob>();
+  readonly #activeTasks = new Set<Promise<void>>();
+  readonly #installerProcesses = new Set<import('node:child_process').ChildProcess>();
+  #closing = false;
   /** One in-flight mutating operation per catalog entry in this process. */
   readonly #entryOperations = new Map<string, EntryOperation>();
 
@@ -85,7 +97,9 @@ export class MarketService {
         installed,
         installedVersion: installation?.entryVersion ?? null,
         updateAvailable:
-          installation !== null && (entry.version ?? 'unpinned') !== installation.entryVersion,
+          installation !== null &&
+          ((entry.version ?? 'unpinned') !== installation.entryVersion ||
+            fingerprint(entry) !== installation.recipeRevision),
       };
     });
   }
@@ -105,7 +119,9 @@ export class MarketService {
           entryId: entry.id,
           installedVersion: installation!.entryVersion,
           catalogVersion,
-          updateAvailable: catalogVersion !== installation!.entryVersion,
+          updateAvailable:
+            catalogVersion !== installation!.entryVersion ||
+            fingerprint(entry) !== installation!.recipeRevision,
           latestUpstream: await this.#latestUpstream(entry),
         };
       }),
@@ -125,14 +141,18 @@ export class MarketService {
       throw new AppError('market_not_installed', `Market entry "${id}" is not installed`, 404);
     }
     const catalogVersion = entry.version ?? 'unpinned';
-    if (installation.entryVersion === catalogVersion) {
+    const recipeRevision = fingerprint(entry);
+    if (
+      installation.entryVersion === catalogVersion &&
+      installation.recipeRevision === recipeRevision
+    ) {
       return { jobId: null, status: 'up_to_date' };
     }
     const job = this.#createJob(entry, entry.version ?? null, 'updating');
     this.#claimEntry(entry.id, job.record.id);
     try {
       this.#update(job, { step: 'starting update' });
-      void this.#runUpdate(entry, installation, job);
+      this.#trackTask(this.#runUpdate(entry, installation, job));
       return { jobId: job.record.id, status: 'updating' };
     } catch (error) {
       this.#releaseEntry(entry.id, job.record.id);
@@ -142,6 +162,18 @@ export class MarketService {
 
   installations() {
     return this.#store.listInstallations();
+  }
+
+  async close(): Promise<void> {
+    this.#closing = true;
+    for (const child of this.#installerProcesses) {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // process already exited
+      }
+    }
+    await Promise.allSettled([...this.#activeTasks]);
   }
 
   getJob(jobId: string): InstallJobView {
@@ -248,11 +280,19 @@ export class MarketService {
 
   #startInstall(entry: MarketEntry, values: Record<string, string>, job: LiveJob): void {
     this.#update(job, { step: 'starting' });
-    if (entryPlane(entry) === 'cli') {
-      void this.#runCliInstall(entry, values, job);
-    } else {
-      void this.#runInstall(entry, values, job);
-    }
+    const task =
+      entryPlane(entry) === 'cli'
+        ? this.#runCliInstall(entry, values, job)
+        : this.#runInstall(entry, values, job);
+    this.#trackTask(task);
+  }
+
+  #trackTask(task: Promise<void>): void {
+    this.#activeTasks.add(task);
+    void task.then(
+      () => this.#activeTasks.delete(task),
+      () => this.#activeTasks.delete(task),
+    );
   }
 
   /** Completes a URL-mode secret action and resumes the linked install job. */
@@ -423,11 +463,8 @@ export class MarketService {
   // ── internals ───────────────────────────────────────────────────────────
 
   /**
-   * CLI-plane install: no package fetch happens here — `cli-image` entries run
-   * a pinned upstream image per exec and `cli-binary` entries use a host
-   * binary, so "installing" means creating the Env credential (values become
-   * injected variables), the CLI record (allow-list from the catalog), and
-   * the installation marker.
+   * CLI-plane install: provision the credential and CLI record, verifying or
+   * fetching an installer-backed artifact before writing the installation marker.
    */
   async #runCliInstall(entry: MarketEntry, values: Record<string, string>, job: LiveJob) {
     let credential: ReturnType<ControlService['createCredential']> | undefined;
@@ -439,27 +476,29 @@ export class MarketService {
         name: entry.name,
         payload: this.#credentialPayload(entry, values),
       });
+      this.#update(job, { step: 'installing CLI artifact' });
+      const cliArtifact = installerForEntry(entry);
+      const installedRuntime =
+        cliArtifact === null
+          ? null
+          : await installArtifact(cliArtifact, this.#installerContext(job));
       this.#update(job, { step: 'creating CLI record' });
-      const command = entry.kind === 'cli-image' ? (entry.image ?? '') : (entry.bin ?? entry.id);
-      const allowList = entry.allowList;
-      if (allowList === undefined || allowList.allow.length === 0) {
-        throw new AppError(
-          'market_cli_allow_list_required',
-          `Market CLI entry "${entry.id}" must declare an argv allow-list`,
-          400,
-        );
-      }
+      const projection = this.#cliProjection(entry, installedRuntime);
       const provisioned = this.#store.transaction(() => {
         const createdCli = this.#store.createCli({
           slug: entry.id,
           name: entry.name,
-          command,
-          executionMode: entry.kind === 'cli-image' ? 'docker' : 'host',
-          entrypoint: entry.kind === 'cli-image' ? (entry.entrypoint ?? null) : null,
-          allowList,
+          command: projection.command,
+          executionMode: projection.executionMode,
+          entrypoint: projection.entrypoint,
+          authStrategy: projection.authStrategy,
+          containerVolumes: projection.containerVolumes,
+          allowList: projection.allowList,
           interactive: false,
           credentialId: credential!.id,
-          probe: entry.probe ?? { command, args: ['--version'] },
+          credentialBindings: entry.credentialBindings ?? {},
+          platform: entry.platform ?? null,
+          probe: entry.probe ?? { command: projection.command, args: ['--version'] },
           enabled: true,
           timeoutMs: 120_000,
           maxOutputBytes: 64 * 1024,
@@ -591,6 +630,7 @@ export class MarketService {
     job: LiveJob,
     patch: { step?: string; output?: string; result?: unknown; error?: string },
   ) {
+    if (this.#closing) return;
     if (patch.step !== undefined) {
       this.#updateRecord(job, { step: patch.step });
     }
@@ -603,94 +643,34 @@ export class MarketService {
   }
 
   #updateRecord(job: LiveJob, patch: Partial<InstallJobRecord>) {
+    if (this.#closing) return;
     job.record = this.#store.updateInstallJob(job.record.id, patch);
   }
 
   async #runInstall(entry: MarketEntry, values: Record<string, string>, job: LiveJob) {
+    let credential: ReturnType<ControlService['createCredential']> | undefined;
+    let server: ServerRecord | undefined;
+    let installation: MarketInstallation | undefined;
     try {
-      if (entry.kind === 'home-stdio') {
-        await this.#npmInstall(entry, job);
-      } else if (entry.kind === 'uvx') {
-        await this.#uvxInstall(entry, job);
-      } else if (entry.kind === 'docker') {
-        await this.#dockerInstall(entry, job);
-      }
+      const artifact = installerForEntry(entry);
+      const installedRuntime =
+        artifact === null ? null : await installArtifact(artifact, this.#installerContext(job));
       this.#update(job, { step: 'creating credential' });
-      const credential = this.#service.createCredential({
+      credential = this.#service.createCredential({
         name: entry.name,
         payload: this.#credentialPayload(entry, values),
       });
       this.#update(job, { step: 'creating server' });
-      let result: unknown;
-      if (entry.kind === 'home-stdio') {
-        const args = (entry.argsTemplate ?? []).map((argument) =>
-          argument.replace(/\$\{([^}]+)\}/g, (_, key: string) => values[key] ?? ''),
-        );
-        result = {
-          server: await this.#service.createServer({
-            slug: entry.id,
-            name: entry.name,
-            kind: 'home',
-            transport: { type: 'stdio', command: this.#binPath(entry), args },
-            credentialId: credential.id,
-            enabled: true,
-          }),
-          credential,
-        };
-      } else if (entry.kind === 'uvx') {
-        const args = [
-          entry.package ?? entry.id,
-          ...(entry.argsTemplate ?? []).map((argument) =>
-            argument.replace(/\$\{([^}]+)\}/g, (_, key: string) => values[key] ?? ''),
-          ),
-        ];
-        result = {
-          server: await this.#service.createServer({
-            slug: entry.id,
-            name: entry.name,
-            kind: 'home',
-            transport: {
-              type: 'stdio',
-              command: 'uvx',
-              args,
-              env: { ...this.#uvEnv },
-            },
-            credentialId: credential.id,
-            enabled: true,
-          }),
-          credential,
-        };
-      } else if (entry.kind === 'docker') {
-        result = {
-          server: await this.#service.createServer({
-            slug: entry.id,
-            name: entry.name,
-            kind: 'home',
-            transport: {
-              type: 'stdio',
-              command: 'docker',
-              args: ['run', '--rm', '-i', entry.image ?? ''],
-            },
-            credentialId: credential.id,
-            enabled: true,
-          }),
-          credential,
-        };
-      } else {
-        result = {
-          server: await this.#service.createServer({
-            slug: entry.id,
-            name: entry.name,
-            kind: 'remote',
-            transport: { type: 'streamable-http', url: entry.url ?? '' },
-            credentialId: credential.id,
-            enabled: true,
-          }),
-          credential,
-        };
-      }
-      const server = (result as { server: { id: string } }).server;
-      const installation = this.#store.createInstallation({
+      const transport = this.#serverTransport(entry, installedRuntime, values);
+      server = await this.#service.createServer({
+        slug: entry.id,
+        name: entry.name,
+        kind: installedRuntime === null ? 'remote' : 'home',
+        transport,
+        credentialId: credential.id,
+        enabled: true,
+      });
+      installation = this.#store.createInstallation({
         source: 'curated',
         entryId: entry.id,
         entryVersion: entry.version ?? 'unpinned',
@@ -699,9 +679,25 @@ export class MarketService {
         targetId: server.id,
         credentialId: credential.id,
       });
-      this.#update(job, { step: 'done', result: { ...(result as object), installation } });
+      const result = { server, credential, installation };
+      this.#update(job, { step: 'done', result });
       this.#updateRecord(job, { status: 'completed', resultReference: installation.id });
     } catch (error) {
+      try {
+        if (installation !== undefined) this.#store.deleteInstallation(installation.id);
+      } catch {
+        // Preserve the original install error if compensation also fails.
+      }
+      try {
+        if (server !== undefined) await this.#service.deleteServer(server.id);
+      } catch {
+        // Preserve the original install error if compensation also fails.
+      }
+      try {
+        if (credential !== undefined) await this.#service.deleteCredential(credential.id);
+      } catch {
+        // Preserve the original install error if compensation also fails.
+      }
       try {
         this.#update(job, {
           step: 'failed',
@@ -768,47 +764,35 @@ export class MarketService {
 
   async #runUpdate(entry: MarketEntry, installation: MarketInstallation, job: LiveJob) {
     try {
-      // Remote entries carry no package; only the recipe revision can drift.
-      if (entryPlane(entry) === 'cli') {
-        if (entry.kind === 'cli-image') {
-          await this.#dockerInstall(entry, job, true);
+      const artifact = installerForEntry(entry);
+      const installedRuntime =
+        artifact === null
+          ? null
+          : await installArtifact(artifact, this.#installerContext(job), { force: true });
+
+      if (installation.targetType === 'server') {
+        const server = this.#store.getServer(installation.targetId);
+        if (server === null) {
+          throw new AppError('server_not_found', 'Installed Market server not found', 404);
         }
-        this.#update(job, { step: 'updating installation record' });
-        const updated = this.#store.updateInstallation(installation.id, {
-          entryVersion: entry.version ?? 'unpinned',
-          recipeRevision: fingerprint(entry),
-        });
-        this.#update(job, {
-          step: 'done',
-          result: {
-            entryId: entry.id,
-            version: updated.entryVersion,
-            targetType: installation.targetType,
-            targetId: installation.targetId,
-          },
-        });
-      } else {
-        if (entry.kind === 'home-stdio') {
-          await this.#npmInstall(entry, job);
-        } else if (entry.kind === 'uvx') {
-          await this.#uvxInstall(entry, job);
-        } else if (entry.kind === 'docker') {
-          await this.#dockerInstall(entry, job, true);
-        }
-        this.#update(job, { step: 'updating installation record' });
-        const updated = this.#store.updateInstallation(installation.id, {
-          entryVersion: entry.version ?? 'unpinned',
-          recipeRevision: fingerprint(entry),
-        });
+        const values = this.#credentialEnvValues(installation.credentialId);
+        const transport = this.#serverTransport(entry, installedRuntime, values);
+        this.#update(job, { step: 'updating server runtime' });
+        await this.#service.updateServer(server.id, { transport });
         this.#update(job, { step: 'restarting server' });
-        // The package is already updated; a failed restart must not roll the job
-        // back — the old process (or a later manual restart) keeps serving.
+        // A failed restart must not roll the job back — the updated target is
+        // persisted and can be restarted manually later.
         let restartError: string | undefined;
         try {
-          await this.#service.restartServer(installation.targetId);
+          await this.#service.restartServer(server.id);
         } catch (error) {
           restartError = error instanceof Error ? error.message : String(error);
         }
+        this.#update(job, { step: 'updating installation record' });
+        const updated = this.#store.updateInstallation(installation.id, {
+          entryVersion: entry.version ?? 'unpinned',
+          recipeRevision: fingerprint(entry),
+        });
         this.#update(job, {
           step: 'done',
           result: {
@@ -817,6 +801,45 @@ export class MarketService {
             targetType: installation.targetType,
             targetId: installation.targetId,
             ...(restartError === undefined ? {} : { restartError }),
+          },
+        });
+      } else {
+        const cli = this.#store.getCli(installation.targetId);
+        if (cli === null) {
+          throw new AppError('cli_not_found', 'Installed Market CLI not found', 404);
+        }
+        const credentialPayload =
+          installation.credentialId === null
+            ? null
+            : this.#store.getCredentialPayload(installation.credentialId);
+        if (credentialPayload !== null) {
+          validateCliCredentialBindings(credentialPayload, entry.credentialBindings ?? {});
+        }
+        const projection = this.#cliProjection(entry, installedRuntime);
+        this.#update(job, { step: 'updating CLI runtime' });
+        this.#store.updateCli(cli.id, {
+          command: projection.command,
+          executionMode: projection.executionMode,
+          entrypoint: projection.entrypoint,
+          authStrategy: projection.authStrategy,
+          containerVolumes: projection.containerVolumes,
+          allowList: projection.allowList,
+          credentialBindings: entry.credentialBindings ?? {},
+          platform: entry.platform ?? null,
+          probe: entry.probe ?? { command: projection.command, args: ['--version'] },
+        });
+        this.#update(job, { step: 'updating installation record' });
+        const updated = this.#store.updateInstallation(installation.id, {
+          entryVersion: entry.version ?? 'unpinned',
+          recipeRevision: fingerprint(entry),
+        });
+        this.#update(job, {
+          step: 'done',
+          result: {
+            entryId: entry.id,
+            version: updated.entryVersion,
+            targetType: installation.targetType,
+            targetId: installation.targetId,
           },
         });
       }
@@ -866,14 +889,92 @@ export class MarketService {
     }
   }
 
-  #binPath(entry: MarketEntry): string {
-    return join(this.#marketDir, 'node_modules', '.bin', entry.bin ?? entry.id);
+  #serverTransport(
+    entry: MarketEntry,
+    runtime: InstalledArtifactRuntime | null,
+    values: Record<string, string>,
+  ): TransportConfig {
+    if (runtime === null) {
+      return {
+        type: 'streamable-http',
+        url: entry.url ?? '',
+        protocolMode: 'auto',
+        allowSseFallback: false,
+        headers: {},
+      };
+    }
+    const args = (entry.argsTemplate ?? []).map((argument) =>
+      argument.replace(/\$\{([^}]+)\}/g, (_, key: string) => values[key] ?? ''),
+    );
+    if (runtime.executionMode === 'host') {
+      return {
+        type: 'stdio',
+        command: runtime.command,
+        args,
+        env: entry.kind === 'uvx' ? { ...this.#uvEnv } : {},
+        protocolMode: 'auto',
+      };
+    }
+    return {
+      type: 'stdio',
+      command: 'docker',
+      args: [
+        'run',
+        '--rm',
+        '-i',
+        runtime.command,
+        ...(runtime.entrypoint === null ? [] : [runtime.entrypoint]),
+      ],
+      env: {},
+      protocolMode: 'auto',
+    };
   }
 
-  #pinnedPackage(entry: MarketEntry, kind: 'npm' | 'uvx'): string {
-    const base = entry.package ?? entry.id;
-    if (!entry.version) return base;
-    return kind === 'uvx' ? `${base}==${entry.version}` : `${base}@${entry.version}`;
+  #credentialEnvValues(credentialId: string | null): Record<string, string> {
+    if (credentialId === null) return {};
+    const payload = this.#store.getCredentialPayload(credentialId);
+    return payload?.type === 'env' ? payload.variables : {};
+  }
+
+  #cliProjection(
+    entry: MarketEntry,
+    runtime: InstalledArtifactRuntime | null = null,
+  ): {
+    command: string;
+    executionMode: 'host' | 'docker';
+    entrypoint: string | null;
+    authStrategy: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
+    containerVolumes: { source: string; target: string; readOnly: boolean }[];
+    allowList: { allow: string[][]; deny: string[][] };
+  } {
+    const artifact = installerForEntry(entry);
+    const allowList = entry.allowList;
+    if (allowList === undefined || allowList.allow.length === 0) {
+      throw new AppError(
+        'market_cli_allow_list_required',
+        `Market CLI entry "${entry.id}" must declare an argv allow-list`,
+        400,
+      );
+    }
+    return {
+      command:
+        runtime?.command ??
+        (entry.kind === 'cli-image'
+          ? artifact?.type === 'docker'
+            ? artifact.image
+            : (entry.image ?? '')
+          : (entry.bin ?? entry.id)),
+      executionMode: runtime?.executionMode ?? (entry.kind === 'cli-image' ? 'docker' : 'host'),
+      entrypoint:
+        runtime?.entrypoint ?? (entry.kind === 'cli-image' ? (entry.entrypoint ?? null) : null),
+      authStrategy: entry.cliRuntime?.authStrategy ?? 'none',
+      containerVolumes: (entry.cliRuntime?.containerVolumes ?? []).map((volume) => ({
+        source: volume.source,
+        target: volume.target,
+        readOnly: volume.readOnly ?? false,
+      })),
+      allowList,
+    };
   }
 
   #credentialPayload(entry: MarketEntry, values: Record<string, string>): CredentialPayload {
@@ -903,14 +1004,28 @@ export class MarketService {
     }
   }
 
-  #runDocker(
-    args: string[],
+  #installerContext(job: LiveJob): InstallerContext {
+    return {
+      marketDir: this.#marketDir,
+      uvEnv: this.#uvEnv,
+      update: (patch) => this.#update(job, patch),
+      runCommand: (command, args, options) =>
+        this.#runInstallerCommand(job, command, args, options),
+    };
+  }
+
+  #runInstallerCommand(
     job: LiveJob,
-    step: string,
+    command: string,
+    args: string[],
+    options: InstallerCommandOptions = {},
   ): Promise<{ code: number; output: string }> {
     return new Promise((resolve) => {
-      this.#update(job, { step });
-      const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(command, args, {
+        env: { ...process.env, ...(options.env ?? {}) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      this.#installerProcesses.add(child);
       let output = '';
       const append = (chunk: string) => {
         output = `${output}${chunk}`.slice(-4000);
@@ -918,131 +1033,19 @@ export class MarketService {
       };
       child.stdout.on('data', (chunk) => append(String(chunk)));
       child.stderr.on('data', (chunk) => append(String(chunk)));
-      const timer = setTimeout(() => child.kill('SIGKILL'), 600_000);
+      const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? 300_000);
+      const cleanup = (): void => {
+        this.#installerProcesses.delete(child);
+      };
       child.on('close', (code) => {
         clearTimeout(timer);
+        cleanup();
         resolve({ code: code ?? 1, output });
       });
       child.on('error', (error) => {
         clearTimeout(timer);
-        resolve({ code: 1, output: `docker: ${error.message}` });
-      });
-    });
-  }
-
-  async #dockerInstall(entry: MarketEntry, job: LiveJob, force = false): Promise<void> {
-    const image = entry.image;
-    if (!image) {
-      throw new AppError('market_install_failed', 'Docker entry is missing an image', 500);
-    }
-    const inspect = force
-      ? { code: 1, output: '' }
-      : await this.#runDocker(['image', 'inspect', image], job, `docker image inspect ${image}`);
-    if (inspect.code === 0) return;
-    const pull = await this.#runDocker(['pull', image], job, `docker pull ${image}`);
-    if (pull.code === 0) return;
-    if (entry.dockerfile !== undefined) {
-      const directory = join(this.#marketDir, 'dockerfiles', entry.id);
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'Dockerfile'), entry.dockerfile);
-      const build = await this.#runDocker(
-        ['build', '-t', image, directory],
-        job,
-        `docker build -t ${image}`,
-      );
-      if (build.code === 0) return;
-      throw new AppError(
-        'market_install_failed',
-        `Docker image ${image} could not be pulled or built: ${pull.output.slice(-240)}`,
-        500,
-      );
-    }
-    throw new AppError(
-      'market_install_failed',
-      `Docker image ${image} could not be pulled: ${pull.output.slice(-240)}`,
-      500,
-    );
-  }
-
-  #uvxInstall(entry: MarketEntry, job: LiveJob): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.#update(job, { step: `uv tool install ${this.#pinnedPackage(entry, 'uvx')}` });
-      const args = ['tool', 'install', this.#pinnedPackage(entry, 'uvx')];
-      for (const dependency of entry.uvWith ?? []) args.push('--with', dependency);
-      const child = spawn('uv', args, {
-        env: { ...process.env, ...this.#uvEnv },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let output = '';
-      const append = (chunk: string) => {
-        output = `${output}${chunk}`.slice(-4000);
-        this.#update(job, { output });
-      };
-      child.stdout.on('data', (chunk) => append(String(chunk)));
-      child.stderr.on('data', (chunk) => append(String(chunk)));
-      const timer = setTimeout(() => child.kill('SIGKILL'), 300_000);
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else {
-          this.#update(job, { output });
-          reject(
-            new AppError(
-              'market_install_failed',
-              `uv tool install failed (${code}): ${output.slice(-400)}`,
-              500,
-            ),
-          );
-        }
-      });
-      child.on('error', (error) => {
-        clearTimeout(timer);
-        reject(new AppError('market_install_failed', `Failed to run uv: ${error.message}`, 500));
-      });
-    });
-  }
-
-  #npmInstall(entry: MarketEntry, job: LiveJob): Promise<void> {
-    return new Promise((resolve, reject) => {
-      mkdirSync(this.#marketDir, { recursive: true });
-      this.#update(job, { step: `npm install ${this.#pinnedPackage(entry, 'npm')}` });
-      const child = spawn(
-        'npm',
-        [
-          'install',
-          '--prefix',
-          this.#marketDir,
-          '--no-audit',
-          '--no-fund',
-          this.#pinnedPackage(entry, 'npm'),
-        ],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
-      );
-      let output = '';
-      const append = (chunk: string) => {
-        output = `${output}${chunk}`.slice(-4000);
-        this.#update(job, { output });
-      };
-      child.stdout.on('data', (chunk) => append(String(chunk)));
-      child.stderr.on('data', (chunk) => append(String(chunk)));
-      const timer = setTimeout(() => child.kill('SIGKILL'), 300_000);
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else {
-          this.#update(job, { output });
-          reject(
-            new AppError(
-              'market_install_failed',
-              `npm install failed (${code}): ${output.slice(-400)}`,
-              500,
-            ),
-          );
-        }
-      });
-      child.on('error', (error) => {
-        clearTimeout(timer);
-        reject(new AppError('market_install_failed', `Failed to run npm: ${error.message}`, 500));
+        cleanup();
+        resolve({ code: 1, output: `${command}: ${error.message}` });
       });
     });
   }

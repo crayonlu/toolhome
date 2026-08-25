@@ -9,6 +9,7 @@ import {
   jsonResponse,
 } from '../support/runtime.js';
 import { credentialRecordSchema, serverRecordSchema } from '../../src/domain/models.js';
+import { marketCatalog, type MarketEntry } from '../../src/market/catalog.js';
 
 interface MarketItem {
   id: string;
@@ -23,6 +24,21 @@ async function marketList(runtime: Parameters<typeof controlRequest>[0], control
   ) as unknown as MarketItem[];
 }
 
+async function waitForInstallJob(
+  runtime: Parameters<typeof controlRequest>[0],
+  controlKey: string,
+  jobId: string,
+): Promise<{ status: string; result?: unknown; error?: string }> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    const job = (await jsonResponse(
+      await controlRequest(runtime, controlKey, 'GET', `/api/v1/market/install/${jobId}`),
+    )) as { status: string; result?: unknown; error?: string };
+    if (!['installing', 'updating'].includes(job.status)) return job;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for Market job ${jobId}`);
+}
+
 async function installEntry(
   runtime: Parameters<typeof controlRequest>[0],
   controlKey: string,
@@ -32,16 +48,41 @@ async function installEntry(
   const started = (await jsonResponse(
     await controlRequest(runtime, controlKey, 'POST', `/api/v1/market/${id}/install`, { values }),
   )) as { jobId: string };
-  for (;;) {
-    const job = (await jsonResponse(
-      await controlRequest(runtime, controlKey, 'GET', `/api/v1/market/install/${started.jobId}`),
-    )) as { status: string; result?: unknown; error?: string };
-    if (job.status !== 'installing') {
-      if (job.status === 'failed') throw new Error(job.error ?? 'install failed');
-      return job.result;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  const job = await waitForInstallJob(runtime, controlKey, started.jobId);
+  if (job.status === 'failed') throw new Error(job.error ?? 'install failed');
+  return job.result;
+}
+
+function createFakeDocker(options: { pullDelaySeconds?: number } = {}): {
+  argsLog: string;
+  close(): void;
+} {
+  const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-market-secure-action-docker-'));
+  const dockerPath = join(fakeBin, 'docker');
+  const argsLog = join(fakeBin, 'docker-args.log');
+  const pullDelay =
+    options.pullDelaySeconds === undefined ? '' : `sleep ${options.pullDelaySeconds}\n  `;
+  writeFileSync(
+    dockerPath,
+    `#!/bin/sh
+echo "$@" >> "${argsLog}"
+case "$1 $2" in
+  "image inspect") exit 1 ;;
+  "pull ghcr.io/cli/cli:2.97.0") ${pullDelay}exit 0 ;;
+esac
+exit 0
+`,
+  );
+  chmodSync(dockerPath, 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  return {
+    argsLog,
+    close() {
+      process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true });
+    },
+  };
 }
 
 describe('market', () => {
@@ -119,6 +160,109 @@ describe('market', () => {
     } finally {
       vi.restoreAllMocks();
       await close();
+    }
+  });
+
+  it('cleans up an MCP server and credential when the installation marker cannot be written', async () => {
+    const { runtime, controlKey, close } = createTestRuntime();
+    const createInstallation = runtime.store.createInstallation.bind(runtime.store);
+    vi.spyOn(runtime.store, 'createInstallation').mockImplementation((input) => {
+      if (input.entryId === 'context7') throw new Error('installation write failed');
+      return createInstallation(input);
+    });
+    try {
+      await expect(
+        installEntry(runtime, controlKey, 'context7', { CONTEXT7_API_KEY: 'ctx-test' }),
+      ).rejects.toThrow('installation write failed');
+      expect(
+        (await jsonResponse(
+          await controlRequest(runtime, controlKey, 'GET', '/api/v1/servers'),
+        )) as unknown[],
+      ).toHaveLength(0);
+      expect(
+        (await jsonResponse(
+          await controlRequest(runtime, controlKey, 'GET', '/api/v1/credentials'),
+        )) as unknown[],
+      ).toHaveLength(0);
+    } finally {
+      vi.restoreAllMocks();
+      await close();
+    }
+  });
+
+  it('pulls a hosted CLI image before provisioning the CLI target', async () => {
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-market-cli-image-'));
+    const dockerPath = join(fakeBin, 'docker');
+    const argsLog = join(fakeBin, 'docker-args.log');
+    writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+echo "$@" >> "${argsLog}"
+case "$1 $2" in
+  "image inspect") exit 1 ;;
+  "pull ghcr.io/cli/cli:2.97.0") exit 0 ;;
+esac
+exit 0
+`,
+    );
+    chmodSync(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const { runtime, controlKey, close } = createTestRuntime();
+    try {
+      const result = (await installEntry(runtime, controlKey, 'gh-cli', {
+        GH_TOKEN: 'gh-test-token',
+      })) as { cliId: string };
+      expect(result.cliId).toBeTruthy();
+      expect(readFileSync(argsLog, 'utf8')).toContain('pull ghcr.io/cli/cli:2.97.0');
+    } finally {
+      await close();
+      process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the installed host binary path for installer-backed hosted CLIs', async () => {
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-market-cli-go-'));
+    const goPath = join(fakeBin, 'go');
+    writeFileSync(goPath, '#!/bin/sh\nexit 0\n');
+    chmodSync(goPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const entry: MarketEntry = {
+      id: 'platform-tool-cli',
+      name: 'Platform Tool CLI',
+      description: 'A test platform CLI backed by Go',
+      category: 'devtools',
+      plane: 'cli',
+      platform: 'example',
+      kind: 'cli-binary',
+      installer: {
+        type: 'go' as const,
+        module: 'github.com/example/platform-tool',
+        bin: 'platform-tool',
+        version: 'v1.0.0',
+      },
+      credential: { type: 'env' as const },
+      requires: [],
+      allowList: { allow: [['version']], deny: [] },
+    };
+    marketCatalog.push(entry);
+    const { runtime, controlKey, close } = createTestRuntime();
+    try {
+      const result = (await installEntry(runtime, controlKey, entry.id)) as { cliId: string };
+      const clis = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'GET', '/api/v1/clis'),
+      )) as { id: string; command: string; executionMode: string }[];
+      expect(clis.find((cli) => cli.id === result.cliId)).toMatchObject({
+        command: '/tmp/toolhome-test-market/go/bin/platform-tool',
+        executionMode: 'host',
+      });
+    } finally {
+      await close();
+      marketCatalog.splice(marketCatalog.indexOf(entry), 1);
+      process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true });
     }
   });
 
@@ -359,13 +503,14 @@ describe('market', () => {
   });
 
   it('allows only one concurrent completion for a hosted CLI secret action', async () => {
+    const fakeDocker = createFakeDocker();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
         await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
           values: {},
         }),
-      )) as { actionId: string; actionUrl: string };
+      )) as { jobId: string; actionId: string; actionUrl: string };
       const actionUrl = new URL(started.actionUrl);
       const token = actionUrl.searchParams.get('token');
       if (!token) throw new Error('secure action token missing');
@@ -386,12 +531,16 @@ describe('market', () => {
       );
       const responses = await Promise.all(requests);
       expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
+      const job = await waitForInstallJob(runtime, controlKey, started.jobId);
+      expect(job.status).toBe('completed');
     } finally {
       await close();
+      fakeDocker.close();
     }
   });
 
   it('allows a secure action URL to be completed without a control key', async () => {
+    const fakeDocker = createFakeDocker();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
@@ -424,8 +573,12 @@ describe('market', () => {
         },
       );
       expect(completed.status).toBe(200);
+      const body = (await completed.json()) as { id: string; status: string };
+      const job = await waitForInstallJob(runtime, controlKey, body.id);
+      expect(job.status).toBe('completed');
     } finally {
       await close();
+      fakeDocker.close();
     }
   });
 
@@ -507,7 +660,27 @@ describe('market', () => {
     }
   });
 
+  it('waits for an active Market install before closing the runtime', async () => {
+    const fakeDocker = createFakeDocker({ pullDelaySeconds: 0.2 });
+    const { runtime, controlKey, close } = createTestRuntime();
+    const startedAt = performance.now();
+    try {
+      const started = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+          values: { GH_TOKEN: 'gh-test-token' },
+        }),
+      )) as { status: string; jobId: string };
+      expect(started.status).toBe('installing');
+      await close();
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
+      expect(readFileSync(fakeDocker.argsLog, 'utf8')).toContain('pull ghcr.io/cli/cli:2.97.0');
+    } finally {
+      fakeDocker.close();
+    }
+  });
+
   it('completes a hosted CLI secret action and resumes the CLI install path', async () => {
+    const fakeDocker = createFakeDocker();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
@@ -533,31 +706,20 @@ describe('market', () => {
       )) as { status: string };
       expect(['installing', 'completed']).toContain(completed.status);
 
-      let job: {
+      const job = (await waitForInstallJob(runtime, controlKey, started.jobId)) as {
         status: string;
         result?: { cliId: string; installation: { targetType: string } };
         error?: string;
       };
-      for (;;) {
-        job = (await jsonResponse(
-          await controlRequest(
-            runtime,
-            controlKey,
-            'GET',
-            `/api/v1/market/install/${started.jobId}`,
-          ),
-        )) as typeof job;
-        if (job.status !== 'installing') break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
       expect(job.status, job.error).toBe('completed');
       expect(job.result?.installation.targetType).toBe('cli');
       const credentials = (await jsonResponse(
         await controlRequest(runtime, controlKey, 'GET', '/api/v1/credentials'),
       )) as { id: string; type: string }[];
-      expect(credentials.some((credential) => credential.type === 'env')).toBe(true);
+      expect(credentials.some((credential) => credential.type === 'bearer')).toBe(true);
     } finally {
       await close();
+      fakeDocker.close();
     }
   });
 
@@ -707,8 +869,8 @@ describe('market', () => {
       expect(server.slug).toBe('fetch');
       expect(server.transport.type).toBe('stdio');
       if (server.transport.type === 'stdio') {
-        expect(server.transport.command).toBe('uvx');
-        expect(server.transport.args).toEqual(['mcp-server-fetch']);
+        expect(server.transport.command).toMatch(/[/\\]mcp-server-fetch$/);
+        expect(server.transport.args).toEqual([]);
         expect(server.transport.env?.UV_CACHE_DIR).toBeDefined();
         expect(server.transport.env?.UV_TOOL_DIR).toBeDefined();
       }
@@ -818,6 +980,37 @@ describe('market', () => {
     } finally {
       await close();
       process.env.PATH = previousPath;
+    }
+  });
+
+  it('updates hosted CLI runtime metadata when its recipe changes without a version bump', async () => {
+    const { runtime, controlKey, close } = createTestRuntime();
+    const entry = (await import('../../src/market/catalog.js')).marketCatalog.find(
+      (item) => item.id === 'host-shell',
+    )!;
+    const originalAllowList = entry.allowList;
+    try {
+      const result = (await installEntry(runtime, controlKey, 'host-shell')) as { cliId: string };
+      entry.allowList = { allow: [['-c', 'echo']], deny: [] };
+      const marketItems = (await marketList(runtime, controlKey)) as (MarketItem & {
+        updateAvailable: boolean;
+      })[];
+      expect(marketItems.find((item) => item.id === 'host-shell')?.updateAvailable).toBe(true);
+
+      const started = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/host-shell/update', {}),
+      )) as { jobId: string; status: string };
+      expect(started.status).toBe('updating');
+      const job = await waitForInstallJob(runtime, controlKey, started.jobId);
+      expect(job.status).toBe('completed');
+
+      const cli = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'GET', `/api/v1/clis/${result.cliId}`),
+      )) as { allowList: { allow: string[][]; deny: string[][] } };
+      expect(cli.allowList).toEqual({ allow: [['-c', 'echo']], deny: [] });
+    } finally {
+      entry.allowList = originalAllowList;
+      await close();
     }
   });
 

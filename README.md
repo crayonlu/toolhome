@@ -2,14 +2,14 @@
 
 > **🌐 Language: English · [中文](README.zh.md)**
 
-ToolHome is a single-user, self-hosted Remote MCP control plane and protocol gateway. Manage your upstream MCP servers and credentials in one place, then point any harness at stable, standard MCP URLs.
+ToolHome is a single-user, self-hosted control plane for MCP servers and Hosted CLIs. Manage upstream MCP capabilities, platform CLIs such as Azure `az`, GitHub `gh`, and Tailscale, and their encrypted credentials in one place.
 
-It exposes two data-plane entry points:
+It exposes two data planes:
 
-- `POST /mcp`: aggregates all enabled servers, namespacing tool names and URIs automatically.
-- `POST /mcp/{server_slug}`: a per-server entry point that preserves original names, URIs, and extension semantics.
+- **MCP**: `POST /mcp` aggregates enabled servers; `POST /mcp/{server_slug}` preserves one server's original names and extensions.
+- **Hosted CLI**: `POST /cli/{slug}/exec` runs an allow-listed argv array on the ToolHome host or in a pinned sibling container and streams NDJSON stdout/stderr/exit frames. `GET /cli/{slug}/status` runs the declared status probe.
 
-ToolHome does not write harness-specific adapters for Claude Code, Codex, Cursor, or anything else. Any harness that speaks standard Streamable HTTP MCP with Bearer auth works.
+ToolHome does not write harness-specific adapters for Claude Code, Codex, Cursor, or anything else. MCP clients use standard Streamable HTTP with Bearer auth; management and Hosted CLI operations use Control Keys.
 
 ## For AI Agents
 
@@ -43,14 +43,12 @@ Mobile:
 
 ## Project Scope
 
-ToolHome manages two kinds of MCPs:
+ToolHome has two first-class planes:
 
-- **Remote-native**: upstreams that already speak Streamable HTTP, hosted on the public internet, a private network, or another server.
-- **Home-hosted**: stdio MCPs spawned on the ToolHome host and exposed remotely to harnesses.
+- **MCP**: Remote-native servers use Streamable HTTP; Home-hosted servers use stdio on the ToolHome host.
+- **Hosted CLI**: platform CLIs represent an external service or control plane, for example Azure `az`, GitHub `gh`, and Tailscale. They are invoked with complete argv, stdin, timeout and output limits, allow/deny rules, and NDJSON output frames. Package managers and developer tools such as `npm`, `go`, `cargo`, `uv`, `pipx`, `docker`, and `cursor` are installer/runtime details, not Hosted CLI products.
 
-MCPs that must run on the harness machine and depend on its browser or desktop state are out of scope. For example, a Chrome DevTools MCP on a harness laptop should stay configured locally on that harness. If it runs on the ToolHome host, it can be managed as a Home-hosted Server — but it operates on the host environment.
-
-The first release explicitly excludes multi-tenancy, profiles, workspaces, and project management.
+MCPs or CLIs that must run on the harness machine and depend on its browser or desktop state remain local to that harness. The first release explicitly excludes multi-tenancy, profiles, workspaces, and project management.
 
 ## Protocol Capabilities
 
@@ -107,14 +105,14 @@ Vite proxies `/api` requests to `http://127.0.0.1:3344`.
 ```bash
 export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
 export MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_PUBLIC_URL="https://mcp.example.com"
-export MCP_HOME_ALLOWED_HOSTS="mcp.example.com"
+export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
+export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
 ```
 
 Put an HTTPS reverse proxy in front of ToolHome in production. OAuth callbacks, URL-based Client IDs, and remote harness connections should all use a stable HTTPS `MCP_HOME_PUBLIC_URL`. The value must be a canonical origin — no path, query, fragment, username, or password. Data lives in `/data/toolhome.sqlite` (SQLite, WAL mode).
 
-npm packages for Home-hosted stdio servers are installed by the **Market** into the data volume (`MCP_HOME_MARKET_DIR`, default `<dataDir>/market`) — no Dockerfile changes needed. Don't run arbitrary npm packages in the container: use the Market's curated catalog instead.
+Market installers are hidden behind curated capability entries. The catalog can use npm, Go, GitHub Release archives, uvx, or Docker recipes; the product surface remains MCP servers and Hosted platform CLIs. Uvx entries execute the installed binary from the persistent ToolHome tool directory instead of resolving the package again on every refresh. Docker-backed entries require the Docker socket mount shown in `docker-compose.yml`. Hosted CLI state directories are explicit named volumes, never implicit mounts of a user's local credential directory.
 
 ## CI/CD
 
@@ -128,18 +126,19 @@ Deployment requires three GitHub Secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_
 
 ## Market
 
-The Market ships a curated catalog of common MCP servers and installs them with one command, creating the Credential and Server for you:
+The Market ships curated MCP servers and Hosted platform CLIs. Installing an entry creates the encrypted Credential and the corresponding Server or CLI record:
 
 ```bash
 npm run cli -- market list
 npm run cli -- market install resend --set RESEND_API_KEY=re_xxx
-npm run cli -- market uninstall resend
+npm run cli -- market install gh-cli --set GH_TOKEN=ghp_xxx
+npm run cli -- market uninstall gh-cli
 ```
 
-- Entries are `remote` (official Streamable HTTP endpoints, OAuth or API key), `home-stdio` (npm packages installed into the Market directory), or `uvx` (Python packages from PyPI).
-- Installing a `home-stdio` entry runs `npm install --prefix <marketDir>` and creates an env Credential plus the matching Server.
-- Installing a `uvx` entry runs `uv tool install` and creates a Server whose command is `uvx <package>` (the `uv` runtime is bundled in the Docker image).
-- The web console's Market page offers the same flow graphically; OAuth entries need the authorization flow after install.
+- MCP entries may be remote, npm-backed, uvx-backed, or Docker-backed.
+- Hosted CLI entries include Azure `az`, GitHub `gh`, and Tailscale. They pin the platform artifact, define allowed argv, and declare how stored credential material reaches the CLI.
+- A CLI can use a bearer token (`GH_TOKEN`), selected Env Credential variables (Azure service principal), or an OAuth access token after the shared MCP authorization flow completes.
+- The web console's Market page offers the same flow graphically. MCP/CLI is a plane switch: only entries and records from the selected plane are shown.
 
 ## Connecting a Harness
 
@@ -147,7 +146,7 @@ First create an MCP Access API Key from the console or CLI. The generic aggregat
 
 ```json
 {
-  "url": "https://mcp.example.com/mcp",
+  "url": "https://tool.cyncyn.xyz/mcp",
   "headers": {
     "Authorization": "Bearer mch_mcp_..."
   }
@@ -158,7 +157,7 @@ For a single GitHub server only:
 
 ```json
 {
-  "url": "https://mcp.example.com/mcp/github",
+  "url": "https://tool.cyncyn.xyz/mcp/github",
   "headers": {
     "Authorization": "Bearer mch_mcp_..."
   }
@@ -194,7 +193,7 @@ After building, run `toolhome`; from source, use `npm run cli --`.
 
 ```bash
 npm run cli -- auth login \
-  --url https://mcp.example.com \
+  --url https://tool.cyncyn.xyz \
   --control-key "$MCP_HOME_CONTROL_KEY"
 
 npm run cli -- server list
@@ -246,19 +245,19 @@ Backups contain plaintext secrets and deserve the same protection as the master 
 
 ## Configuration
 
-| Environment variable             | Description                                    | Default                 |
-| -------------------------------- | ---------------------------------------------- | ----------------------- |
-| `MCP_HOME_HOST`                  | Listen address                                 | `127.0.0.1`             |
-| `MCP_HOME_PORT`                  | Listen port                                    | `3344`                  |
-| `MCP_HOME_PUBLIC_URL`            | Externally reachable canonical origin          | `http://127.0.0.1:3344` |
-| `MCP_HOME_DATA_DIR`              | SQLite and runtime data directory              | `./data`                |
-| `MCP_HOME_MASTER_KEY`            | Root key for secret encryption/signing/digests | required                |
-| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | Control Key written on first database boot     | required on first boot  |
-| `MCP_HOME_ALLOWED_HOSTS`         | Allowed Hosts, comma-separated                 | Public URL hostname     |
-| `MCP_HOME_LOG_LEVEL`             | `debug`, `info`, `warn`, `error`               | `info`                  |
-| `MCP_HOME_WEB_DIR`               | Web console static files directory             | disabled                |
-| `MCP_HOME_MARKET_DIR`            | Market npm install directory                   | `<dataDir>/market`      |
-| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata               | `true`                  |
+| Environment variable             | Description                                                                   | Default                 |
+| -------------------------------- | ----------------------------------------------------------------------------- | ----------------------- |
+| `MCP_HOME_HOST`                  | Listen address                                                                | `127.0.0.1`             |
+| `MCP_HOME_PORT`                  | Listen port                                                                   | `3344`                  |
+| `MCP_HOME_PUBLIC_URL`            | Externally reachable canonical origin (production: `https://tool.cyncyn.xyz`) | `http://127.0.0.1:3344` |
+| `MCP_HOME_DATA_DIR`              | SQLite and runtime data directory                                             | `./data`                |
+| `MCP_HOME_MASTER_KEY`            | Root key for secret encryption/signing/digests                                | required                |
+| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | Control Key written on first database boot                                    | required on first boot  |
+| `MCP_HOME_ALLOWED_HOSTS`         | Allowed Hosts, comma-separated                                                | Public URL hostname     |
+| `MCP_HOME_LOG_LEVEL`             | `debug`, `info`, `warn`, `error`                                              | `info`                  |
+| `MCP_HOME_WEB_DIR`               | Web console static files directory                                            | disabled                |
+| `MCP_HOME_MARKET_DIR`            | Market npm install directory                                                  | `<dataDir>/market`      |
+| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata                                              | `true`                  |
 
 ## Security Model
 

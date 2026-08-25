@@ -79,6 +79,153 @@ exit 0
     }
   });
 
+  it('wraps Azure service-principal authentication without putting the secret in argv', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-docker-auth-'));
+    const argsFile = join(directory, 'args.txt');
+    const dockerPath = join(directory, 'docker');
+    writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+printf '%s\\n' "$@" > "${argsFile}"
+exit 0
+`,
+    );
+    chmodSync(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${previousPath ?? ''}`;
+    try {
+      await execCli(
+        {
+          command: 'mcr.microsoft.com/azure-cli:2.89.0',
+          argv: ['account', 'show'],
+          env: {
+            ...process.env,
+            AZURE_CLIENT_ID: 'client-id',
+            AZURE_CLIENT_SECRET: 'client-secret',
+            AZURE_TENANT_ID: 'tenant-id',
+          },
+          stdin: null,
+          timeoutMs: 5_000,
+          maxOutputBytes: 64 * 1024,
+          executionMode: 'docker',
+          containerEnvKeys: ['AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID'],
+          containerVolumes: [{ source: 'toolhome-azure-cli-state', target: '/root/.azure' }],
+          authStrategy: 'azure-service-principal',
+        },
+        () => undefined,
+      );
+      const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean);
+      expect(args).toContain('--entrypoint');
+      expect(args[args.indexOf('--entrypoint') + 1]).toBe('/bin/sh');
+      expect(args[args.indexOf('mcr.microsoft.com/azure-cli:2.89.0') + 1]).toBe('-c');
+      expect(args).toContain('AZURE_CLIENT_SECRET');
+      expect(args).not.toContain('client-secret');
+      expect(args.at(-2)).toBe('account');
+      expect(args.at(-1)).toBe('show');
+    } finally {
+      process.env.PATH = previousPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('wraps Tailscale auth-key bootstrap with the shell entrypoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-docker-tailscale-auth-'));
+    const argsFile = join(directory, 'args.txt');
+    const dockerPath = join(directory, 'docker');
+    writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+printf '%s\\n' "$@" > "${argsFile}"
+exit 0
+`,
+    );
+    chmodSync(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${previousPath ?? ''}`;
+    try {
+      await execCli(
+        {
+          command: 'tailscale/tailscale:v1.102.3',
+          argv: ['status'],
+          env: { ...process.env, TS_AUTHKEY: 'tskey-secret' },
+          stdin: null,
+          timeoutMs: 5_000,
+          maxOutputBytes: 64 * 1024,
+          executionMode: 'docker',
+          containerEnvKeys: ['TS_AUTHKEY'],
+          containerVolumes: [{ source: 'toolhome-tailscale-state', target: '/var/lib/tailscale' }],
+          authStrategy: 'tailscale-auth-key',
+          entrypoint: 'tailscale',
+        },
+        () => undefined,
+      );
+      const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean);
+      expect(args).toContain('--entrypoint');
+      expect(args[args.indexOf('--entrypoint') + 1]).toBe('/bin/sh');
+      expect(args).toContain('--env');
+      expect(args).toContain('TS_AUTHKEY');
+      expect(args).toContain('TS_STATE_DIR=/var/lib/tailscale');
+      expect(args[args.indexOf('tailscale/tailscale:v1.102.3') + 1]).toBe('-c');
+      expect(args.some((arg) => arg.includes('tailscaled --tun=userspace-networking'))).toBe(true);
+      expect(args.some((arg) => arg.includes('--socket=/var/run/tailscale/tailscaled.sock'))).toBe(
+        true,
+      );
+      expect(args).not.toContain('tskey-secret');
+      expect(args.at(-3)).toContain(
+        'tailscale --socket=/var/run/tailscale/tailscaled.sock up --auth-key',
+      );
+      expect(args.at(-2)).toBe('--');
+      expect(args.at(-1)).toBe('status');
+    } finally {
+      process.env.PATH = previousPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards declared state volumes into the container command', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-docker-volume-'));
+    const argsFile = join(directory, 'args.txt');
+    const dockerPath = join(directory, 'docker');
+    writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+printf '%s\\n' "$@" > "${argsFile}"
+exit 0
+`,
+    );
+    chmodSync(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${previousPath ?? ''}`;
+    try {
+      await execCli(
+        {
+          command: 'toolhome/tailscale-cli:v1.0.0',
+          argv: ['status'],
+          env: process.env as Record<string, string>,
+          stdin: null,
+          timeoutMs: 5_000,
+          maxOutputBytes: 64 * 1024,
+          executionMode: 'docker',
+          containerVolumes: [{ source: 'toolhome-tailscale-state', target: '/var/lib/tailscale' }],
+        },
+        () => undefined,
+      );
+      const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean);
+      expect(args).toEqual([
+        'run',
+        '--rm',
+        '-i',
+        '--volume',
+        'toolhome-tailscale-state:/var/lib/tailscale',
+        'toolhome/tailscale-cli:v1.0.0',
+        'status',
+      ]);
+    } finally {
+      process.env.PATH = previousPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('forwards the execution environment into the container command', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'toolhome-docker-env-'));
     const argsFile = join(directory, 'args.txt');

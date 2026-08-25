@@ -72,12 +72,19 @@ export function InstallSheet({
     try {
       const started = (await api.post(`/api/v1/market/${entry.id}/install`, {
         values,
-      })) as { jobId: string; status: InstallJob['status']; actionUrl?: string };
+      })) as { jobId: string | null; status: string; actionUrl?: string };
       setActionUrl(
         started.actionUrl === undefined
           ? null
           : toConsoleActionUrl(started.actionUrl, window.location.origin),
       );
+      if (started.jobId === null || started.status === 'already_installed') {
+        setInstalling(false);
+        onOpenChange(false);
+        toast(`✓ ${entry.name} ${t('market.install')}`, 'success');
+        onInstalled(entry.id);
+        return;
+      }
       for (;;) {
         const current = await api.get<InstallJob>(`/api/v1/market/install/${started.jobId}`);
         if (!activeRef.current) return;
@@ -127,6 +134,12 @@ export function InstallSheet({
       title={`${t('market.install')} · ${entry.name}`}
     >
       <p className="mb-4 text-sm text-ink-2">{entry.description}</p>
+      {entry.plane === 'cli' && (
+        <div className="mb-4 bg-surface-2 px-3 py-2 text-xs text-ink-3">
+          Hosted CLI for {entry.platform ?? 'a platform'}; installation details are managed by
+          ToolHome.
+        </div>
+      )}
       <FieldGroup>
         {entry.requires.map((requirement) => (
           <TextField

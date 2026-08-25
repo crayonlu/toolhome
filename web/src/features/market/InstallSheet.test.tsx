@@ -34,9 +34,8 @@ function requestPath(input: RequestInfo | URL): string {
 }
 
 function countPolls(fetchMock: ReturnType<typeof vi.spyOn>): number {
-  return fetchMock.mock.calls.filter(
-    ([input]: [RequestInfo | URL, RequestInit?]) =>
-      requestPath(input).endsWith('/api/v1/market/install/job-1'),
+  return fetchMock.mock.calls.filter(([input]: [RequestInfo | URL, RequestInit?]) =>
+    requestPath(input).endsWith('/api/v1/market/install/job-1'),
   ).length;
 }
 
@@ -45,23 +44,51 @@ describe('InstallSheet secure action expiry', () => {
     vi.restoreAllMocks();
   });
 
+  it('handles an already-installed response without polling a null job', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const onInstalled = vi.fn();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (path === '/api/v1/market/gh-cli/install') {
+        return jsonResponse({ jobId: null, status: 'already_installed' });
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    render(
+      <I18nProvider>
+        <InstallSheet entry={entry} onOpenChange={onOpenChange} onInstalled={onInstalled} />
+      </I18nProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(onInstalled).toHaveBeenCalledWith('gh-cli'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
   it('stops polling and shows the expiry message when the secret link expires', async () => {
     const user = userEvent.setup();
     let installCalls = 0;
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const path =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (path === '/api/v1/market/gh-cli/install') {
         installCalls += 1;
         return jsonResponse({ jobId: 'job-1', status: 'awaiting_secret' });
       }
-      if (path === '/api/v1/market/install/job-1') return jsonResponse({
-        id: 'job-1',
-        entryId: 'gh-cli',
-        status: 'failed',
-        step: 'secure action expired',
-        output: '',
-        error: 'secure_action_expired',
-      });
+      if (path === '/api/v1/market/install/job-1')
+        return jsonResponse({
+          id: 'job-1',
+          entryId: 'gh-cli',
+          status: 'failed',
+          step: 'secure action expired',
+          output: '',
+          error: 'secure_action_expired',
+        });
       throw new Error(`unexpected fetch: ${path}`);
     });
 

@@ -23,9 +23,13 @@ export interface CliRecord {
   command: string;
   executionMode: CliExecutionMode;
   entrypoint: string | null;
+  authStrategy: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
+  containerVolumes: { source: string; target: string; readOnly: boolean }[];
+  platform: string | null;
   allowList: CliAllowList;
   interactive: boolean;
   credentialId: string | null;
+  credentialBindings: Record<string, string>;
   probe: CliProbe | null;
   enabled: boolean;
   timeoutMs: number;
@@ -245,6 +249,34 @@ export interface MarketEntry {
   bin?: string;
   image?: string;
   url?: string;
+  version?: string;
+  platform?: string;
+  credentialBindings?: Record<string, string>;
+  cliRuntime?: {
+    authStrategy?: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
+    containerVolumes?: { source: string; target: string; readOnly?: boolean }[];
+  };
+  allowList?: { allow: string[][]; deny: string[][] };
+  probe?: { command: string; args: string[] };
+  installer?:
+    | { type: 'npm'; package: string; bin: string; version?: string }
+    | {
+        type: 'go';
+        module: string;
+        bin: string;
+        version?: string;
+      }
+    | {
+        type: 'github-release';
+        repository: string;
+        tag: string;
+        asset: string;
+        url: string;
+        bin: string;
+        archive?: 'tar.gz' | 'zip';
+      }
+    | { type: 'uvx'; package: string; bin: string; version?: string; with?: string[] }
+    | { type: 'docker'; image: string; entrypoint?: string | null; dockerfile?: string };
   credential: CredentialSpec;
   requires: MarketRequirement[];
   argsTemplate?: string[];

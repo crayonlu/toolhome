@@ -24,6 +24,21 @@ export interface MarketEntry {
   bin?: string;
   /** Pinned exact artifact version (npm `@x.y.z`, uvx `==x.y.z`); installs never drift with latest */
   version?: string;
+  /** Declarative installation recipe hidden behind the platform product entry. */
+  installer?:
+    | { type: 'npm'; package: string; bin: string; version?: string }
+    | { type: 'go'; module: string; bin: string; version?: string }
+    | {
+        type: 'github-release';
+        repository: string;
+        tag: string;
+        asset: string;
+        url: string;
+        bin: string;
+        archive?: 'tar.gz' | 'zip';
+      }
+    | { type: 'uvx'; package: string; bin: string; version?: string; with?: string[] }
+    | { type: 'docker'; image: string; entrypoint?: string | null; dockerfile?: string };
   /** Docker image to run via `docker run --rm -i` (kind: docker); the host socket must be mounted */
   image?: string;
   /** Inline Dockerfile used to build the image when it is not present and not pullable */
@@ -35,6 +50,15 @@ export interface MarketEntry {
   argsTemplate?: string[];
   /** Explicit argv rules required for hosted CLI execution. */
   allowList?: { allow: string[][]; deny: string[][] };
+  /** Platform identity shown in the CLI plane and used for shared auth metadata. */
+  platform?: string;
+  /** Maps CLI environment names to credential payload sources. */
+  credentialBindings?: Record<string, string>;
+  /** Declarative runtime bootstrap for hosted CLI containers. */
+  cliRuntime?: {
+    authStrategy?: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
+    containerVolumes?: { source: string; target: string; readOnly?: boolean }[];
+  };
   credential: CredentialSpec;
   requires: MarketRequirement[];
   /** Optional Docker entrypoint used when the image does not declare its CLI binary. */
@@ -435,56 +459,82 @@ ENTRYPOINT ["markitdown-mcp"]`,
     docs: 'https://github.com/crayonlu/Mosaic/tree/main/packages/mcp-server',
   },
 
-  // ── CLI plane (Form A): hosted CLIs, parallel to MCP entries ───────────
+  // ── CLI plane: hosted platform CLIs, parallel to MCP entries ───────────
   {
     id: 'azure-cli',
     name: 'Azure CLI (az)',
-    description: 'Manage Azure resources, subscriptions, and deployments from the host',
+    description: 'Manage Azure subscriptions, resources, and deployments through Azure APIs',
     category: 'infra',
     plane: 'cli',
+    platform: 'azure',
     kind: 'cli-image',
-    image: 'mcr.microsoft.com/azure-cli',
+    version: '2.89.0',
+    installer: {
+      type: 'docker',
+      image: 'mcr.microsoft.com/azure-cli:2.89.0',
+      entrypoint: 'az',
+    },
+    image: 'mcr.microsoft.com/azure-cli:2.89.0',
     entrypoint: 'az',
     credential: { type: 'env' },
+    credentialBindings: {
+      AZURE_CLIENT_ID: 'env:AZURE_CLIENT_ID',
+      AZURE_CLIENT_SECRET: 'env:AZURE_CLIENT_SECRET',
+      AZURE_TENANT_ID: 'env:AZURE_TENANT_ID',
+    },
+    cliRuntime: {
+      authStrategy: 'azure-service-principal',
+      containerVolumes: [{ source: 'toolhome-azure-cli-state', target: '/root/.azure' }],
+    },
     requires: [
       {
         name: 'AZURE_CLIENT_ID',
-        description: 'Service principal app id (optional)',
-        required: false,
+        description: 'Microsoft Entra application client ID',
+        secret: false,
+        required: true,
       },
       {
         name: 'AZURE_CLIENT_SECRET',
-        description: 'Service principal secret (collected via one-time URL)',
+        description: 'Microsoft Entra service principal secret',
         secret: true,
-        required: false,
+        required: true,
       },
-      { name: 'AZURE_TENANT_ID', description: 'Tenant id (optional)', required: false },
+      {
+        name: 'AZURE_TENANT_ID',
+        description: 'Microsoft Entra tenant ID',
+        secret: false,
+        required: true,
+      },
     ],
     allowList: {
-      allow: [
-        ['account', 'show'],
-        ['group', 'list'],
-        ['resource', 'list'],
-      ],
+      allow: [['account', 'show'], ['group', 'list'], ['resource', 'list'], ['version']],
       deny: [['login'], ['account', 'clear']],
     },
-    probe: { command: 'az', args: ['version', '--output', 'tsv', '--query', 'coreVersion'] },
+    probe: { command: 'az', args: ['version', '--output', 'tsv', '--query', '"azure-cli"'] },
     docs: 'https://learn.microsoft.com/cli/azure/',
   },
   {
     id: 'gh-cli',
     name: 'GitHub CLI (gh)',
-    description: 'GitHub repos, issues, PRs, and Actions from the host shell',
+    description: 'Operate GitHub repositories, issues, pull requests, and Actions centrally',
     category: 'devtools',
     plane: 'cli',
+    platform: 'github',
     kind: 'cli-image',
-    image: 'ghcr.io/cli/cli',
+    version: '2.97.0',
+    installer: {
+      type: 'docker',
+      image: 'ghcr.io/cli/cli:2.97.0',
+      entrypoint: 'gh',
+    },
+    image: 'ghcr.io/cli/cli:2.97.0',
     entrypoint: 'gh',
-    credential: { type: 'env' },
+    credential: { type: 'bearer', tokenKey: 'GH_TOKEN' },
+    credentialBindings: { GH_TOKEN: 'token' },
     requires: [
       {
         name: 'GH_TOKEN',
-        description: 'GitHub token (collected via one-time URL)',
+        description: 'GitHub token with the scopes required by the selected commands',
         secret: true,
         required: true,
       },
@@ -498,6 +548,43 @@ ENTRYPOINT ["markitdown-mcp"]`,
     },
     probe: { command: 'gh', args: ['--version'] },
     docs: 'https://cli.github.com/',
+  },
+  {
+    id: 'tailscale-cli',
+    name: 'Tailscale CLI',
+    description: 'Inspect and manage a Tailscale network from the hosted control plane',
+    category: 'infra',
+    plane: 'cli',
+    platform: 'tailscale',
+    kind: 'cli-image',
+    version: '1.102.3',
+    installer: {
+      type: 'docker',
+      image: 'tailscale/tailscale:v1.102.3',
+      entrypoint: 'tailscale',
+    },
+    image: 'tailscale/tailscale:v1.102.3',
+    entrypoint: 'tailscale',
+    credential: { type: 'env' },
+    credentialBindings: { TS_AUTHKEY: 'env:TS_AUTHKEY' },
+    cliRuntime: {
+      authStrategy: 'tailscale-auth-key',
+      containerVolumes: [{ source: 'toolhome-tailscale-state', target: '/var/lib/tailscale' }],
+    },
+    requires: [
+      {
+        name: 'TS_AUTHKEY',
+        description: 'Tailscale auth key for the hosted node',
+        secret: true,
+        required: true,
+      },
+    ],
+    allowList: {
+      allow: [['version'], ['status'], ['netcheck']],
+      deny: [['up'], ['logout'], ['down']],
+    },
+    probe: { command: 'tailscale', args: ['version'] },
+    docs: 'https://tailscale.com/kb/1080/cli/',
   },
   {
     id: 'host-shell',

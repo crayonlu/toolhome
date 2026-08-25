@@ -202,6 +202,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     async close() {
       await oauthSweeper.stop();
       await management.close();
+      await market.close();
       await dataPlane.close();
       await upstreams.close();
       await callRecorder.close();

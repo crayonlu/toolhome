@@ -1,10 +1,15 @@
 import { AppError } from '../domain/errors.js';
 import type { ToolCallDraft } from '../domain/models.js';
+import {
+  materializeCliCredential,
+  validateCliCredentialBindings,
+} from '../security/credential-materializer.js';
 import type { CallRecorder } from '../observability/call-recorder.js';
 import type { Store } from '../storage/store.js';
 import { evaluateAllowList } from './allow-list.js';
 import type { CliExecFrame } from './frames.js';
 import {
+  assertCliRuntimeConfig,
   cliExecInputSchema,
   createCliInputSchema,
   updateCliInputSchema,
@@ -84,7 +89,8 @@ export class CliService {
 
   create(value: unknown): CliRecord {
     const input = createCliInputSchema.parse(value);
-    this.#assertCredential(input.credentialId);
+    assertCliRuntimeConfig(input);
+    this.#assertCredential(input.credentialId, input.credentialBindings);
     const record = this.#store.createCli(input);
     this.#store.appendEvent({
       level: 'info',
@@ -101,7 +107,20 @@ export class CliService {
     const input = updateCliInputSchema.parse(value);
     const nextCredentialId =
       input.credentialId === undefined ? current.credentialId : input.credentialId;
-    this.#assertCredential(nextCredentialId);
+    const nextExecutionMode = input.executionMode ?? current.executionMode;
+    const nextAuthStrategy = input.authStrategy ?? current.authStrategy;
+    const nextContainerVolumes = input.containerVolumes ?? current.containerVolumes;
+    assertCliRuntimeConfig({
+      executionMode: nextExecutionMode,
+      authStrategy: nextAuthStrategy,
+      containerVolumes: nextContainerVolumes,
+    });
+    this.#assertCredential(
+      nextCredentialId,
+      input.credentialBindings === undefined
+        ? current.credentialBindings
+        : input.credentialBindings,
+    );
     const record = this.#store.updateCli(id, input);
     this.#store.appendEvent({
       level: 'info',
@@ -140,6 +159,9 @@ export class CliService {
     if (verdict.verdict === 'deny') {
       throw new AppError('cli_denied', `argv denied by allow-list: ${verdict.reason}`, 403);
     }
+    // Resolve credentials before the NDJSON response starts so authorization and
+    // binding errors remain structured HTTP errors instead of stream frames.
+    this.#buildEnv(record);
     return { record, input };
   }
 
@@ -165,6 +187,8 @@ export class CliService {
         executionMode: record.executionMode,
         containerEnvKeys:
           record.executionMode === 'docker' ? this.#containerEnvKeys(record) : undefined,
+        containerVolumes: record.executionMode === 'docker' ? record.containerVolumes : undefined,
+        authStrategy: record.authStrategy,
         entrypoint: record.entrypoint,
       },
       emit,
@@ -240,6 +264,8 @@ export class CliService {
         executionMode: record.executionMode,
         containerEnvKeys:
           record.executionMode === 'docker' ? this.#containerEnvKeys(record) : undefined,
+        containerVolumes: record.executionMode === 'docker' ? record.containerVolumes : undefined,
+        authStrategy: record.authStrategy,
         entrypoint: record.executionMode === 'docker' ? record.probe.command : record.entrypoint,
       },
       (frame) => {
@@ -256,11 +282,18 @@ export class CliService {
   }
 
   #containerEnvKeys(record: CliRecord): string[] {
-    const keys = new Set(Object.keys(cliEnforcementEnv));
+    const keys = new Set<string>();
+    if (!record.interactive) {
+      for (const key of Object.keys(cliEnforcementEnv)) keys.add(key);
+    }
     if (record.credentialId !== null) {
       const payload = this.#store.getCredentialPayload(record.credentialId);
-      if (payload?.type === 'env') {
-        for (const key of Object.keys(payload.variables)) keys.add(key);
+      if (payload) {
+        for (const key of Object.keys(
+          materializeCliCredential(payload, record.credentialBindings),
+        )) {
+          keys.add(key);
+        }
       }
     }
     return [...keys];
@@ -278,28 +311,15 @@ export class CliService {
     if (record.credentialId !== null) {
       const payload = this.#store.getCredentialPayload(record.credentialId);
       if (payload === null) throw new AppError('credential_not_found', 'Credential not found', 400);
-      if (payload.type !== 'env') {
-        throw new AppError(
-          'cli_credential_kind_mismatch',
-          'CLIs only accept environment credentials',
-          400,
-        );
-      }
-      Object.assign(env, payload.variables);
+      Object.assign(env, materializeCliCredential(payload, record.credentialBindings));
     }
     return env;
   }
 
-  #assertCredential(credentialId: string | null): void {
+  #assertCredential(credentialId: string | null, bindings: Record<string, string>): void {
     if (credentialId === null) return;
     const payload = this.#store.getCredentialPayload(credentialId);
     if (!payload) throw new AppError('credential_not_found', 'Credential not found', 400);
-    if (payload.type !== 'env') {
-      throw new AppError(
-        'cli_credential_kind_mismatch',
-        'CLIs only accept environment credentials',
-        400,
-      );
-    }
+    validateCliCredentialBindings(payload, bindings);
   }
 }

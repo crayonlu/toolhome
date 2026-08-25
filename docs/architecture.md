@@ -7,13 +7,20 @@ flowchart LR
   H["Harness / Agent"] -->|"MCP Access Key or OAuth"| A["/mcp aggregate"]
   H -->|"MCP Access Key or OAuth"| I["/mcp/{slug} individual"]
   U["Web / CLI / Agent"] -->|"Control Key or session"| C["Control API"]
+  U -->|"Control Key + argv"| X["/cli/{slug}/exec"]
   A --> G["Gateway server"]
   I --> G
   C --> S["Control service"]
+  X --> L["CLI service"]
   G --> R["Capability registry"]
   G --> M["Upstream manager"]
   S --> M
+  S --> K["Market service"]
+  K --> IR["npm / Go / uvx / Docker installers"]
   S --> D["SQLite store"]
+  L --> D
+  L --> CR["CLI runner"]
+  L --> CM["Credential materializer"]
   R --> D
   M --> P["Connection pool"]
   P --> RH["Remote Streamable HTTP / SSE"]
@@ -24,12 +31,18 @@ flowchart LR
 
 - `src/control`：Control API、OpenAPI、业务服务与 CLI client。
 - `src/data-plane`：聚合/独立 MCP Server、路由、虚拟化与 HTTP serving。
+- `src/cli-plane`：Hosted CLI 注册、allow/deny argv 校验、Docker/宿主执行、超时和 NDJSON 输出。
+- `src/market`：MCP 与 Hosted CLI 的统一安装任务、版本 pin、Secure Action 和 npm/Go/GitHub Release/uvx/Docker installer recipes。
 - `src/upstream`：协议 Client、连接池、OAuth provider、扩展 transport bridge。
-- `src/security`：两类 API Key、SecretBox、控制台 session 与下游 OAuth Authorization Server。
+- `src/security`：两类 API Key、SecretBox、控制台 session、共享 Credential materializer 与下游 OAuth Authorization Server。
 - `src/storage`：同步 SQLite repository，WAL、外键、加密 payload 与主密钥一致性标记。
 - `web`：标准 Vite React 控制台，使用 Radix UI primitives 与 Lucide icons。
 
-## 两个身份域
+## MCP 与 Hosted CLI 平面
+
+ToolHome 暴露两个平行的能力平面。MCP 平面通过 `/mcp` 和 `/mcp/{slug}` 提供标准 MCP 数据面；Hosted CLI 平面通过 `/cli/{slug}/exec` 和 `/cli/{slug}/status` 接收完整 argv、stdin、超时与输出上限，并以 stdout/stderr/exit NDJSON 帧返回结果。CLI 记录的 allow/deny 规则在进程启动前校验，Docker 记录只显式转发声明的环境变量和状态 volume，不继承宿主机环境或凭据目录。
+
+CLI 不复制 MCP 的 OAuth transport。`src/security/credential-materializer.ts` 将同一份加密 Credential payload 投影为 MCP headers/env 或 CLI 环境变量；OAuth discovery、PKCE、callback、refresh 和 token transport 仍由既有 `StoredOAuthProvider` 负责。CLI 对已经授权的 OAuth credential 使用 access token，未授权时在执行前返回结构化的 authorization-required 错误。Docker CLI 只允许显式 named volume，并在注册时拒绝 host 模式下的容器认证 bootstrap、volume 和冲突挂载目标。
 
 Control API Key 只能访问 `/api/v1/*`。MCP Access API Key 只能访问 `/mcp` 与 `/mcp/{slug}`。两类 Key 使用不同前缀、不同数据库 kind 和不同认证入口，不能互换。
 
@@ -108,6 +121,8 @@ SDK 2.0.0 的 2026 核心 registry 仍会把同名的 2025 Tasks 方法判定为
 ## 故障与生命周期
 
 Server runtime state 记录协议版本、状态、进程 ID、最近成功、最近错误和重启计数。Manager 将认证错误标为 `auth-required`，连接错误标为 `unreachable`。Home-hosted stdio 意外退出时，Manager 按 restart policy 重建进程；主动重启、配置更新、Credential 变化和删除都会关闭旧 adapter、订阅与 suspended round，下一次请求使用新连接。
+
+Hosted CLI 的 Market 安装是异步 job：installer 先完成 pinned artifact 的 inspect/pull/build，再在同一事务边界创建 CLI、Credential 和 installation marker；安装失败会补偿已创建的目标和 Credential。每个 entry 同时最多有一个 install/update/uninstall 操作；recipe 或 runtime fingerprint 变化也会触发 update，更新时同步目标配置。进程收到关闭信号时先终止 installer child，再等待 job 收尾，最后关闭数据面和 SQLite，避免后台安装任务访问已关闭的数据库。
 
 事件写入 SQLite 并由触发器保留最近约 10,000 条。Home-hosted stderr 会先按 transport env 与 Environment Credential 值脱敏。配置备份默认脱敏；显式 secret export 是可恢复的便携格式，导入在单个数据库事务内完成 ID 重映射。
 

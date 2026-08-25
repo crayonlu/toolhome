@@ -2,21 +2,31 @@
 
 ## Overview
 
-The Market is a curated catalog of common MCP servers. One command installs the server, creates the credential, and configures everything.
+The Market is a curated catalog of MCP servers and hosted platform CLIs. One command installs the target, creates the credential, and configures the runtime. A Market entry represents the capability itself; installer technologies such as npm, Go, GitHub Release, uv, and Docker remain implementation details.
 
-## Catalog Entries (24)
+## Catalog Entries (30)
 
 ### Remote (OAuth)
+
 github (PAT), linear, slack, stripe, figma, sentry, supabase, notion, cloudflare, deepwiki
 
 ### Remote (API Key)
+
 context7, exa, tavily, firecrawl, openrouter, apifox
 
-### Home-stdio (npm)
+### Home-stdio MCP servers
+
 resend, tailscale, playwright, postgres, sqlite, memory, sequential-thinking
 
-### Uvx (Python)
+### Uvx-backed MCP server
+
 fetch
+
+### Hosted platform CLIs
+
+azure-cli (`az`), gh-cli (`gh`), tailscale-cli
+
+Hosted CLI entries are parallel to MCP entries. The catalog describes the platform command, pinned artifact, credential requirements, and allowed argv; it does not expose npm, Go, uv, or Docker as products.
 
 > ⚠️ The npm package name `mcp-server-fetch` is **squatted** by a canary (npx-confusion) package that runs code on install. The official Fetch server is Python — the catalog installs it via `uvx`, never via npm.
 
@@ -35,13 +45,31 @@ toolhome market uninstall resend
 
 **Remote entries**: Creates a credential (bearer/headers/oauth) + a remote server with the upstream URL. For OAuth entries, run `toolhome credential authorize <name>` after install.
 
-**Home-stdio entries**: Runs `npm install --prefix <marketDir> <package>`, creates an env credential, and creates a home server with the stdio command pointing to the installed binary. The install is async with progress logging.
+**Home-stdio entries**: The installer backend runs the pinned npm recipe, creates an env credential, and creates a home server with the stdio command pointing to the installed binary. The install is async with progress logging.
 
-**Uvx entries**: Runs `uv tool install <package>` (Python packages from PyPI), then creates a home server with the stdio command `uvx <package>`. Requires the `uv` runtime, which is bundled in the Docker image. Some entries pin extra dependencies via `--with` (e.g. `mcp-server-fetch` pins `mcp<2` because upstream still imports the pre-2.0 `McpError` name).
+**Uvx entries**: The installer backend runs `uv tool install <package>` (Python packages from PyPI), then creates a home server that executes the installed binary from the persistent `UV_TOOL_BIN_DIR`. It does not run `uvx <package>` again during every MCP refresh, so the pinned artifact is reused without a second dependency resolution. Some entries pin extra dependencies via `--with` (e.g. `mcp-server-fetch` pins `mcp<2` because upstream still imports the pre-2.0 `McpError` name).
+
+**Hosted CLI entries**: A CLI entry provisions a first-class CLI record and installs its pinned artifact through the entry's hidden npm, Go, GitHub Release, uvx, or Docker recipe. Execution remains argv-only and uses the same encrypted credential payloads as MCP. A declarative binding maps credential material to the platform CLI environment, for example `GH_TOKEN <- bearer token` or `AZURE_CLIENT_ID <- env:CLIENT_ID`. OAuth-backed CLI records use the stored access token and return `credential_authorization_required` until the credential is authorized. ToolHome never mounts a user's local `~/.azure`, `~/.config/gh`, `~/.aws`, or similar directory by default.
+
+Azure service-principal entries use `authStrategy: "azure-service-principal"`: the runner starts `/bin/sh` inside the pinned Azure image, executes a fixed non-interactive `az login --service-principal` from `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, and `AZURE_TENANT_ID`, then executes the allow-listed `az` argv. The named `/root/.azure` volume preserves CLI state across runs without importing a user's local Azure profile.
+
+Tailscale entries use `authStrategy: "tailscale-auth-key"` and an explicit named `/var/lib/tailscale` volume. Each invocation starts `tailscaled` in userspace-networking mode inside the pinned container, waits for its socket, performs the fixed `tailscale --socket=/var/run/tailscale/tailscaled.sock up --auth-key="$TS_AUTHKEY" --reset` bootstrap, then executes the allow-listed `tailscale` argv through that socket. This avoids requiring host TUN devices or kernel capabilities; the state volume preserves the node identity. The entry remains limited to the catalog's read-only `version`, `status`, and `netcheck` commands.
+
+### Hosted CLI Authentication
+
+MCP and CLI credentials share the encrypted `CredentialPayload` storage format and a common materialization layer:
+
+- `env` credentials pass variables through, or select them with `env:<name>` bindings.
+- `bearer` credentials bind with `token`.
+- `api-key` credentials bind with `value`.
+- `headers` credentials bind with `header:<Header-Name>`.
+- `oauth` credentials bind with `accessToken` after authorization.
+
+The MCP side still owns OAuth provider discovery, refresh, and callback handling. The CLI side only consumes the stored access token; it does not implement a second OAuth transport.
 
 ### Install Location
 
-Home-stdio packages install to `MCP_HOME_MARKET_DIR` (default `<dataDir>/market`), which is a persistent Docker volume. Packages survive container restarts. Uvx tools and caches install to `<dataDir>/.uv`, also persistent.
+Home-stdio packages, Go binaries, and GitHub Release binaries install to `MCP_HOME_MARKET_DIR` (default `<dataDir>/market`), which is a persistent Docker volume. Packages survive container restarts. Uvx tools and caches install to `<dataDir>/.uv`, also persistent.
 
 ### Installation Progress
 

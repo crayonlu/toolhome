@@ -131,6 +131,73 @@ describe('legacy database rename (0.3.x → 0.4.0)', () => {
   });
 });
 
+describe('CLI schema migrations', () => {
+  it('adds Hosted CLI metadata columns to an older clis table and preserves rows', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-cli-schema-migrate-'));
+    const path = join(directory, 'legacy.sqlite');
+    const secrets = new SecretBox('store-test-master-key-0000000000000000000000001');
+    const first = new SqliteStore(path, secrets);
+    first.close();
+
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE clis');
+    db.exec(`
+      CREATE TABLE clis (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('host', 'docker')),
+        allow_list_json TEXT NOT NULL,
+        interactive INTEGER NOT NULL,
+        credential_id TEXT,
+        probe_json TEXT,
+        enabled INTEGER NOT NULL,
+        timeout_ms INTEGER NOT NULL,
+        max_output_bytes INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO clis (
+        id, slug, name, command, execution_mode, allow_list_json, interactive,
+        credential_id, probe_json, enabled, timeout_ms, max_output_bytes, created_at, updated_at
+      ) VALUES (
+        '00000000-0000-4000-8000-000000000021', 'legacy-cli', 'Legacy CLI', '/bin/echo', 'host',
+        '{"allow":[["version"]],"deny":[]}', 0, NULL, NULL, 1, 60000, 65536,
+        '2026-08-26T00:00:00.000Z', '2026-08-26T00:00:00.000Z'
+      );
+    `);
+    db.close();
+
+    const migrated = new SqliteStore(path, secrets);
+    try {
+      expect(migrated.getCliBySlug('legacy-cli')).toMatchObject({
+        slug: 'legacy-cli',
+        entrypoint: null,
+        authStrategy: 'none',
+        containerVolumes: [],
+        platform: null,
+        credentialBindings: {},
+      });
+      const columnsDb = new DatabaseSync(path);
+      const columns = columnsDb.prepare('PRAGMA table_info(clis)').all() as { name: string }[];
+      columnsDb.close();
+      expect(columns.map((column) => column.name)).toEqual(
+        expect.arrayContaining([
+          'entrypoint',
+          'auth_strategy',
+          'container_volumes_json',
+          'platform',
+          'credential_bindings_json',
+        ]),
+      );
+    } finally {
+      migrated.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('market installation migrations', () => {
   it('migrates legacy market server_id rows into polymorphic targets', () => {
     const directory = mkdtempSync(join(tmpdir(), 'toolhome-installation-migrate-'));

@@ -1,5 +1,6 @@
 import type { AuthProvider, OAuthClientProvider } from '@modelcontextprotocol/client';
 import { AppError } from '../domain/errors.js';
+import { materializeCredentialPayload } from '../security/credential-materializer.js';
 import type { CredentialPayload, ServerRecord } from '../domain/models.js';
 import type { Store } from '../storage/store.js';
 import { StoredOAuthProvider } from './oauth-provider.js';
@@ -36,17 +37,18 @@ export class CredentialResolver {
   ): ResolvedCredential {
     switch (payload.type) {
       case 'bearer':
-        return {
-          headers: {},
-          env: {},
-          authProvider: { token: async () => payload.token },
-        };
       case 'api-key':
-        return { headers: { [payload.headerName]: payload.value }, env: {} };
       case 'headers':
-        return { headers: payload.headers, env: {} };
-      case 'env':
-        return { headers: {}, env: payload.variables };
+      case 'env': {
+        const materialized = materializeCredentialPayload(payload);
+        return {
+          headers: materialized.headers,
+          env: materialized.env,
+          ...(materialized.bearerToken === undefined
+            ? {}
+            : { authProvider: { token: async () => materialized.bearerToken } }),
+        };
+      }
       case 'oauth':
         if (server.transport.type !== 'streamable-http') {
           throw new AppError(

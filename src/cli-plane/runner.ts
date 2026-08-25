@@ -14,6 +14,10 @@ export interface ExecRequest {
   executionMode: 'host' | 'docker';
   /** Environment variable names explicitly forwarded into the container. */
   containerEnvKeys?: string[];
+  /** Persistent or bind-mounted state directories explicitly forwarded into the container. */
+  containerVolumes?: { source: string; target: string; readOnly?: boolean }[];
+  /** Fixed authentication bootstrap performed inside a hosted container. */
+  authStrategy?: 'none' | 'azure-service-principal' | 'tailscale-auth-key';
   entrypoint?: string | null;
 }
 
@@ -43,15 +47,43 @@ export function execCli(
   return new Promise((resolve) => {
     const isDocker = request.executionMode === 'docker';
     const spawnCommand = isDocker ? 'docker' : request.command;
+    const containerArgv =
+      request.authStrategy === 'azure-service-principal'
+        ? [
+            '-c',
+            'az login --service-principal --username "$AZURE_CLIENT_ID" --password "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --output none && exec az "$@"',
+            '--',
+            ...request.argv,
+          ]
+        : request.authStrategy === 'tailscale-auth-key'
+          ? [
+              '-c',
+              'mkdir -p /var/run/tailscale && tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 & daemon=$!; attempt=0; while [ "$attempt" -lt 50 ] && [ ! -S /var/run/tailscale/tailscaled.sock ]; do attempt=$((attempt + 1)); sleep 0.1; done; tailscale --socket=/var/run/tailscale/tailscaled.sock up --auth-key="$TS_AUTHKEY" --reset >/dev/null 2>&1 && exec tailscale --socket=/var/run/tailscale/tailscaled.sock "$@"; status=$?; kill "$daemon" >/dev/null 2>&1 || true; wait "$daemon" >/dev/null 2>&1 || true; exit "$status"',
+              '--',
+              ...request.argv,
+            ]
+          : request.argv;
     const spawnArgs = isDocker
       ? [
           'run',
           '--rm',
           '-i',
-          ...(request.entrypoint ? ['--entrypoint', request.entrypoint] : []),
+          ...(request.authStrategy === 'azure-service-principal' ||
+          request.authStrategy === 'tailscale-auth-key'
+            ? ['--entrypoint', '/bin/sh']
+            : request.entrypoint
+              ? ['--entrypoint', request.entrypoint]
+              : []),
+          ...(request.containerVolumes ?? []).flatMap((volume) => [
+            '--volume',
+            `${volume.source}:${volume.target}${volume.readOnly ? ':ro' : ''}`,
+          ]),
+          ...(request.authStrategy === 'tailscale-auth-key'
+            ? ['--env', 'TS_STATE_DIR=/var/lib/tailscale']
+            : []),
           ...(request.containerEnvKeys ?? []).flatMap((name) => ['--env', name]),
           request.command,
-          ...request.argv,
+          ...containerArgv,
         ]
       : request.argv;
 

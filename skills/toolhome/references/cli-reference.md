@@ -3,7 +3,7 @@
 ## auth
 
 ```bash
-toolhome auth login --url https://mcp.example.com --control-key "$KEY"
+toolhome auth login --url https://tool.cyncyn.xyz --control-key "$KEY"
 toolhome auth logout
 ```
 
@@ -169,7 +169,10 @@ audited in the events stream. The web console has a parallel **CLIs** page
 toolhome api GET  /api/v1/clis                       # list registered CLIs
 toolhome api POST /api/v1/clis -d '{ "slug":"az", "name":"Azure CLI", "command":"az",
   "executionMode":"host", "allowList":{"allow":[["account","show"],["vm","*"]],"deny":[["login"]]},
-  "probe":{"command":"az","args":["version"]}, "credentialId":"<env-credential-uuid>",
+  "probe":{"command":"az","args":["version"]}, "credentialId":"<credential-uuid>",
+  "credentialBindings":{"AZURE_CLIENT_ID":"env:CLIENT_ID"}, "platform":"azure",
+  "authStrategy":"azure-service-principal",
+  "containerVolumes":[{"source":"toolhome-azure-cli-state","target":"/root/.azure","readOnly":false}],
   "timeoutMs":60000, "maxOutputBytes":65536 }'       # register (201)
 toolhome api GET  /api/v1/clis/<id>                  # fetch
 toolhome api PATCH /api/v1/clis/<id> -d '{"enabled":false}'   # update (partial)
@@ -196,13 +199,23 @@ Semantics:
 - **Allow-list**: `deny` rules are evaluated first; a non-empty `allow` list must match at
   least one rule (`*` matches one argv token, rules match as argv prefixes). Denied argv is
   rejected with 403 before any process is spawned.
+- **Credential materialization**: MCP and hosted CLI entries share the encrypted credential
+  payload format. CLI bindings project `env:<name>`, `token`, `value`, `header:<name>`, or
+  `accessToken` into the process environment. OAuth uses its stored access token and returns
+  `credential_authorization_required` until authorization is complete.
 - **Env injection**: every exec gets `CI=true`, `NO_COLOR=1`, `PAGER=cat`, `TERM=dumb`
-  (unless the record sets `interactive: true`), plus any Env Credential
-  (`payload.type: 'env'`) variables attached to the record.
+  (unless the record sets `interactive: true`), plus the bound credential variables.
 - **Status probe**: the declared `probe.command` runs in the same context; its stdout is
   parsed as `version=...` / `loggedIn=true|false` lines; `installed` = exit code 0.
 - **Isolation**: `executionMode: 'host'` spawns on the ToolHome host (trusted entries);
   `'docker'` spawns a one-shot sibling container (`docker run --rm -i <image> <argv…>`).
+  `containerVolumes` are explicit Docker named volumes forwarded with `--volume`; bind paths,
+  duplicate targets, and host credential directories are rejected.
+  credential directories are never mounted implicitly. `authStrategy: "azure-service-principal"`
+  performs a fixed `az login --service-principal` bootstrap from bound environment variables,
+  while `authStrategy: "tailscale-auth-key"` starts an in-container userspace `tailscaled` and performs a fixed `tailscale --socket=... up --auth-key` bootstrap.
+  Catalog entries may use npm, Go, GitHub Release, uv, or Docker installer backends, but those
+  backends are hidden implementation details rather than separate Market products.
 - **Audit**: every exec appends a `cli.exec` event (slug, argv, exit code, duration) visible
   via `toolhome events` / `GET /api/v1/events`.
 

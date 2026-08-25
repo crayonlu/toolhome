@@ -4,8 +4,8 @@
 > ToolHome server, so no client machine needs to install or log in to them. This plane is a
 > **sibling of MCP hosting**, not a dependency on it.
 >
-> Status: research/design only — no code in this change. Security is treated as a short
-> constraints note by explicit scope decision.
+> Status: historical research/design note. The implemented v1 follows the Form A direction
+> below; later sections retain future-login ideas and operational follow-ups.
 
 ---
 
@@ -18,7 +18,7 @@ A dedicated registry and execution API beside the existing MCP planes:
 ```
 Control:   POST /api/v1/clis            register a CLI (slug, image/command, allow-list, credentialId)
            GET  /api/v1/clis/{slug}     status incl. version + login-state probe result
-Data:      POST /cli/{slug}/exec        { argv[], stdin?, timeoutMs?, cwd? } → NDJSON stream
+Data:      POST /cli/{slug}/exec        { argv[], stdin?, timeoutMs? } → NDJSON stream
 Status:    GET  /cli/{slug}/status      { installed, version, loggedIn, lastCheckedAt }
 Lifecycle: install/upgrade jobs reuse the Market InstallJob machinery
 ```
@@ -117,13 +117,14 @@ discipline in `src/market/catalog.ts` applies verbatim), report steps, land in `
 
 ### 2.4 Execution isolation
 
-Default execution mode is a **one-shot sibling container**: `docker run --rm -i --network <net>
-<image> <argv…>` with the CLI's state volume mounted. The host path is proven:
-`docker-compose.yml` mounts `/var/run/docker.sock` into the container and sets
+Default execution mode is a **one-shot sibling container**: `docker run --rm -i <image> <argv…>`
+with only declared Docker named volumes and credential environment variables forwarded. The host
+path is proven: `docker-compose.yml` mounts `/var/run/docker.sock` into the container and sets
 `group_add: ${DOCKER_GROUP_ID}` precisely so the runtime user may drive sibling containers
-(this is how `docker`-kind Market entries run markitdown today, via the spawn site above).
-Host-process execution stays available as an explicit opt-in for trusted entries (same trust
-decision the catalog makes for `home-stdio`).
+(this is how Docker-backed Market entries run today, via the spawn site above). Host-process
+execution stays available as an explicit opt-in for trusted entries (same trust decision the
+catalog makes for `home-stdio`). Hosted CLI records reject bind paths and duplicate volume
+mount targets; platform-specific bootstrap strategies are limited to supported Docker entries.
 
 The Dockerfile already ships the two runtimes CLIs need (`uv`/`uvx` for Python-based tooling,
 `docker` CLI, plus `curl` — see the `apk add` layer in `Dockerfile`, which also supports the
@@ -189,29 +190,17 @@ skip interactive credential chains).
 - ⚠ Long-lived client secret (rotation policy is the operator's problem); some CLIs lack any
   non-interactive auth mode and cannot use this path
 
-### Approach 2 — Device-code login bridged through SecureAction (for CLIs without SP support)
+### Approach 2 — Device-code login bridged through SecureAction (future work)
 
-Extend `secure_actions` (`src/domain/models.ts`, `secureActionRecordSchema` with
-`kind: z.enum(['market_install'])`, `valuesJson`, `expiresAt`): add a `cli_login` kind.
-Flow: console/CLI triggers login → server runs `<cli> login --use-device-code` (or equivalent)
-inside the exec context → captures the verification URL + code into the SecureAction record →
-operator opens the URL from anywhere, completes consent → server polls for success, records
-`loggedIn=true`, and the resulting token cache persists in the CLI's mounted state volume.
+The current v1 implementation does not add a second CLI OAuth/device-code transport. A future
+version could extend `secure_actions` with a `cli_login` kind and run a per-platform device-code
+flow inside the exec context, but that requires a poller and platform-specific login semantics.
 
-- ✅ Covers CLIs whose only non-interactive mode is device-code; the SecureAction record
-  (URL + expiry + status) is exactly the existing "collect a value via URL" primitive used for
-  market installs
-- ✅ Token cache persistence is solved by mounting a per-CLI named volume (same pattern as the
-  `toolhome-data` volume in `docker-compose.yml`)
-- ⚠ Requires a poller/watcher during the login window and per-CLI knowledge of "what does
-  logged-in look like" (the §2.6 probe answers this)
-- ⚠ Device-code flows expire quickly (~15 min); the SecureAction `expiresAt` field models this
+- The SecureAction record (URL + expiry + status) could carry a future device-code flow, but
+  a poller and platform-specific login semantics are still required.
 
-Token-cache durability note: both approaches must mount persistent state (e.g.
-`cli-state-{slug}:/home/cli/.azure`) so tokens survive container restarts — the compose file's
-named-volume convention covers this directly. Expiry re-login is then: status probe flips
-`loggedIn=false` → console shows re-login action → Approach 2 flow (or secret rotation via
-Approach 1's credential update).
+Token-cache durability note: a future device-code flow would need a persistent named volume
+(for example `cli-state-{slug}:/home/cli/.config/tool`) so tokens survive container restarts.
 
 ---
 
@@ -233,14 +222,13 @@ Approach 1's credential update).
 
 On the Aliyun host, inside the real deployment topology:
 
-1. `docker run --rm -i -v cli-state-az:/root/.azure mcr.microsoft.com/azure-cli <version> az login --use-device-code` — verify device-code completion works from a headless container and the token cache lands in the mounted volume
-2. Restart the container; verify `az account show` still works from cache alone (persistence across restarts)
-3. Repeat the equivalent with an Env-Credential-injected service principal (`AZURE_*` env vars)
+1. Run the pinned Azure image with the current fixed service-principal bootstrap and named `/root/.azure` volume; verify `az account show` succeeds in the deployed sibling-container topology
+2. Restart the container; verify the state volume remains usable without importing a local profile
+3. Repeat with an Env-Credential-injected service principal (`AZURE_*` env vars) after rotating the stored secret
 4. Measure cold-start cost (`az version` after fresh pull) to decide image-per-CLI vs shared base
 
-Exit criteria: both auth paths demonstrably survive restart; timing numbers recorded. If
-device-code polling cannot be made to work headlessly, Approach 1 (SP/env) alone still
-unblocks v1 — document the limitation either way.
+Exit criteria: the service-principal path demonstrably survives restart; timing numbers are
+recorded. Device-code login remains future work and is not part of the current v1 runner.
 
 ### Phase 1 — Minimal CLI plane (Form A core)
 
@@ -248,6 +236,8 @@ unblocks v1 — document the limitation either way.
 - `POST /cli/{slug}/exec` with argv-only spawn, NDJSON streaming, timeouts, size caps
 - One pilot CLI: azure-cli via sibling container + Env Credential (Approach 1)
 - Events recorded per exec
+- Hosted CLI catalog entries for Azure, GitHub, and Tailscale with pinned Docker images,
+  explicit credential bindings, and read-only argv policies
 
 ### Phase 2 — Lifecycle & login UX
 

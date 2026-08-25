@@ -26,16 +26,16 @@
 
 深色模式（默认）：
 
-| Token | 值 |
-|---|---|
-| 背景 | `#0E0E10` |
-| 表面 | `#17171A` |
-| 毛玻璃 | `rgba(255,255,255,0.05)` + `blur(20px) saturate(180%)` |
-| 文字主/次/弱 | `#EDEDEF` / `#A0A0A8` / `#6B6B73` |
-| **强调色** | **`#3D7BFF`（电光蓝）** |
-| 成功 / 警告 / 错误 | `#3FBF7F` / `#D9A03F` / `#D96A5E`（降饱和） |
-| **Radius** | **`0`（全直角）** |
-| **边框** | **无** |
+| Token              | 值                                                     |
+| ------------------ | ------------------------------------------------------ |
+| 背景               | `#0E0E10`                                              |
+| 表面               | `#17171A`                                              |
+| 毛玻璃             | `rgba(255,255,255,0.05)` + `blur(20px) saturate(180%)` |
+| 文字主/次/弱       | `#EDEDEF` / `#A0A0A8` / `#6B6B73`                      |
+| **强调色**         | **`#3D7BFF`（电光蓝）**                                |
+| 成功 / 警告 / 错误 | `#3FBF7F` / `#D9A03F` / `#D96A5E`（降饱和）            |
+| **Radius**         | **`0`（全直角）**                                      |
+| **边框**           | **无**                                                 |
 
 浅色模式同比例反转（`#FAFAFA` 底 + 深灰文字），同一套 token 通过 CSS 变量切换。
 
@@ -86,18 +86,18 @@ web/
 
 ## 4. 信息架构（与 CLI 功能全量对齐）
 
-| 页面 | 覆盖的 CLI 功能 |
-|---|---|
-| 登录 | `auth login`（Control Key） |
-| 概览 Dashboard | `status`（服务器/凭据/密钥计数、整体健康、聚合+各独立端点、一键复制） |
-| 服务器 Servers | `server list/get/add/update/delete` · `enable/disable/refresh/restart/test` · `capability` · `status/logs`；详情页 Tab：概览 / 能力快照 / 日志 / 设置 |
-| 凭据 Credentials | `credential list/get/add/update/delete` · `test/revoke` · `authorize`（OAuth 完整等待流） |
-| 访问密钥 Access Keys | `access-key create/list/revoke`（创建后一次性明文展示 + 复制） |
-| 控制密钥 Control Keys | `control-key create/list/revoke`（设置-高级，二次确认） |
-| 端点 Endpoints | `endpoint aggregate/server`（聚合 + 每服务器 URL，复制按钮） |
-| 诊断 Diagnostics | `doctor`（每服务器状态 + 错误信息 + 重新检查） |
-| 事件 Events | `events`（级别过滤 + 时间线 + 自动刷新） |
-| 设置 Settings | `config export/import`（含/不含密钥）· 语言 · 主题 · 原始 API 控制台（`api <method> <path>`） |
+| 页面                  | 覆盖的 CLI 功能                                                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 登录                  | `auth login`（Control Key）                                                                                                                           |
+| 概览 Dashboard        | `status`（服务器/凭据/密钥计数、整体健康、聚合+各独立端点、一键复制）                                                                                 |
+| 服务器 Servers        | `server list/get/add/update/delete` · `enable/disable/refresh/restart/test` · `capability` · `status/logs`；详情页 Tab：概览 / 能力快照 / 日志 / 设置 |
+| 凭据 Credentials      | `credential list/get/add/update/delete` · `test/revoke` · `authorize`（OAuth 完整等待流）                                                             |
+| 访问密钥 Access Keys  | `access-key create/list/revoke`（创建后一次性明文展示 + 复制）                                                                                        |
+| 控制密钥 Control Keys | `control-key create/list/revoke`（设置-高级，二次确认）                                                                                               |
+| 端点 Endpoints        | `endpoint aggregate/server`（聚合 + 每服务器 URL，复制按钮）                                                                                          |
+| 诊断 Diagnostics      | `doctor`（每服务器状态 + 错误信息 + 重新检查）                                                                                                        |
+| 事件 Events           | `events`（级别过滤 + 时间线 + 自动刷新）                                                                                                              |
+| 设置 Settings         | `config export/import`（含/不含密钥）· 语言 · 主题 · 原始 API 控制台（`api <method> <path>`）                                                         |
 
 ### 4.1 OAuth 授权流（核心体验，镜像 CLI）
 
@@ -120,7 +120,7 @@ web/
 4. **核心页面**：Dashboard、Servers（含详情 Tab）、Credentials（含 OAuth 流）、Access Keys
 5. **剩余页面**：Endpoints、Diagnostics、Events、Settings（export/import、原始 API 控制台、Control Keys）
 6. **打磨**：Motion 统一、空态/错误态、reduced-motion、响应式
-7. **测试与上线**：vitest 组件测试、构建进 Docker、部署到 `mcp.cyncyn.xyz`
+7. **测试与上线**：vitest 组件测试、构建进 Docker、部署到 `tool.cyncyn.xyz`
 
 ## 7. 范围说明
 
