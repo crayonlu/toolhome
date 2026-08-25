@@ -107,7 +107,9 @@ describe('market', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       expect(
-        (await jsonResponse(await controlRequest(runtime, controlKey, 'GET', '/api/v1/clis'))) as unknown[],
+        (await jsonResponse(
+          await controlRequest(runtime, controlKey, 'GET', '/api/v1/clis'),
+        )) as unknown[],
       ).toHaveLength(0);
       expect(
         (await jsonResponse(
@@ -178,11 +180,11 @@ describe('market', () => {
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       await installEntry(runtime, controlKey, 'host-shell');
-      const deleteInstallation = vi.spyOn(runtime.store, 'deleteInstallation').mockImplementation(
-        () => {
+      const deleteInstallation = vi
+        .spyOn(runtime.store, 'deleteInstallation')
+        .mockImplementation(() => {
           throw new Error('installation delete failed');
-        },
-      );
+        });
 
       const response = await controlRequest(
         runtime,
@@ -193,7 +195,9 @@ describe('market', () => {
       );
       expect(response.status).toBe(500);
       expect(
-        (await jsonResponse(await controlRequest(runtime, controlKey, 'GET', '/api/v1/clis'))) as unknown[],
+        (await jsonResponse(
+          await controlRequest(runtime, controlKey, 'GET', '/api/v1/clis'),
+        )) as unknown[],
       ).toHaveLength(1);
       expect(
         (
@@ -237,7 +241,9 @@ describe('market', () => {
       );
       expect(response.status).toBe(500);
       expect(
-        (await jsonResponse(await controlRequest(runtime, controlKey, 'GET', '/api/v1/servers'))) as {
+        (await jsonResponse(
+          await controlRequest(runtime, controlKey, 'GET', '/api/v1/servers'),
+        )) as {
           id: string;
         }[],
       ).toEqual(expect.arrayContaining([expect.objectContaining({ id: result.server.id })]));
@@ -682,9 +688,12 @@ describe('market', () => {
   it('installs a uvx entry via uv tool install', async () => {
     const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-uv-'));
     const uvPath = join(fakeBin, 'uv');
+    const uvxPath = join(fakeBin, 'uvx');
     const argsLog = join(fakeBin, 'uv-args.log');
     writeFileSync(uvPath, `#!/bin/sh\necho "$@" > "${argsLog}"\nexit 0\n`);
+    writeFileSync(uvxPath, '#!/bin/sh\nexit 1\n');
     chmodSync(uvPath, 0o755);
+    chmodSync(uvxPath, 0o755);
     const previousPath = process.env.PATH;
     process.env.PATH = `${fakeBin}:${previousPath}`;
     const { runtime, controlKey, close } = createTestRuntime();
@@ -815,9 +824,12 @@ describe('market', () => {
   it('updates an installed entry to the catalog pin, keeping the credential', async () => {
     const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-uv-update-'));
     const uvPath = join(fakeBin, 'uv');
+    const uvxPath = join(fakeBin, 'uvx');
     const argsLog = join(fakeBin, 'uv-args.log');
     writeFileSync(uvPath, `#!/bin/sh\necho "$@" >> "${argsLog}"\nexit 0\n`);
+    writeFileSync(uvxPath, '#!/bin/sh\nexit 1\n');
     chmodSync(uvPath, 0o755);
+    chmodSync(uvxPath, 0o755);
     const previousPath = process.env.PATH;
     process.env.PATH = `${fakeBin}:${previousPath}`;
     const { runtime, controlKey, close } = createTestRuntime();
@@ -859,8 +871,8 @@ describe('market', () => {
       })[];
       expect(list.find((item) => item.id === 'fetch')?.updateAvailable).toBe(true);
 
-      // Run the update; the fake uv succeeds, the (real) uvx restart fails but
-      // must not fail the job — the package and record are already updated.
+      // Run the update; the fake installer succeeds, while the isolated uvx
+      // restart fails fast without touching a real external process.
       const started = (await jsonResponse(
         await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/fetch/update', {}),
       )) as { jobId: string; status: string };

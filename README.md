@@ -199,11 +199,25 @@ npm run cli -- auth login \
 
 npm run cli -- server list
 npm run cli -- server add ./server.json
+npm run cli -- cli list
+npm run cli -- cli status az
+npm run cli -- cli exec az -- account show
+npm run cli -- cli exec gh --stdin-file ./input.txt -- issue list
 npm run cli -- credential authorize cloudflare
 npm run cli -- access-key create laptop
 npm run cli -- endpoint aggregate
 npm run cli -- doctor
 ```
+
+`cli exec` sends an argv array to the hosted CLI and streams stdout/stderr without invoking a shell. Put `--` before CLI arguments that start with `-`; `--stdin` and `--stdin-file` feed remote stdin, and `--output json` emits one JSON object per frame plus the final exit outcome:
+
+```bash
+npm run cli -- cli exec az --timeout 30000 -- account show --subscription "$SUBSCRIPTION_ID"
+npm run cli -- cli exec gh --stdin-file ./issue.md -- issue create --title "Bug" --body-file -
+npm run cli --output json -- cli exec host-shell -- -c 'printf hello'
+```
+
+The CLI command family also supports `cli get`, `cli add`, `cli update`, `cli delete`, `cli enable`, and `cli disable`. `cli exec` returns exit status 0 only when the hosted process reports `result: "ok"`; SIGINT/SIGTERM abort the HTTP stream and the remote process.
 
 `credential authorize <name>` resolves by credential name (or id), opens the browser, and waits until authorization succeeds, fails, or times out:
 
@@ -232,19 +246,19 @@ Backups contain plaintext secrets and deserve the same protection as the master 
 
 ## Configuration
 
-| Environment variable            | Description                                       | Default                  |
-| ------------------------------- | ------------------------------------------------- | ------------------------ |
-| `MCP_HOME_HOST`                 | Listen address                                    | `127.0.0.1`              |
-| `MCP_HOME_PORT`                 | Listen port                                       | `3344`                   |
-| `MCP_HOME_PUBLIC_URL`           | Externally reachable canonical origin             | `http://127.0.0.1:3344`  |
-| `MCP_HOME_DATA_DIR`             | SQLite and runtime data directory                 | `./data`                 |
-| `MCP_HOME_MASTER_KEY`           | Root key for secret encryption/signing/digests    | required                 |
-| `MCP_HOME_BOOTSTRAP_CONTROL_KEY`| Control Key written on first database boot        | required on first boot   |
-| `MCP_HOME_ALLOWED_HOSTS`        | Allowed Hosts, comma-separated                    | Public URL hostname      |
-| `MCP_HOME_LOG_LEVEL`            | `debug`, `info`, `warn`, `error`                  | `info`                   |
-| `MCP_HOME_WEB_DIR`              | Web console static files directory                | disabled                 |
-| `MCP_HOME_MARKET_DIR`           | Market npm install directory                      | `<dataDir>/market`       |
-| `MCP_HOME_OAUTH_URL_CLIENT_ID`  | Enable URL-based Client Metadata                  | `true`                   |
+| Environment variable             | Description                                    | Default                 |
+| -------------------------------- | ---------------------------------------------- | ----------------------- |
+| `MCP_HOME_HOST`                  | Listen address                                 | `127.0.0.1`             |
+| `MCP_HOME_PORT`                  | Listen port                                    | `3344`                  |
+| `MCP_HOME_PUBLIC_URL`            | Externally reachable canonical origin          | `http://127.0.0.1:3344` |
+| `MCP_HOME_DATA_DIR`              | SQLite and runtime data directory              | `./data`                |
+| `MCP_HOME_MASTER_KEY`            | Root key for secret encryption/signing/digests | required                |
+| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | Control Key written on first database boot     | required on first boot  |
+| `MCP_HOME_ALLOWED_HOSTS`         | Allowed Hosts, comma-separated                 | Public URL hostname     |
+| `MCP_HOME_LOG_LEVEL`             | `debug`, `info`, `warn`, `error`               | `info`                  |
+| `MCP_HOME_WEB_DIR`               | Web console static files directory             | disabled                |
+| `MCP_HOME_MARKET_DIR`            | Market npm install directory                   | `<dataDir>/market`      |
+| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata               | `true`                  |
 
 ## Security Model
 

@@ -12,8 +12,9 @@ function packageVersion(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
   for (;;) {
     try {
-      return (JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')) as { version: string })
-        .version;
+      return (
+        JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')) as { version: string }
+      ).version;
     } catch {
       const parent = dirname(directory);
       if (parent === directory) return '0.0.0';
@@ -86,6 +87,131 @@ for (const view of ['capabilities', 'status', 'logs', 'endpoint']) {
     .action(run((client, id: string) => client.request('GET', `/api/v1/servers/${id}/${view}`)));
 }
 
+const cli = program.command('cli').description('Manage and run CLIs hosted on the ToolHome server');
+cli
+  .command('list')
+  .description('List registered hosted CLIs')
+  .action(run((client) => client.request('GET', '/api/v1/clis')));
+cli
+  .command('get <id>')
+  .description('Show a hosted CLI record')
+  .action(run((client, id: string) => client.request('GET', `/api/v1/clis/${id}`)));
+cli
+  .command('add <file>')
+  .description('Register a hosted CLI from a JSON file or - for stdin')
+  .action(run((client, file: string) => client.request('POST', '/api/v1/clis', readJson(file))));
+cli
+  .command('update <id> <file>')
+  .description('Update a hosted CLI from a JSON file or - for stdin')
+  .action(
+    run((client, id: string, file: string) =>
+      client.request('PATCH', `/api/v1/clis/${id}`, readJson(file)),
+    ),
+  );
+cli
+  .command('delete <id>')
+  .description('Delete a hosted CLI record')
+  .action(run((client, id: string) => client.request('DELETE', `/api/v1/clis/${id}`)));
+cli
+  .command('enable <id>')
+  .description('Enable a hosted CLI')
+  .action(
+    run((client, id: string) => client.request('PATCH', `/api/v1/clis/${id}`, { enabled: true })),
+  );
+cli
+  .command('disable <id>')
+  .description('Disable a hosted CLI')
+  .action(
+    run((client, id: string) => client.request('PATCH', `/api/v1/clis/${id}`, { enabled: false })),
+  );
+cli
+  .command('status <slug>')
+  .description('Probe a hosted CLI (installed/version/loggedIn)')
+  .action(run((client, slug: string) => client.request('GET', `/cli/${slug}/status`)));
+cli
+  .command('exec <slug> [args...]')
+  .description('Run a hosted CLI; args are passed verbatim as argv (never through a shell)')
+  .option('--stdin <text>', 'feed text to the remote process stdin')
+  .option('--stdin-file <path>', 'feed a file (or - for this terminal) to remote stdin')
+  .option(
+    '--timeout <ms>',
+    'kill the remote process after this many milliseconds',
+    parsePositiveInt,
+  )
+  .option('--max-output-bytes <bytes>', 'cap output for this invocation', parsePositiveInt)
+  .action(
+    run(
+      async (
+        client,
+        slug: string,
+        args: string[],
+        options: {
+          stdin?: string;
+          stdinFile?: string;
+          timeout?: number;
+          maxOutputBytes?: number;
+        },
+      ) => {
+        if (args.length === 0) throw new Error('At least one argv token is required');
+        if (options.stdin !== undefined && options.stdinFile !== undefined) {
+          throw new Error('--stdin and --stdin-file are mutually exclusive');
+        }
+        let stdin: string | null | undefined;
+        if (options.stdin !== undefined) {
+          stdin = options.stdin;
+        } else if (options.stdinFile === '-') {
+          stdin = readFileSync(0, 'utf8');
+        } else if (options.stdinFile !== undefined) {
+          stdin = readFileSync(resolve(options.stdinFile), 'utf8');
+        }
+
+        const output = program.opts<GlobalOptions>().output;
+        const abort = new AbortController();
+        const onSignal = (): void => abort.abort();
+        process.once('SIGINT', onSignal);
+        process.once('SIGTERM', onSignal);
+        let outcome;
+        try {
+          outcome = await client.execStream(
+            slug,
+            {
+              argv: args,
+              stdin,
+              ...(options.timeout === undefined ? {} : { timeoutMs: options.timeout }),
+              ...(options.maxOutputBytes === undefined
+                ? {}
+                : { maxOutputBytes: options.maxOutputBytes }),
+            },
+            (frame) => {
+              if (output === 'json') {
+                print(frame, 'json');
+              } else if (frame.type === 'stdout') {
+                process.stdout.write(frame.data);
+              } else if (frame.type === 'stderr') {
+                process.stderr.write(frame.data);
+              }
+            },
+            abort.signal,
+          );
+        } finally {
+          process.removeListener('SIGINT', onSignal);
+          process.removeListener('SIGTERM', onSignal);
+        }
+        if (output === 'json') {
+          print(outcome, 'json');
+        } else {
+          if (outcome.result === 'timeout') {
+            process.stderr.write(`\ntimed out after ${outcome.durationMs}ms\n`);
+          }
+          if (outcome.truncated) {
+            process.stderr.write('\noutput truncated by the configured limit\n');
+          }
+        }
+        process.exitCode = outcome.result === 'ok' ? 0 : 1;
+      },
+    ),
+  );
+
 const credential = program
   .command('credential')
   .description('Manage encrypted upstream credentials');
@@ -125,7 +251,10 @@ credential
   .option('--timeout <seconds>', 'how long to wait for authorization', parsePositiveInt, 600)
   .action(
     run(async (client, name: string, options: AuthorizeOptions) => {
-      const credentials = (await client.request('GET', '/api/v1/credentials')) as CredentialSummary[];
+      const credentials = (await client.request(
+        'GET',
+        '/api/v1/credentials',
+      )) as CredentialSummary[];
       const credential = resolveCredential(credentials, name);
       const servers = (await client.request('GET', '/api/v1/servers')) as ServerSummary[];
       const bound = servers.filter((server) => server.credentialId === credential.id);
@@ -146,10 +275,14 @@ credential
         );
       }
 
-      const result = (await client.request('POST', `/api/v1/credentials/${credential.id}/authorize`, {
-        serverId,
-        force: options.force ?? false,
-      })) as { status: string; authorizationUrl?: string };
+      const result = (await client.request(
+        'POST',
+        `/api/v1/credentials/${credential.id}/authorize`,
+        {
+          serverId,
+          force: options.force ?? false,
+        },
+      )) as { status: string; authorizationUrl?: string };
 
       if (program.opts<GlobalOptions>().output === 'json') {
         print(result, program.opts<GlobalOptions>().output);
@@ -170,7 +303,9 @@ credential
         openUrl(authorizationUrl);
         process.stdout.write(`If the browser did not open, visit:\n  ${authorizationUrl}\n`);
       } else {
-        process.stdout.write(`Visit this URL to authorize "${credential.name}":\n  ${authorizationUrl}\n`);
+        process.stdout.write(
+          `Visit this URL to authorize "${credential.name}":\n  ${authorizationUrl}\n`,
+        );
       }
 
       if (!options.wait) return;
@@ -269,7 +404,9 @@ endpoint
   .command('server <id>')
   .action(run((client, id: string) => client.request('GET', `/api/v1/servers/${id}/endpoint`)));
 
-const market = program.command('market').description('Browse and install MCP servers from the catalog');
+const market = program
+  .command('market')
+  .description('Browse and install MCP servers from the catalog');
 market
   .command('list')
   .description('List catalog entries with install status')
@@ -539,7 +676,9 @@ function resolveCredential(credentials: CredentialSummary[], value: string): Cre
   );
   if (loose.length === 1 && loose[0] !== undefined) return loose[0];
   if (exact.length > 1) {
-    throw new Error(`Multiple credentials named "${value}"; use a unique name or the credential id`);
+    throw new Error(
+      `Multiple credentials named "${value}"; use a unique name or the credential id`,
+    );
   }
   const names = credentials.map((credential) => credential.name).join(', ');
   throw new Error(`Credential "${value}" not found. Available credentials: ${names || '(none)'}`);
@@ -592,10 +731,7 @@ function parsePositiveInt(value: string | number): number {
   return parsed;
 }
 
-function collectValues(
-  value: string,
-  previous: Record<string, string>,
-): Record<string, string> {
+function collectValues(value: string, previous: Record<string, string>): Record<string, string> {
   const index = value.indexOf('=');
   if (index <= 0) {
     throw new Error(`Expected KEY=value, got "${value}"`);

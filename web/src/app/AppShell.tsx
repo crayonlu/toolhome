@@ -33,18 +33,45 @@ interface NavItem {
   planes?: Plane[];
 }
 
+/**
+ * Sidebar sections. The "plane" section holds per-plane resources (Servers vs
+ * CLIs) and is the only one that changes when the switch flips; "shared" and
+ * "system" stay put on both planes.
+ */
+const navGroups: { titleKey: string; items: NavItem[] }[] = [
+  {
+    titleKey: 'nav.section.plane',
+    items: [
+      { to: '/servers', key: 'nav.servers', icon: Server, planes: ['mcp'] },
+      { to: '/clis', key: 'nav.clis', icon: SquareTerminal, planes: ['cli'] },
+    ],
+  },
+  {
+    titleKey: 'nav.section.shared',
+    items: [
+      { to: '/calls', key: 'nav.calls', icon: PhoneCall },
+      { to: '/endpoints', key: 'nav.endpoints', icon: Globe },
+      { to: '/market', key: 'nav.market', icon: Boxes },
+      { to: '/credentials', key: 'nav.credentials', icon: KeyRound },
+    ],
+  },
+  {
+    titleKey: 'nav.section.mcp',
+    items: [{ to: '/access-keys', key: 'nav.accessKeys', icon: Link2, planes: ['mcp'] }],
+  },
+  {
+    titleKey: 'nav.section.system',
+    items: [
+      { to: '/diagnostics', key: 'nav.diagnostics', icon: Activity },
+      { to: '/events', key: 'nav.events', icon: ScrollText },
+      { to: '/settings', key: 'nav.settings', icon: Settings },
+    ],
+  },
+];
+
 const desktopNav: NavItem[] = [
   { to: '/', key: 'nav.overview', icon: LayoutDashboard, end: true },
-  { to: '/servers', key: 'nav.servers', icon: Server, planes: ['mcp'] },
-  { to: '/clis', key: 'nav.clis', icon: SquareTerminal, planes: ['cli'] },
-  { to: '/calls', key: 'nav.calls', icon: PhoneCall },
-  { to: '/credentials', key: 'nav.credentials', icon: KeyRound },
-  { to: '/access-keys', key: 'nav.accessKeys', icon: Link2 },
-  { to: '/endpoints', key: 'nav.endpoints', icon: Globe },
-  { to: '/market', key: 'nav.market', icon: Boxes },
-  { to: '/diagnostics', key: 'nav.diagnostics', icon: Activity },
-  { to: '/events', key: 'nav.events', icon: ScrollText },
-  { to: '/settings', key: 'nav.settings', icon: Settings },
+  ...navGroups.flatMap((group) => group.items),
 ];
 
 /** Pages that exist per plane; switching flips between the pair. */
@@ -62,9 +89,18 @@ function mobileTabsFor(plane: Plane): NavItem[] {
   return navFor(plane).slice(0, 3);
 }
 
-function mobileMoreFor(plane: Plane): NavItem[] {
+function mobileMoreGroupsFor(plane: Plane): { titleKey: string; items: NavItem[] }[] {
   const tabs = mobileTabsFor(plane);
-  return navFor(plane).filter((item) => !tabs.some((tab) => tab.to === item.to));
+  return navGroups
+    .map((group) => ({
+      titleKey: group.titleKey,
+      items: group.items.filter(
+        (item) =>
+          (item.planes === undefined || item.planes.includes(plane)) &&
+          !tabs.some((tab) => tab.to === item.to),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 function ThemeSwitch() {
@@ -116,9 +152,7 @@ function PlaneSwitch() {
           aria-checked={plane === option.value}
           onClick={() => setPlane(option.value)}
           className={`flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 text-xs font-medium transition-colors ${
-            plane === option.value
-              ? 'bg-surface text-ink shadow-sm'
-              : 'text-ink-3 hover:text-ink-2'
+            plane === option.value ? 'bg-surface text-ink shadow-sm' : 'text-ink-3 hover:text-ink-2'
           }`}
         >
           <option.icon className="size-3.5" />
@@ -159,23 +193,39 @@ function Brand() {
 
 function SideNav({ plane }: { plane: Plane }) {
   const { t } = useI18n();
+  const overview: NavItem = { to: '/', key: 'nav.overview', icon: LayoutDashboard, end: true };
+  const renderLink = (item: NavItem) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.end}
+      className={({ isActive }) =>
+        `flex h-9 items-center gap-2.5 px-3 text-sm transition-colors ${
+          isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink'
+        }`
+      }
+    >
+      <item.icon className="size-4 shrink-0" />
+      {t(item.key)}
+    </NavLink>
+  );
   return (
-    <nav className="flex flex-1 flex-col gap-0.5 px-2">
-      {navFor(plane).map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.end}
-          className={({ isActive }) =>
-            `flex h-9 items-center gap-2.5 px-3 text-sm transition-colors ${
-              isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink'
-            }`
-          }
-        >
-          <item.icon className="size-4 shrink-0" />
-          {t(item.key)}
-        </NavLink>
-      ))}
+    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2">
+      {renderLink(overview)}
+      {navGroups.map((group) => {
+        const items = group.items.filter(
+          (item) => item.planes === undefined || item.planes.includes(plane),
+        );
+        if (items.length === 0) return null;
+        return (
+          <div key={group.titleKey} className="mt-3 flex flex-col gap-0.5">
+            <div className="px-3 pb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-3/70">
+              {t(group.titleKey)}
+            </div>
+            {items.map(renderLink)}
+          </div>
+        );
+      })}
     </nav>
   );
 }
@@ -282,19 +332,26 @@ export function AppShell() {
 
       <Sheet open={moreOpen} onOpenChange={setMoreOpen} title={t('nav.more')} side="bottom">
         <div className="flex flex-col gap-0.5 pb-[env(safe-area-inset-bottom)]">
-          {mobileMoreFor(plane).map((item) => (
-            <button
-              key={item.to}
-              type="button"
-              onClick={() => {
-                setMoreOpen(false);
-                navigate(item.to);
-              }}
-              className="flex h-11 items-center gap-3 px-2 text-sm text-ink-2"
-            >
-              <item.icon className="size-4" />
-              {t(item.key)}
-            </button>
+          {mobileMoreGroupsFor(plane).map((group) => (
+            <div key={group.titleKey} className="mt-3 flex flex-col gap-0.5 first:mt-0">
+              <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-3/70">
+                {t(group.titleKey)}
+              </div>
+              {group.items.map((item) => (
+                <button
+                  key={item.to}
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    navigate(item.to);
+                  }}
+                  className="flex h-11 items-center gap-3 px-2 text-sm text-ink-2"
+                >
+                  <item.icon className="size-4" />
+                  {t(item.key)}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </Sheet>

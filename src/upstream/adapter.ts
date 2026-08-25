@@ -88,6 +88,11 @@ interface ConnectionSlot {
   suppressCloseEvent: boolean;
 }
 
+interface PendingConnection {
+  client: Client;
+  transport: Transport;
+}
+
 interface ResourceSubscription {
   slot: ConnectionSlot;
   subscription: McpSubscription | null;
@@ -128,6 +133,7 @@ export class UpstreamAdapter {
   readonly server: ServerRecord;
   readonly #slots: ConnectionSlot[] = [];
   readonly #creating = new Map<string, number>();
+  readonly #pendingConnections = new Set<PendingConnection>();
   readonly #waiters = new Set<() => void>();
   readonly #resourceSubscriptions = new Map<string, ResourceSubscription>();
   readonly #subscriptionCreates = new Map<string, Promise<void>>();
@@ -508,8 +514,13 @@ export class UpstreamAdapter {
       slot.suppressCloseEvent = true;
       slot.extensions.close();
     }
+    const pendingConnections = [...this.#pendingConnections];
+    this.#pendingConnections.clear();
     this.#wakeWaiters();
-    await Promise.allSettled(slots.map((slot) => slot.client.close()));
+    await Promise.allSettled([
+      ...slots.map((slot) => slot.client.close()),
+      ...pendingConnections.flatMap(({ client, transport }) => [client.close(), transport.close()]),
+    ]);
     this.#resourceSubscriptions.clear();
     this.#subscriptionCreates.clear();
   }
@@ -612,6 +623,8 @@ export class UpstreamAdapter {
           if (message !== '') this.#events({ type: 'stderr', serverId: this.server.id, message });
         });
       }
+      const pendingConnection = { client, transport };
+      this.#pendingConnections.add(pendingConnection);
       try {
         await client.connect(transport, { timeout: this.server.settings.connectTimeoutMs });
         connected = true;
@@ -633,6 +646,8 @@ export class UpstreamAdapter {
         connected = false;
         await client.close().catch(() => undefined);
         throw error;
+      } finally {
+        this.#pendingConnections.delete(pendingConnection);
       }
     };
 
