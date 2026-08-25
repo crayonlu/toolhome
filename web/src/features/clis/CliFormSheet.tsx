@@ -7,12 +7,14 @@ import { FieldGroup, TextareaField, TextField } from '../../components/ui/Field'
 import { SelectField } from '../../components/ui/SelectField';
 import { Toggle } from '../../components/ui/Toggle';
 import type { CliRecord } from '../../api/types';
+import { parseArgvText } from './argv';
 
 export interface CliFormValue {
   slug: string;
   name: string;
   command: string;
   executionMode: 'host' | 'docker';
+  entrypoint: string | null;
   allowList: { allow: string[][]; deny: string[][] };
   interactive: boolean;
   credentialId: string | null;
@@ -52,6 +54,7 @@ export function CliFormSheet({
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [executionMode, setExecutionMode] = useState<'host' | 'docker'>('host');
+  const [entrypoint, setEntrypoint] = useState('');
   const [allowText, setAllowText] = useState('');
   const [denyText, setDenyText] = useState('');
   const [interactive, setInteractive] = useState(false);
@@ -69,6 +72,7 @@ export function CliFormSheet({
     setName(initial?.name ?? '');
     setCommand(initial?.command ?? '');
     setExecutionMode(initial?.executionMode ?? 'host');
+    setEntrypoint(initial?.entrypoint ?? '');
     setAllowText(formatRules(initial?.allowList.allow ?? []));
     setDenyText(formatRules(initial?.allowList.deny ?? []));
     setInteractive(initial?.interactive ?? false);
@@ -87,12 +91,13 @@ export function CliFormSheet({
       name,
       command,
       executionMode,
+      entrypoint: entrypoint || null,
       allowList: { allow: parseRules(allowText), deny: parseRules(denyText) },
       interactive,
       credentialId: credentialId || null,
       probe:
         probeEnabled && probeCommand
-          ? { command: probeCommand, args: probeArgs ? probeArgs.split(/\s+/).filter(Boolean) : [] }
+          ? { command: probeCommand, args: parseArgvText(probeArgs) }
           : null,
       enabled,
       timeoutMs: Number(timeoutMs) || 60_000,
@@ -130,6 +135,15 @@ export function CliFormSheet({
             { value: 'docker', label: t('cli.modeDocker') },
           ]}
         />
+        {executionMode === 'docker' && (
+          <TextField
+            label={t('cli.entrypoint')}
+            value={entrypoint}
+            onChange={setEntrypoint}
+            mono
+            placeholder="gh"
+          />
+        )}
         <TextareaField
           label={t('cli.allowRules')}
           value={allowText}

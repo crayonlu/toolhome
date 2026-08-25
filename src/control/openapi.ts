@@ -204,8 +204,12 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
 
   add('/api/v1/overview', 'get', 'getOverview', { summary: 'Read the system overview' });
   add('/api/v1/events', 'get', 'listEvents', {
-    summary: 'Read system events',
-    parameters: [limitParameter],
+    summary: 'Read system events, optionally filtered by hosting plane and level',
+    parameters: [
+      limitParameter,
+      { name: 'plane', in: 'query', schema: { type: 'string', enum: ['mcp', 'cli'] } },
+      { name: 'level', in: 'query', schema: { type: 'string', enum: ['info', 'warn', 'error'] } },
+    ],
   });
   add('/api/v1/calls', 'get', 'listCalls', {
     summary: 'List tool call records (metadata only)',
@@ -217,7 +221,7 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
       {
         name: 'endpoint_type',
         in: 'query',
-        schema: { type: 'string', enum: ['aggregate', 'individual', 'management'] },
+        schema: { type: 'string', enum: ['aggregate', 'individual', 'management', 'cli'] },
       },
       { name: 'principal_id', in: 'query', schema: { type: 'string' } },
       {
@@ -237,6 +241,11 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
     parameters: [
       { name: 'server_id', in: 'query', schema: { type: 'string' } },
       { name: 'tool', in: 'query', schema: { type: 'string' } },
+      {
+        name: 'endpoint_type',
+        in: 'query',
+        schema: { type: 'string', enum: ['aggregate', 'individual', 'management', 'cli'] },
+      },
       { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
       { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
     ],
@@ -251,6 +260,11 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
       },
       { name: 'server_id', in: 'query', schema: { type: 'string' } },
       { name: 'tool', in: 'query', schema: { type: 'string' } },
+      {
+        name: 'endpoint_type',
+        in: 'query',
+        schema: { type: 'string', enum: ['aggregate', 'individual', 'management', 'cli'] },
+      },
       { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
       { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
     ],
@@ -288,7 +302,7 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   });
   add('/api/v1/market/{entry_id}/update', 'post', 'updateMarketEntry', {
     summary:
-      'Explicitly update an installed entry to the catalog pin; keeps credential and visibility, restarts the server',
+      'Explicitly update an installed entry to the catalog pin; keeps credential and visibility, and refreshes the hosted target',
     parameters: [{ name: 'entry_id', in: 'path', required: true, schema: { type: 'string' } }],
   });
   add('/api/v1/market/installations', 'get', 'listMarketInstallations', {

@@ -104,8 +104,12 @@ export function mountControlApi(
     }
     try {
       const token = bearerToken(context.req.raw);
+      const secureActionPath = context.req.path.startsWith('/api/v1/secure-actions/');
       if (token) {
         context.set('principal', options.auth.authenticate('control', token));
+      } else if (secureActionPath) {
+        await next();
+        return;
       } else {
         const session = cookieValue(context.req.raw, 'mcp_home_session');
         if (!session) throw new AppError('unauthorized', 'Control credential required', 401);
@@ -313,9 +317,17 @@ export function mountControlApi(
   );
   app.get(
     '/api/v1/events',
-    route((context) =>
-      options.store.listEvents({ limit: numberQuery(context.req.query('limit'), 100) }),
-    ),
+    route((context) => {
+      const limit = numberQuery(context.req.query('limit'), 100);
+      const planeValue = context.req.query('plane');
+      const plane = planeValue === undefined ? undefined : z.enum(['mcp', 'cli']).parse(planeValue);
+      const levelValue = context.req.query('level');
+      const level =
+        levelValue === undefined
+          ? undefined
+          : z.enum(['debug', 'info', 'warn', 'error']).parse(levelValue);
+      return options.store.listEvents({ limit, plane, level });
+    }),
   );
   app.get(
     '/api/v1/calls',
@@ -414,8 +426,11 @@ export function mountControlApi(
         throw new AppError('secure_action_unavailable', 'Secure actions are unavailable', 404);
       }
       const principal = context.get<{ id: string }>('principal');
-      if (!principal) throw new AppError('unauthorized', 'Control credential required', 401);
-      return options.market.secureActionInfo(context.req.param('id'), principal.id);
+      return options.market.secureActionInfo(
+        context.req.param('id'),
+        new URL(context.req.raw.url).searchParams.get('token') ?? undefined,
+        principal?.id,
+      );
     }),
   );
   app.post(
@@ -425,7 +440,6 @@ export function mountControlApi(
         throw new AppError('secure_action_unavailable', 'Secure actions are unavailable', 404);
       }
       const principal = context.get<{ id: string }>('principal');
-      if (!principal) throw new AppError('unauthorized', 'Control credential required', 401);
       const body = (await context.req.json()) as {
         token: string;
         values: Record<string, string>;
@@ -433,7 +447,7 @@ export function mountControlApi(
       return options.market.completeAction(
         context.req.param('id'),
         body.token,
-        principal.id,
+        principal?.id,
         body.values ?? {},
       );
     }),

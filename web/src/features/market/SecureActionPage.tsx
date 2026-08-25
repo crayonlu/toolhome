@@ -1,50 +1,50 @@
-import { KeySquare } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router'
-import { api } from '../../api/client'
-import { useI18n } from '../../i18n'
-import { useToast } from '../../components/ui/Toast'
-import { Button } from '../../components/ui/Button'
-import { TextField } from '../../components/ui/Field'
+import { KeySquare } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router';
+import { api } from '../../api/client';
+import { useI18n } from '../../i18n';
+import { useToast } from '../../components/ui/Toast';
+import { Button } from '../../components/ui/Button';
+import { TextField } from '../../components/ui/Field';
 
 interface ActionInfo {
-  actionId: string
-  status: string
-  entryId: string | null
-  entryName: string | null
-  fields: { name: string; description: string }[]
+  actionId: string;
+  status: string;
+  entryId: string | null;
+  entryName: string | null;
+  fields: { name: string; description: string }[];
 }
 
 export function SecureActionPage() {
-  const { actionId = '' } = useParams()
-  const [searchParams] = useSearchParams()
-  const token = searchParams.get('token') ?? ''
-  const { t } = useI18n()
-  const { toast } = useToast()
-  const [info, setInfo] = useState<ActionInfo | null>(null)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [done, setDone] = useState(false)
+  const { actionId = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
+  const { t } = useI18n();
+  const { toast } = useToast();
+  const [info, setInfo] = useState<ActionInfo | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     api
-      .get<ActionInfo>(`/api/v1/secure-actions/${actionId}`)
+      .get<ActionInfo>(`/api/v1/secure-actions/${actionId}?token=${encodeURIComponent(token)}`)
       .then(setInfo)
-      .catch((error) => toast((error as Error).message, 'error'))
-  }, [actionId])
+      .catch((error) => toast((error as Error).message, 'error'));
+  }, [actionId, token, toast]);
 
   const submit = async () => {
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      await api.post(`/api/v1/secure-actions/${actionId}/complete`, { token, values })
-      setDone(true)
-      toast(t('secureAction.completed'), 'success')
+      await api.post(`/api/v1/secure-actions/${actionId}/complete`, { token, values });
+      setDone(true);
+      toast(t('secureAction.completed'), 'success');
     } catch (error) {
-      toast((error as Error).message, 'error')
+      toast((error as Error).message, 'error');
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="mx-auto w-full max-w-md">
@@ -79,7 +79,9 @@ export function SecureActionPage() {
                   type="password"
                   mono
                   value={values[field.name] ?? ''}
-                  onChange={(value) => setValues((current) => ({ ...current, [field.name]: value }))}
+                  onChange={(value) =>
+                    setValues((current) => ({ ...current, [field.name]: value }))
+                  }
                 />
               ))}
               {info.fields.length === 0 && (
@@ -98,5 +100,5 @@ export function SecureActionPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

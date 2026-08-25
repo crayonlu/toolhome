@@ -12,6 +12,9 @@ export interface ExecRequest {
   timeoutMs: number;
   maxOutputBytes: number;
   executionMode: 'host' | 'docker';
+  /** Environment variable names explicitly forwarded into the container. */
+  containerEnvKeys?: string[];
+  entrypoint?: string | null;
 }
 
 export interface ExecOutcome {
@@ -41,7 +44,15 @@ export function execCli(
     const isDocker = request.executionMode === 'docker';
     const spawnCommand = isDocker ? 'docker' : request.command;
     const spawnArgs = isDocker
-      ? ['run', '--rm', '-i', request.command, ...request.argv]
+      ? [
+          'run',
+          '--rm',
+          '-i',
+          ...(request.entrypoint ? ['--entrypoint', request.entrypoint] : []),
+          ...(request.containerEnvKeys ?? []).flatMap((name) => ['--env', name]),
+          request.command,
+          ...request.argv,
+        ]
       : request.argv;
 
     let child: ChildProcessWithoutNullStreams;
@@ -86,6 +97,11 @@ export function execCli(
 
     child.stdout.on('data', (chunk: Buffer) => forward('stdout', chunk));
     child.stderr.on('data', (chunk: Buffer) => forward('stderr', chunk));
+    if (request.stdin !== null && request.stdin !== undefined) {
+      child.stdin.end(request.stdin);
+    } else {
+      child.stdin.end();
+    }
 
     const terminate = (): void => {
       try {

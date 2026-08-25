@@ -1,30 +1,35 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router'
-import { api, storeKey } from '../../api/client'
-import { useI18n } from '../../i18n'
-import { Button } from '../../components/ui/Button'
+import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import { api, storeKey } from '../../api/client';
+import { useI18n } from '../../i18n';
+import { Button } from '../../components/ui/Button';
 
 export function LoginPage() {
-  const { t } = useI18n()
-  const navigate = useNavigate()
-  const [key, setKey] = useState('')
-  const [remember, setRemember] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [key, setKey] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setError(null)
-    setLoading(true)
-    storeKey(key.trim(), remember)
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+    storeKey(key.trim(), remember);
     try {
-      await api.get('/api/v1/overview')
-      navigate('/', { replace: true })
+      await api.get('/api/v1/overview');
+      const returnTo =
+        typeof location.state?.returnTo === 'string'
+          ? location.state.returnTo
+          : new URLSearchParams(location.search).get('returnTo');
+      navigate(returnTo || '/', { replace: true });
     } catch (err) {
-      setError(t('login.error'))
-      setLoading(false)
+      setError(t('login.error'));
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="flex h-dvh items-center justify-center px-4">
@@ -71,5 +76,5 @@ export function LoginPage() {
         </div>
       </form>
     </div>
-  )
+  );
 }

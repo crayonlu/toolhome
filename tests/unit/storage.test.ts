@@ -60,6 +60,7 @@ function createStore() {
     store,
     serverA,
     serverB,
+    directory,
     databasePath,
     close() {
       store.close();
@@ -116,9 +117,9 @@ describe('legacy database rename (0.3.x → 0.4.0)', () => {
       store.close();
       // Overwrite the marker with the pre-0.4.0 kind, as an upgraded database would have.
       const db = new DatabaseSync(path);
-      db.prepare("UPDATE metadata SET metadata_value = ? WHERE metadata_key = 'master-key-check'").run(
-        secrets.encrypt({ kind: 'mcp-home-master-key-check', version: 1 }),
-      );
+      db.prepare(
+        "UPDATE metadata SET metadata_value = ? WHERE metadata_key = 'master-key-check'",
+      ).run(secrets.encrypt({ kind: 'mcp-home-master-key-check', version: 1 }));
       db.close();
 
       const reopened = new SqliteStore(path, secrets);
@@ -126,6 +127,84 @@ describe('legacy database rename (0.3.x → 0.4.0)', () => {
       reopened.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('market installation migrations', () => {
+  it('migrates legacy market server_id rows into polymorphic targets', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-installation-migrate-'));
+    const path = join(directory, 'legacy.sqlite');
+    const secrets = new SecretBox('store-test-master-key-0000000000000000000000001');
+    const first = new SqliteStore(path, secrets);
+    first.close();
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE market_installations');
+    db.exec(`CREATE TABLE market_installations (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL CHECK (source IN ('curated', 'registry')),
+      entry_id TEXT NOT NULL,
+      entry_version TEXT NOT NULL,
+      recipe_revision TEXT NOT NULL,
+      server_id TEXT NOT NULL,
+      credential_id TEXT,
+      installed_at TEXT NOT NULL
+    )`);
+    db.prepare('INSERT INTO market_installations VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      '00000000-0000-4000-8000-000000000010',
+      'curated',
+      'legacy-entry',
+      '1.0.0',
+      'recipe',
+      '00000000-0000-4000-8000-000000000011',
+      null,
+      new Date().toISOString(),
+    );
+    db.close();
+
+    const migrated = new SqliteStore(path, secrets);
+    try {
+      expect(migrated.listInstallations()).toMatchObject([
+        {
+          entryId: 'legacy-entry',
+          targetType: 'server',
+          targetId: '00000000-0000-4000-8000-000000000011',
+        },
+      ]);
+    } finally {
+      migrated.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('secure action store', () => {
+  it('consumes a pending action with a conditional one-time update', () => {
+    const { store, close } = createStore();
+    try {
+      const action = store.createSecureAction({
+        kind: 'market_install',
+        target: 'job-1',
+        principalId: 'principal-1',
+        status: 'pending',
+        valuesJson: '{}',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        completedAt: null,
+      });
+      const completedAt = new Date().toISOString();
+      expect(
+        store.completeSecureAction(action.id, JSON.stringify({ TOKEN: 'first' }), completedAt),
+      ).toMatchObject({
+        id: action.id,
+        status: 'completed',
+        valuesJson: JSON.stringify({ TOKEN: 'first' }),
+        completedAt,
+      });
+      expect(() =>
+        store.completeSecureAction(action.id, JSON.stringify({ TOKEN: 'second' }), completedAt),
+      ).toThrow('already used');
+    } finally {
+      close();
     }
   });
 });
@@ -167,8 +246,20 @@ describe('tool call store', () => {
     try {
       store.insertToolCalls([
         draft({ serverId: serverA.id, status: 'success', durationMs: 20 }),
-        draft({ endpointType: 'individual', serverId: serverB.id, exposedToolName: 'echo', upstreamToolName: 'echo', status: 'success', durationMs: 40 }),
-        draft({ serverId: serverA.id, status: 'timeout', errorType: 'REQUEST_TIMEOUT', durationMs: 100 }),
+        draft({
+          endpointType: 'individual',
+          serverId: serverB.id,
+          exposedToolName: 'echo',
+          upstreamToolName: 'echo',
+          status: 'success',
+          durationMs: 40,
+        }),
+        draft({
+          serverId: serverA.id,
+          status: 'timeout',
+          errorType: 'REQUEST_TIMEOUT',
+          durationMs: 100,
+        }),
       ]);
 
       const all = store.listToolCalls({ limit: 50, offset: 0 });
@@ -199,9 +290,21 @@ describe('tool call store', () => {
       const base = now - (now % hour);
       store.insertToolCalls([
         draft({ serverId: serverA.id, startedAt: new Date(base).toISOString(), status: 'success' }),
-        draft({ serverId: serverA.id, startedAt: new Date(base + 60_000).toISOString(), status: 'timeout' }),
-        draft({ serverId: serverA.id, startedAt: new Date(base + hour).toISOString(), status: 'success' }),
-        draft({ serverId: serverA.id, startedAt: new Date(base + 2 * hour).toISOString(), status: 'success' }),
+        draft({
+          serverId: serverA.id,
+          startedAt: new Date(base + 60_000).toISOString(),
+          status: 'timeout',
+        }),
+        draft({
+          serverId: serverA.id,
+          startedAt: new Date(base + hour).toISOString(),
+          status: 'success',
+        }),
+        draft({
+          serverId: serverA.id,
+          startedAt: new Date(base + 2 * hour).toISOString(),
+          status: 'success',
+        }),
       ]);
       const series = store.toolCallSeries({
         from: new Date(base).toISOString(),
@@ -210,8 +313,16 @@ describe('tool call store', () => {
       });
       expect(series).toHaveLength(3);
       expect(series[0]).toEqual({ bucket: Math.floor(base / 1000 / 3600), total: 2, success: 1 });
-      expect(series[1]).toEqual({ bucket: Math.floor((base + hour) / 1000 / 3600), total: 1, success: 1 });
-      expect(series[2]).toEqual({ bucket: Math.floor((base + 2 * hour) / 1000 / 3600), total: 1, success: 1 });
+      expect(series[1]).toEqual({
+        bucket: Math.floor((base + hour) / 1000 / 3600),
+        total: 1,
+        success: 1,
+      });
+      expect(series[2]).toEqual({
+        bucket: Math.floor((base + 2 * hour) / 1000 / 3600),
+        total: 1,
+        success: 1,
+      });
     } finally {
       close();
     }
@@ -221,7 +332,10 @@ describe('tool call store', () => {
     const { store, serverA, serverB, close } = createStore();
     try {
       store.insertToolCalls([
-        draft({ serverId: serverA.id, startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }),
+        draft({
+          serverId: serverA.id,
+          startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+        }),
         draft({
           serverId: serverB.id,
           startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString(),
@@ -242,7 +356,9 @@ describe('tool call store', () => {
     const { databasePath, close } = createStore();
     try {
       const read = new DatabaseSync(databasePath, { readOnly: true });
-      const rows = read.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='trim_tool_calls'").all();
+      const rows = read
+        .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='trim_tool_calls'")
+        .all();
       expect(rows).toHaveLength(1);
       read.close();
     } finally {

@@ -1,25 +1,25 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
-import { AppShell } from './app/AppShell'
-import { I18nProvider } from './i18n'
-import { ToastProvider } from './components/ui/Toast'
-import { ConfirmProvider } from './components/ui/ConfirmDialog'
-import { getStoredKey } from './api/client'
-import { LoginPage } from './features/login/LoginPage'
-import { DashboardPage } from './features/dashboard/DashboardPage'
-import { ServersPage } from './features/servers/ServersPage'
-import { ServerDetailPage } from './features/servers/ServerDetailPage'
-import { ClisPage } from './features/clis/ClisPage'
-import { CredentialsPage } from './features/credentials/CredentialsPage'
-import { AccessKeysPage } from './features/access-keys/AccessKeysPage'
-import { EndpointsPage } from './features/endpoints/EndpointsPage'
-import { DiagnosticsPage } from './features/diagnostics/DiagnosticsPage'
-import { EventsPage } from './features/events/EventsPage'
-import { SettingsPage } from './features/settings/SettingsPage'
-import { MarketPage } from './features/market/MarketPage'
-import { SecureActionPage } from './features/market/SecureActionPage'
-import { CallsPage } from './features/calls/CallsPage'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { AppShell } from './app/AppShell';
+import { I18nProvider } from './i18n';
+import { ToastProvider } from './components/ui/Toast';
+import { ConfirmProvider } from './components/ui/ConfirmDialog';
+import { getStoredKey } from './api/client';
+import { LoginPage } from './features/login/LoginPage';
+import { DashboardPage } from './features/dashboard/DashboardPage';
+import { ServersPage } from './features/servers/ServersPage';
+import { ServerDetailPage } from './features/servers/ServerDetailPage';
+import { ClisPage } from './features/clis/ClisPage';
+import { CredentialsPage } from './features/credentials/CredentialsPage';
+import { AccessKeysPage } from './features/access-keys/AccessKeysPage';
+import { EndpointsPage } from './features/endpoints/EndpointsPage';
+import { DiagnosticsPage } from './features/diagnostics/DiagnosticsPage';
+import { EventsPage } from './features/events/EventsPage';
+import { SettingsPage } from './features/settings/SettingsPage';
+import { MarketPage } from './features/market/MarketPage';
+import { SecureActionPage } from './features/market/SecureActionPage';
+import { CallsPage } from './features/calls/CallsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,21 +28,29 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
     },
   },
-})
+});
 
 function hasKey(): boolean {
-  return getStoredKey() !== null
+  return getStoredKey() !== null;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
     const onUnauthorized = () => {
-      window.location.href = '/login'
-    }
-    window.addEventListener('mch:unauthorized', onUnauthorized)
-    return () => window.removeEventListener('mch:unauthorized', onUnauthorized)
-  }, [])
-  return hasKey() ? children : <Navigate to="/login" replace />
+      navigate(`/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`, {
+        replace: true,
+      });
+    };
+    window.addEventListener('mch:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('mch:unauthorized', onUnauthorized);
+  }, [location.pathname, location.search, navigate]);
+  return hasKey() ? (
+    children
+  ) : (
+    <Navigate to="/login" replace state={{ returnTo: location.pathname + location.search }} />
+  );
 }
 
 export function App() {
@@ -54,6 +62,7 @@ export function App() {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/market/actions/:actionId" element={<SecureActionPage />} />
                 <Route
                   element={
                     <RequireAuth>
@@ -68,7 +77,6 @@ export function App() {
                   <Route path="/credentials" element={<CredentialsPage />} />
                   <Route path="/access-keys" element={<AccessKeysPage />} />
                   <Route path="/market" element={<MarketPage />} />
-                  <Route path="/market/actions/:actionId" element={<SecureActionPage />} />
                   <Route path="/endpoints" element={<EndpointsPage />} />
                   <Route path="/diagnostics" element={<DiagnosticsPage />} />
                   <Route path="/events" element={<EventsPage />} />
@@ -82,5 +90,5 @@ export function App() {
         </ToastProvider>
       </I18nProvider>
     </QueryClientProvider>
-  )
+  );
 }

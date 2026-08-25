@@ -1,11 +1,11 @@
-import { Activity } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { useCallSeries, useCallStats, useCalls, useServers } from '../../app/queries'
-import { useI18n } from '../../i18n'
-import { Badge, EmptyState } from '../../components/ui/Badge'
-import { SelectField, type SelectOption } from '../../components/ui/SelectField'
-import { CallChart } from '../../components/ui/CallChart'
-import type { ToolCallStatus } from '../../api/types'
+import { Activity } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useCallSeries, useCallStats, useCalls, useServers } from '../../app/queries';
+import { useI18n } from '../../i18n';
+import { Badge, EmptyState } from '../../components/ui/Badge';
+import { SelectField, type SelectOption } from '../../components/ui/SelectField';
+import { CallChart } from '../../components/ui/CallChart';
+import type { ToolCallStatus } from '../../api/types';
 
 const statusOptions: SelectOption[] = [
   { value: '', label: 'all' },
@@ -13,15 +13,16 @@ const statusOptions: SelectOption[] = [
   { value: 'tool_error', label: 'tool error' },
   { value: 'protocol_error', label: 'protocol error' },
   { value: 'timeout', label: 'timeout' },
+  { value: 'cancelled', label: 'cancelled' },
   { value: 'rejected', label: 'rejected' },
-]
+];
 
 const timeOptions: SelectOption[] = [
   { value: '86400000', label: '24h' },
   { value: '604800000', label: '7d' },
   { value: '2592000000', label: '30d' },
   { value: '', label: 'all' },
-]
+];
 
 const statusTone: Record<ToolCallStatus, 'success' | 'danger' | 'warning' | 'neutral'> = {
   success: 'success',
@@ -30,7 +31,7 @@ const statusTone: Record<ToolCallStatus, 'success' | 'danger' | 'warning' | 'neu
   timeout: 'danger',
   cancelled: 'neutral',
   rejected: 'neutral',
-}
+};
 
 function summaryCard(label: string, value: string, sub?: string) {
   return (
@@ -39,16 +40,17 @@ function summaryCard(label: string, value: string, sub?: string) {
       <div className="font-mono text-lg text-ink">{value}</div>
       {sub !== undefined && <div className="text-xs text-ink-2">{sub}</div>}
     </div>
-  )
+  );
 }
 
 export function CallsPage() {
-  const { t, locale } = useI18n()
-  const { data: servers } = useServers()
-  const [serverId, setServerId] = useState('')
-  const [tool, setTool] = useState('')
-  const [status, setStatus] = useState('')
-  const [windowMs, setWindowMs] = useState('86400000')
+  const { t, locale } = useI18n();
+  const { data: servers } = useServers();
+  const [serverId, setServerId] = useState('');
+  const [endpointType, setEndpointType] = useState('');
+  const [tool, setTool] = useState('');
+  const [status, setStatus] = useState('');
+  const [windowMs, setWindowMs] = useState('86400000');
 
   const serverOptions = useMemo<SelectOption[]>(
     () => [
@@ -56,21 +58,27 @@ export function CallsPage() {
       ...(servers ?? []).map((server) => ({ value: server.id, label: server.slug })),
     ],
     [servers],
-  )
+  );
 
   const from = useMemo(() => {
-    if (!windowMs) return undefined
-    return new Date(Date.now() - Number(windowMs)).toISOString()
-  }, [windowMs])
+    if (!windowMs) return undefined;
+    return new Date(Date.now() - Number(windowMs)).toISOString();
+  }, [windowMs]);
 
-  const filter = { server_id: serverId || undefined, tool: tool || undefined, status: status || undefined, from }
-  const calls = useCalls({ limit: '50', ...filter })
-  const stats = useCallStats(filter)
-  const bucket = windowMs === '604800000' ? '6h' : windowMs === '2592000000' ? '1d' : '1h'
-  const series = useCallSeries(filter, bucket)
+  const filter = {
+    server_id: serverId || undefined,
+    tool: tool || undefined,
+    status: status || undefined,
+    endpoint_type: endpointType || undefined,
+    from,
+  };
+  const calls = useCalls({ limit: '50', ...filter });
+  const stats = useCallStats(filter);
+  const bucket = windowMs === '604800000' ? '6h' : windowMs === '2592000000' ? '1d' : '1h';
+  const series = useCallSeries(filter, bucket);
 
-  const recent = calls.data?.items ?? []
-  const s = stats.data
+  const recent = calls.data?.items ?? [];
+  const s = stats.data;
 
   return (
     <div className="flex flex-col gap-5">
@@ -80,7 +88,11 @@ export function CallsPage() {
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
         {summaryCard(t('calls.total'), String(s?.total ?? '—'))}
-        {summaryCard(t('calls.successRate'), s === undefined ? '—' : `${s.successRate}%`, `${s?.success ?? 0} / ${s?.error ?? 0}`)}
+        {summaryCard(
+          t('calls.successRate'),
+          s === undefined ? '—' : `${s.successRate}%`,
+          `${s?.success ?? 0} / ${s?.error ?? 0}`,
+        )}
         {summaryCard(t('calls.avgDuration'), s === undefined ? '—' : `${s.avgDurationMs}ms`)}
         {summaryCard(t('calls.p50'), s === undefined ? '—' : `${s.p50Ms}ms`)}
         {summaryCard(t('calls.p95'), s === undefined ? '—' : `${s.p95Ms}ms`)}
@@ -100,11 +112,31 @@ export function CallsPage() {
             </span>
           </span>
         </div>
-        <CallChart points={series.data?.points ?? []} bucketSeconds={series.data?.bucketSeconds ?? 3600} />
+        <CallChart
+          points={series.data?.points ?? []}
+          bucketSeconds={series.data?.bucketSeconds ?? 3600}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <SelectField label={t('calls.server')} value={serverId} onChange={setServerId} options={serverOptions} />
+        <SelectField
+          label={t('calls.server')}
+          value={serverId}
+          onChange={setServerId}
+          options={serverOptions}
+        />
+        <SelectField
+          label={t('calls.type')}
+          value={endpointType}
+          onChange={setEndpointType}
+          options={[
+            { value: '', label: 'all' },
+            { value: 'aggregate', label: `MCP · ${t('calls.aggregate')}` },
+            { value: 'individual', label: `MCP · ${t('calls.individual')}` },
+            { value: 'management', label: 'MCP · management' },
+            { value: 'cli', label: 'CLI exec' },
+          ]}
+        />
         <label className="flex flex-col gap-1.5">
           <span className="text-[13px] font-medium text-ink-2">{t('calls.tool')}</span>
           <input
@@ -114,8 +146,18 @@ export function CallsPage() {
             className="h-9 bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:ring-2 focus:ring-accent/50"
           />
         </label>
-        <SelectField label={t('calls.status')} value={status} onChange={setStatus} options={statusOptions} />
-        <SelectField label={t('calls.window')} value={windowMs} onChange={setWindowMs} options={timeOptions} />
+        <SelectField
+          label={t('calls.status')}
+          value={status}
+          onChange={setStatus}
+          options={statusOptions}
+        />
+        <SelectField
+          label={t('calls.window')}
+          value={windowMs}
+          onChange={setWindowMs}
+          options={timeOptions}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
@@ -165,14 +207,22 @@ export function CallsPage() {
                 <Badge tone={statusTone[call.status]}>{call.status}</Badge>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-mono text-[13px] text-ink">
+                    {call.endpointType === 'cli' ? (
+                      <span className="mr-2 text-ink-3">CLI</span>
+                    ) : null}
                     {call.upstreamToolName}
-                    {call.endpointType === 'aggregate' && call.exposedToolName !== call.upstreamToolName && (
-                      <span className="ml-2 text-ink-3">{call.exposedToolName}</span>
-                    )}
+                    {call.endpointType === 'aggregate' &&
+                      call.exposedToolName !== call.upstreamToolName && (
+                        <span className="ml-2 text-ink-3">{call.exposedToolName}</span>
+                      )}
                   </span>
                   <span className="truncate text-xs text-ink-3">
-                    {call.serverId ? serverSlug(servers ?? [], call.serverId) : '—'} ·{' '}
-                    {new Date(call.startedAt).toLocaleString(locale)} · {call.durationMs}ms
+                    {call.serverId
+                      ? serverSlug(servers ?? [], call.serverId)
+                      : call.endpointType === 'cli'
+                        ? call.exposedToolName
+                        : '—'}{' '}
+                    · {new Date(call.startedAt).toLocaleString(locale)} · {call.durationMs}ms
                   </span>
                 </div>
               </div>
@@ -181,9 +231,9 @@ export function CallsPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function serverSlug(servers: { id: string; slug: string }[], id: string): string {
-  return servers.find((server) => server.id === id)?.slug ?? id.slice(0, 8)
+  return servers.find((server) => server.id === id)?.slug ?? id.slice(0, 8);
 }

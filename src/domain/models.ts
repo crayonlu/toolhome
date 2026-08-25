@@ -354,8 +354,8 @@ export type ToolCallStatus = z.infer<typeof toolCallStatusSchema>;
 
 export const toolCallSchema = z.object({
   id: z.string().uuid(),
-  endpointType: z.enum(['aggregate', 'individual', 'management']),
-  principalKind: z.enum(['access_key', 'control_key', 'oauth_client']),
+  endpointType: z.enum(['aggregate', 'individual', 'management', 'cli']),
+  principalKind: z.enum(['access_key', 'control_key', 'oauth_client', 'cli']),
   principalId: z.string(),
   serverId: z.string().uuid().nullable(),
   exposedToolName: z.string(),
@@ -375,7 +375,7 @@ export const toolCallFilterSchema = z.object({
   offset: z.number().int().min(0).default(0),
   serverId: z.string().uuid().optional(),
   tool: z.string().optional(),
-  endpointType: z.enum(['aggregate', 'individual', 'management']).optional(),
+  endpointType: z.enum(['aggregate', 'individual', 'management', 'cli']).optional(),
   principalId: z.string().optional(),
   status: toolCallStatusSchema.optional(),
   from: z.string().datetime().optional(),
@@ -389,6 +389,7 @@ export interface ToolCallSeriesQuery {
   bucketSeconds: number;
   serverId?: string;
   tool?: string;
+  endpointType?: 'aggregate' | 'individual' | 'management' | 'cli';
 }
 
 export interface ToolCallSeriesBucket {
@@ -459,7 +460,8 @@ export const marketInstallationSchema = z.object({
   entryId: z.string().min(1),
   entryVersion: z.string(),
   recipeRevision: z.string(),
-  serverId: z.uuid(),
+  targetType: z.enum(['server', 'cli']),
+  targetId: z.uuid(),
   credentialId: z.uuid().nullable(),
   installedAt: z.iso.datetime(),
 });
@@ -482,4 +484,3 @@ export const secureActionRecordSchema = z.object({
   completedAt: z.iso.datetime().nullable(),
 });
 export type SecureActionRecord = z.infer<typeof secureActionRecordSchema>;
-

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { postNdjson } from '../../api/client';
+import { streamNdjson } from '../../api/client';
 import { useI18n } from '../../i18n';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 import { FieldGroup, TextareaField } from '../../components/ui/Field';
 import type { CliRecord } from '../../api/types';
+import { parseArgvText } from './argv';
 
 interface Frame {
   type: 'stdout' | 'stderr' | 'exit';
@@ -34,33 +35,46 @@ export function CliExecSheet({
   const [frames, setFrames] = useState<Frame[]>([]);
   const [running, setRunning] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open) {
       setArgvText('');
       setFrames([]);
       setRunning(false);
+      return;
     }
+    abortRef.current?.abort();
+    abortRef.current = null;
   }, [open]);
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [frames]);
 
   const run = async () => {
-    const argv = argvText.trim().split(/\s+/).filter(Boolean);
+    const argv = parseArgvText(argvText);
     if (argv.length === 0) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setRunning(true);
     setFrames([]);
     try {
-      const result = await postNdjson<Frame>(`/cli/${cli.slug}/exec`, { argv });
-      setFrames(result);
+      await streamNdjson<Frame>(`/cli/${cli.slug}/exec`, { argv }, (frame) => {
+        setFrames((current) => [...current, frame]);
+      }, controller.signal);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setFrames([
         { type: 'stderr', data: error instanceof Error ? error.message : String(error) },
         { type: 'exit', code: null, result: 'error', durationMs: 0 },
       ]);
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setRunning(false);
     }
   };
@@ -75,7 +89,7 @@ export function CliExecSheet({
           value={argvText}
           onChange={setArgvText}
           mono
-          placeholder={'account show -o table'}
+          placeholder={'account show\n-o\ntable'}
         />
         <p className="text-xs text-ink-3">{t('cli.execHint')}</p>
         <div>

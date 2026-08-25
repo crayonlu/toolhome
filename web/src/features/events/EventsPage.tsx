@@ -1,28 +1,44 @@
-import { ScrollText } from 'lucide-react'
-import { useState } from 'react'
-import { useEvents } from '../../app/queries'
-import { useI18n } from '../../i18n'
-import { Badge, EmptyState, type Tone } from '../../components/ui/Badge'
-import { SelectField } from '../../components/ui/SelectField'
-import type { EventLevel } from '../../api/types'
+import { ScrollText } from 'lucide-react';
+import { useState } from 'react';
+import { useEvents } from '../../app/queries';
+import { useI18n } from '../../i18n';
+import { Badge, EmptyState, type Tone } from '../../components/ui/Badge';
+import { SelectField } from '../../components/ui/SelectField';
+import type { EventLevel } from '../../api/types';
 
 const levelTone: Record<EventLevel, Tone> = {
   info: 'neutral',
   warn: 'warning',
   error: 'danger',
-}
+};
 
 export function EventsPage() {
-  const { t } = useI18n()
-  const [level, setLevel] = useState<string>('')
-  const { data: events, isLoading } = useEvents(200, level === '' ? undefined : (level as EventLevel))
+  const { t } = useI18n();
+  const [level, setLevel] = useState<string>('');
+  const [plane, setPlane] = useState<'all' | 'mcp' | 'cli'>('all');
+  const { data: events, isLoading } = useEvents(
+    200,
+    level === '' ? undefined : (level as EventLevel),
+    plane === 'all' ? undefined : plane,
+  );
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('nav.events')}</h1>
-        <div className="w-32">
+        <div className="grid grid-cols-2 gap-2 sm:w-72">
           <SelectField
+            label={t('common.type')}
+            value={plane}
+            onChange={(value) => setPlane(value as 'all' | 'mcp' | 'cli')}
+            options={[
+              { value: 'all', label: t('common.all') },
+              { value: 'mcp', label: 'MCP' },
+              { value: 'cli', label: 'CLI' },
+            ]}
+          />
+          <SelectField
+            label={t('common.level')}
             value={level}
             onChange={setLevel}
             options={[
@@ -56,5 +72,5 @@ export function EventsPage() {
         <EmptyState icon={<ScrollText className="size-8" />} title={t('common.empty')} />
       )}
     </div>
-  )
+  );
 }

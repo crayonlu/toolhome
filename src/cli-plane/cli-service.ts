@@ -1,4 +1,6 @@
 import { AppError } from '../domain/errors.js';
+import type { ToolCallDraft } from '../domain/models.js';
+import type { CallRecorder } from '../observability/call-recorder.js';
 import type { Store } from '../storage/store.js';
 import { evaluateAllowList } from './allow-list.js';
 import type { CliExecFrame } from './frames.js';
@@ -11,6 +13,30 @@ import {
 } from './models.js';
 import { execCli, type ExecOutcome } from './runner.js';
 import { parseProbeOutput } from './status.js';
+
+const secretArgNamePattern = /(?:token|secret|password|passwd|api[-_]?key|credential)/i;
+
+function redactArgv(argv: string[]): string[] {
+  const redacted: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    const equalIndex = argument.indexOf('=');
+    if (equalIndex > 0 && secretArgNamePattern.test(argument.slice(0, equalIndex))) {
+      redacted.push(`${argument.slice(0, equalIndex + 1)}[REDACTED]`);
+      continue;
+    }
+    if (argument.startsWith('-') && secretArgNamePattern.test(argument.replace(/^-+/, ''))) {
+      redacted.push(argument);
+      if (index + 1 < argv.length) {
+        redacted.push('[REDACTED]');
+        index += 1;
+      }
+      continue;
+    }
+    redacted.push(argument);
+  }
+  return redacted;
+}
 
 /**
  * Non-interactive enforcement variables injected into every CLI execution
@@ -33,9 +59,11 @@ export interface CliStatus {
 
 export class CliService {
   readonly #store: Store;
+  readonly #recorder: CallRecorder | null;
 
-  constructor(store: Store) {
+  constructor(store: Store, recorder?: CallRecorder) {
     this.#store = store;
+    this.#recorder = recorder ?? null;
   }
 
   list(): CliRecord[] {
@@ -122,15 +150,22 @@ export class CliService {
     emit: (frame: CliExecFrame) => void,
     signal?: AbortSignal,
   ): Promise<ExecOutcome> {
+    const env = this.#buildEnv(record);
     const outcome = await execCli(
       {
         command: record.command,
         argv: input.argv,
-        env: this.#buildEnv(record),
+        env,
         stdin: input.stdin ?? null,
-        timeoutMs: input.timeoutMs ?? record.timeoutMs,
-        maxOutputBytes: input.maxOutputBytes ?? record.maxOutputBytes,
+        timeoutMs: Math.min(record.timeoutMs, input.timeoutMs ?? record.timeoutMs),
+        maxOutputBytes: Math.min(
+          record.maxOutputBytes,
+          input.maxOutputBytes ?? record.maxOutputBytes,
+        ),
         executionMode: record.executionMode,
+        containerEnvKeys:
+          record.executionMode === 'docker' ? this.#containerEnvKeys(record) : undefined,
+        entrypoint: record.entrypoint,
       },
       emit,
       signal,
@@ -139,17 +174,50 @@ export class CliService {
       level: 'info',
       type: 'cli.exec',
       serverId: null,
-      message: `${record.slug} ${input.argv.join(' ')}`,
+      message: `${record.slug} ${redactArgv(input.argv).join(' ')}`,
       detail: {
         slug: record.slug,
-        argv: input.argv,
+        argv: redactArgv(input.argv),
         exitCode: outcome.code,
         durationMs: outcome.durationMs,
         result: outcome.result,
         truncated: outcome.truncated,
       },
     });
+    this.#recordCall(record, input.argv, outcome);
     return outcome;
+  }
+
+  /** Mirror the exec into the calls panel (fire-and-forget, same as MCP calls). */
+  #recordCall(
+    record: CliRecord,
+    argv: string[],
+    outcome: { code: number | null; durationMs: number; result: string },
+  ): void {
+    if (this.#recorder === null) return;
+    const completedAt = new Date();
+    const status =
+      outcome.result === 'ok'
+        ? 'success'
+        : outcome.result === 'timeout'
+          ? 'timeout'
+          : outcome.code === null
+            ? 'rejected'
+            : 'tool_error';
+    const draft: ToolCallDraft = {
+      endpointType: 'cli',
+      principalKind: 'cli',
+      principalId: record.id,
+      serverId: null,
+      exposedToolName: record.slug,
+      upstreamToolName: redactArgv(argv).join(' '),
+      status,
+      errorType: status === 'success' ? null : outcome.result,
+      startedAt: new Date(completedAt.getTime() - outcome.durationMs).toISOString(),
+      completedAt: completedAt.toISOString(),
+      durationMs: Math.max(0, outcome.durationMs),
+    };
+    this.#recorder.record(draft);
   }
 
   /** Run the CLI's declared probe in the same isolated context and parse it. */
@@ -160,15 +228,19 @@ export class CliService {
       return { installed: null, version: null, loggedIn: false, lastCheckedAt };
     }
     let stdout = '';
+    const env = this.#buildEnv(record);
     const outcome = await execCli(
       {
-        command: record.probe.command,
+        command: record.executionMode === 'docker' ? record.command : record.probe.command,
         argv: record.probe.args,
-        env: this.#buildEnv(record),
+        env,
         stdin: null,
         timeoutMs: Math.min(record.timeoutMs, 30_000),
         maxOutputBytes: 64 * 1024,
         executionMode: record.executionMode,
+        containerEnvKeys:
+          record.executionMode === 'docker' ? this.#containerEnvKeys(record) : undefined,
+        entrypoint: record.executionMode === 'docker' ? record.probe.command : record.entrypoint,
       },
       (frame) => {
         if (frame.type === 'stdout') stdout += frame.data;
@@ -181,6 +253,17 @@ export class CliService {
       loggedIn: parsed.loggedIn,
       lastCheckedAt,
     };
+  }
+
+  #containerEnvKeys(record: CliRecord): string[] {
+    const keys = new Set(Object.keys(cliEnforcementEnv));
+    if (record.credentialId !== null) {
+      const payload = this.#store.getCredentialPayload(record.credentialId);
+      if (payload?.type === 'env') {
+        for (const key of Object.keys(payload.variables)) keys.add(key);
+      }
+    }
+    return [...keys];
   }
 
   #buildEnv(record: CliRecord): Record<string, string> {

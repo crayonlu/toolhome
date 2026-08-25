@@ -1,14 +1,16 @@
-import { Globe } from 'lucide-react'
-import { useServers } from '../../app/queries'
-import { useI18n } from '../../i18n'
-import { CopyButton } from '../../components/ui/CopyButton'
+import { Globe, SquareTerminal } from 'lucide-react';
+import { useClis, useOverview, useServers } from '../../app/queries';
+import { useI18n } from '../../i18n';
+import { CopyButton } from '../../components/ui/CopyButton';
 
 export function EndpointsPage() {
-  const { t } = useI18n()
-  const { data: servers, isLoading } = useServers()
+  const { t } = useI18n();
+  const { data: servers, isLoading } = useServers();
+  const { data: clis, isLoading: clisLoading } = useClis();
+  const { data: overview } = useOverview();
 
-  const base = 'https://mcp.cyncyn.xyz'
-  const aggregate = `${base}/mcp`
+  const aggregate = overview?.endpoints.aggregate ?? `${window.location.origin}/mcp`;
+  const base = aggregate.replace(/\/mcp$/, '');
 
   return (
     <div className="flex flex-col gap-5">
@@ -24,7 +26,7 @@ export function EndpointsPage() {
 
       <div className="flex flex-col divide-y divide-ink-3/10">
         {(servers ?? []).map((server) => {
-          const endpoint = `${base}/mcp/${server.slug}`
+          const endpoint = `${base}/mcp/${server.slug}`;
           return (
             <div key={server.id} className="flex items-center gap-3 px-1 py-2.5">
               <Globe className="size-4 shrink-0 text-ink-3" />
@@ -34,12 +36,34 @@ export function EndpointsPage() {
               </div>
               <CopyButton text={endpoint} />
             </div>
-          )
+          );
         })}
         {!isLoading && servers?.length === 0 && (
           <div className="py-10 text-center text-sm text-ink-3">{t('common.empty')}</div>
         )}
       </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="text-[13px] font-medium text-ink-3">{t('nav.clis')}</div>
+        <div className="flex flex-col divide-y divide-ink-3/10">
+          {(clis ?? []).map((cli) => {
+            const endpoint = `${base}/cli/${cli.slug}/exec`;
+            return (
+              <div key={cli.id} className="flex items-center gap-3 px-1 py-2.5">
+                <SquareTerminal className="size-4 shrink-0 text-ink-3" />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-sm font-medium text-ink">{cli.name}</span>
+                  <code className="truncate font-mono text-xs text-ink-3">POST {endpoint}</code>
+                </div>
+                <CopyButton text={endpoint} />
+              </div>
+            );
+          })}
+          {!clisLoading && clis?.length === 0 && (
+            <div className="py-6 text-center text-sm text-ink-3">{t('common.empty')}</div>
+          )}
+        </div>
+      </div>
     </div>
-  )
+  );
 }

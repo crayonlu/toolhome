@@ -65,12 +65,7 @@ import {
   type Visibility,
 } from '../domain/models.js';
 import type { SecretBox } from '../security/secret-box.js';
-import type {
-  CreateKeyInput,
-  ProjectionIndex,
-  Store,
-  StoredApiKey,
-} from './store.js';
+import type { CreateKeyInput, ProjectionIndex, Store, StoredApiKey } from './store.js';
 
 const serverRowSchema = z.object({
   id: z.string(),
@@ -91,6 +86,7 @@ const cliRowSchema = z.object({
   name: z.string(),
   command: z.string(),
   execution_mode: z.string(),
+  entrypoint: z.string().nullable(),
   allow_list_json: z.string(),
   interactive: z.number(),
   credential_id: z.string().nullable(),
@@ -216,7 +212,8 @@ const installationRowSchema = z.object({
   entry_id: z.string(),
   entry_version: z.string(),
   recipe_revision: z.string(),
-  server_id: z.string(),
+  target_type: z.string(),
+  target_id: z.string(),
   credential_id: z.string().nullable(),
   installed_at: z.string(),
 });
@@ -440,7 +437,7 @@ export class SqliteStore implements Store {
 
       CREATE TABLE IF NOT EXISTS tool_calls (
         id TEXT PRIMARY KEY,
-        endpoint_type TEXT NOT NULL CHECK (endpoint_type IN ('aggregate', 'individual', 'management')),
+        endpoint_type TEXT NOT NULL CHECK (endpoint_type IN ('aggregate', 'individual', 'management', 'cli')),
         principal_kind TEXT NOT NULL,
         principal_id TEXT NOT NULL,
         server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
@@ -474,7 +471,8 @@ export class SqliteStore implements Store {
         entry_id TEXT NOT NULL,
         entry_version TEXT NOT NULL,
         recipe_revision TEXT NOT NULL,
-        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL CHECK (target_type IN ('server', 'cli')),
+        target_id TEXT NOT NULL,
         credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
         installed_at TEXT NOT NULL
       );
@@ -515,6 +513,7 @@ export class SqliteStore implements Store {
         name TEXT NOT NULL,
         command TEXT NOT NULL,
         execution_mode TEXT NOT NULL CHECK (execution_mode IN ('host', 'docker')),
+        entrypoint TEXT,
         allow_list_json TEXT NOT NULL,
         interactive INTEGER NOT NULL,
         credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
@@ -528,13 +527,18 @@ export class SqliteStore implements Store {
       CREATE INDEX IF NOT EXISTS idx_clis_slug ON clis(slug);
     `);
     // Guarded migration for existing databases created before api_keys.scope existed.
-    const apiKeyColumns = this.#db
-      .prepare('PRAGMA table_info(api_keys)')
-      .all() as { name: string }[];
+    const apiKeyColumns = this.#db.prepare('PRAGMA table_info(api_keys)').all() as {
+      name: string;
+    }[];
     if (!apiKeyColumns.some((column) => column.name === 'scope')) {
       this.#db.exec(
         "ALTER TABLE api_keys ADD COLUMN scope TEXT DEFAULT 'admin' CHECK (scope IN ('admin', 'agent'))",
       );
+    }
+    // Guarded migration for existing CLI records created before Docker entrypoints were stored.
+    const cliColumns = this.#db.prepare('PRAGMA table_info(clis)').all() as { name: string }[];
+    if (!cliColumns.some((column) => column.name === 'entrypoint')) {
+      this.#db.exec('ALTER TABLE clis ADD COLUMN entrypoint TEXT');
     }
     // Guarded migration: install_jobs created before the 'updating' status have a
     // CHECK constraint without it. SQLite cannot alter CHECK constraints, so
@@ -566,6 +570,73 @@ export class SqliteStore implements Store {
         DROP TABLE install_jobs;
         ALTER TABLE install_jobs_next RENAME TO install_jobs;
         CREATE INDEX IF NOT EXISTS idx_install_jobs_status ON install_jobs(status, updated_at);
+        COMMIT;
+      `);
+    }
+    // Guarded migration: tool_calls created before the 'cli' endpoint type have
+    // a CHECK constraint without it. SQLite cannot alter CHECK constraints, so
+    // rebuild the table (rows are preserved).
+    const toolCallsSql = this.#db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tool_calls'")
+      .get() as { sql: string } | undefined;
+    if (toolCallsSql !== undefined && !toolCallsSql.sql.includes("'cli'")) {
+      this.#db.exec(`
+        BEGIN;
+        CREATE TABLE tool_calls_next (
+          id TEXT PRIMARY KEY,
+          endpoint_type TEXT NOT NULL CHECK (endpoint_type IN ('aggregate', 'individual', 'management', 'cli')),
+          principal_kind TEXT NOT NULL,
+          principal_id TEXT NOT NULL,
+          server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
+          exposed_tool_name TEXT NOT NULL,
+          upstream_tool_name TEXT NOT NULL,
+          status TEXT NOT NULL,
+          error_type TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT NOT NULL,
+          duration_ms INTEGER NOT NULL
+        );
+        INSERT INTO tool_calls_next
+          SELECT id, endpoint_type, principal_kind, principal_id, server_id,
+                 exposed_tool_name, upstream_tool_name, status, error_type,
+                 started_at, completed_at, duration_ms
+          FROM tool_calls;
+        DROP TABLE tool_calls;
+        ALTER TABLE tool_calls_next RENAME TO tool_calls;
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_started ON tool_calls(started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_server ON tool_calls(server_id, started_at DESC);
+        COMMIT;
+      `);
+    }
+    // Guarded migration: market installations historically pointed to a server
+    // through `server_id`. CLI installs need the same durable record without a
+    // foreign key to the servers table, so migrate to a polymorphic target.
+    const installationsSql = this.#db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'market_installations'",
+      )
+      .get() as { sql: string } | undefined;
+    if (installationsSql !== undefined && !installationsSql.sql.includes('target_type')) {
+      this.#db.exec(`
+        BEGIN;
+        CREATE TABLE market_installations_next (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL CHECK (source IN ('curated', 'registry')),
+          entry_id TEXT NOT NULL,
+          entry_version TEXT NOT NULL,
+          recipe_revision TEXT NOT NULL,
+          target_type TEXT NOT NULL CHECK (target_type IN ('server', 'cli')),
+          target_id TEXT NOT NULL,
+          credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
+          installed_at TEXT NOT NULL
+        );
+        INSERT INTO market_installations_next
+          SELECT id, source, entry_id, entry_version, recipe_revision,
+                 'server', server_id, credential_id, installed_at
+          FROM market_installations;
+        DROP TABLE market_installations;
+        ALTER TABLE market_installations_next RENAME TO market_installations;
+        CREATE INDEX IF NOT EXISTS idx_installations_entry ON market_installations(entry_id);
         COMMIT;
       `);
     }
@@ -754,9 +825,9 @@ export class SqliteStore implements Store {
     this.#db
       .prepare(
         `INSERT INTO clis
-        (id, slug, name, command, execution_mode, allow_list_json, interactive, credential_id,
+        (id, slug, name, command, execution_mode, entrypoint, allow_list_json, interactive, credential_id,
          probe_json, enabled, timeout_ms, max_output_bytes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -764,6 +835,7 @@ export class SqliteStore implements Store {
         record.name,
         record.command,
         record.executionMode,
+        record.entrypoint,
         JSON.stringify(record.allowList),
         record.interactive ? 1 : 0,
         record.credentialId,
@@ -788,7 +860,7 @@ export class SqliteStore implements Store {
     });
     this.#db
       .prepare(
-        `UPDATE clis SET name = ?, command = ?, execution_mode = ?, allow_list_json = ?,
+        `UPDATE clis SET name = ?, command = ?, execution_mode = ?, entrypoint = ?, allow_list_json = ?,
          interactive = ?, credential_id = ?, probe_json = ?, enabled = ?, timeout_ms = ?,
          max_output_bytes = ?, updated_at = ? WHERE id = ?`,
       )
@@ -796,6 +868,7 @@ export class SqliteStore implements Store {
         record.name,
         record.command,
         record.executionMode,
+        record.entrypoint,
         JSON.stringify(record.allowList),
         record.interactive ? 1 : 0,
         record.credentialId,
@@ -1077,13 +1150,31 @@ export class SqliteStore implements Store {
     return record;
   }
 
-  listEvents(options: { serverId?: string; limit?: number } = {}): EventRecord[] {
+  listEvents(
+    options: {
+      serverId?: string;
+      limit?: number;
+      level?: EventRecord['level'];
+      plane?: 'mcp' | 'cli';
+    } = {},
+  ): EventRecord[] {
     const limit = Math.max(1, Math.min(options.limit ?? 100, 1_000));
-    const rows = options.serverId
-      ? this.#db
-          .prepare('SELECT * FROM events WHERE server_id = ? ORDER BY created_at DESC LIMIT ?')
-          .all(options.serverId, limit)
-      : this.#db.prepare('SELECT * FROM events ORDER BY created_at DESC LIMIT ?').all(limit);
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    if (options.serverId !== undefined) {
+      conditions.push('server_id = ?');
+      params.push(options.serverId);
+    }
+    if (options.level !== undefined) {
+      conditions.push('level = ?');
+      params.push(options.level);
+    }
+    if (options.plane === 'cli') conditions.push("type LIKE 'cli.%'");
+    if (options.plane === 'mcp') conditions.push("type NOT LIKE 'cli.%'");
+    const where = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`;
+    const rows = this.#db
+      .prepare(`SELECT * FROM events ${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params, limit);
     return rows.map((row) => this.#parseEvent(row));
   }
 
@@ -1119,11 +1210,17 @@ export class SqliteStore implements Store {
       ? this.#db
           .prepare('SELECT * FROM tool_projections WHERE server_id = ? ORDER BY upstream_tool_name')
           .all(serverId)
-      : this.#db.prepare('SELECT * FROM tool_projections ORDER BY server_id, upstream_tool_name').all();
+      : this.#db
+          .prepare('SELECT * FROM tool_projections ORDER BY server_id, upstream_tool_name')
+          .all();
     return rows.map((row) => this.#parseToolProjection(row));
   }
 
-  setToolProjection(serverId: string, toolName: string, visibility: ToolProjection['visibility']): void {
+  setToolProjection(
+    serverId: string,
+    toolName: string,
+    visibility: ToolProjection['visibility'],
+  ): void {
     if (visibility === 'inherit') {
       this.#db
         .prepare('DELETE FROM tool_projections WHERE server_id = ? AND upstream_tool_name = ?')
@@ -1209,14 +1306,15 @@ export class SqliteStore implements Store {
 
   countToolCalls(filter: ToolCallFilter): number {
     const { where, params } = this.#callWhere(filter);
-    const row = this.#db
-      .prepare(`SELECT COUNT(*) AS n FROM tool_calls ${where}`)
-      .get(...params);
+    const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM tool_calls ${where}`).get(...params);
     return (row as { n: number }).n;
   }
 
-  toolCallStats(filter: Omit<ToolCallFilter, 'limit' | 'offset'>): ToolCallStats {    const { where, params } = this.#callWhere({ ...filter, limit: 50, offset: 0 });
-    const totalRow = this.#db.prepare(`SELECT COUNT(*) AS n FROM tool_calls ${where}`).get(...params) as {
+  toolCallStats(filter: Omit<ToolCallFilter, 'limit' | 'offset'>): ToolCallStats {
+    const { where, params } = this.#callWhere({ ...filter, limit: 50, offset: 0 });
+    const totalRow = this.#db
+      .prepare(`SELECT COUNT(*) AS n FROM tool_calls ${where}`)
+      .get(...params) as {
       n: number;
     };
     const total = totalRow.n;
@@ -1257,8 +1355,7 @@ export class SqliteStore implements Store {
         .all(...params) as { tool: string; n: number }[]
     ).map((row) => ({ tool: row.tool, count: row.n }));
 
-    const failingWhere =
-      where === '' ? 'WHERE status != ?' : `${where} AND status != ?`;
+    const failingWhere = where === '' ? 'WHERE status != ?' : `${where} AND status != ?`;
     const failingParams = [...params, 'success'];
     const topFailing = (
       this.#db
@@ -1296,6 +1393,10 @@ export class SqliteStore implements Store {
     if (query.tool !== undefined) {
       conditions.push('upstream_tool_name = ?');
       params.push(query.tool);
+    }
+    if (query.endpointType !== undefined) {
+      conditions.push('endpoint_type = ?');
+      params.push(query.endpointType);
     }
     if (query.from !== undefined) {
       conditions.push('started_at >= ?');
@@ -1349,7 +1450,9 @@ export class SqliteStore implements Store {
 
   getInstallation(entryId: string): MarketInstallation | null {
     const row = this.#db
-      .prepare('SELECT * FROM market_installations WHERE entry_id = ? ORDER BY installed_at DESC LIMIT 1')
+      .prepare(
+        'SELECT * FROM market_installations WHERE entry_id = ? ORDER BY installed_at DESC LIMIT 1',
+      )
       .get(entryId);
     return row === undefined ? null : this.#parseInstallation(row);
   }
@@ -1363,8 +1466,8 @@ export class SqliteStore implements Store {
     this.#db
       .prepare(
         `INSERT INTO market_installations
-         (id, source, entry_id, entry_version, recipe_revision, server_id, credential_id, installed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, source, entry_id, entry_version, recipe_revision, target_type, target_id, credential_id, installed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -1372,7 +1475,8 @@ export class SqliteStore implements Store {
         record.entryId,
         record.entryVersion,
         record.recipeRevision,
-        record.serverId,
+        record.targetType,
+        record.targetId,
         record.credentialId,
         record.installedAt,
       );
@@ -1392,7 +1496,8 @@ export class SqliteStore implements Store {
       )
       .run(patch.entryVersion ?? null, patch.recipeRevision ?? null, id);
     const row = this.#db.prepare('SELECT * FROM market_installations WHERE id = ?').get(id);
-    if (row === undefined) throw new AppError('market_installation_not_found', 'Installation not found', 404);
+    if (row === undefined)
+      throw new AppError('market_installation_not_found', 'Installation not found', 404);
     return this.#parseInstallation(row);
   }
 
@@ -1400,7 +1505,9 @@ export class SqliteStore implements Store {
     this.#db.prepare('DELETE FROM market_installations WHERE id = ?').run(id);
   }
 
-  createInstallJob(input: Omit<InstallJobRecord, 'id' | 'createdAt' | 'updatedAt'>): InstallJobRecord {
+  createInstallJob(
+    input: Omit<InstallJobRecord, 'id' | 'createdAt' | 'updatedAt'>,
+  ): InstallJobRecord {
     const timestamp = now();
     const record = installJobRecordSchema.parse({
       id: randomUUID(),
@@ -1514,23 +1621,28 @@ export class SqliteStore implements Store {
     return row === undefined ? null : this.#parseSecureAction(row);
   }
 
-  updateSecureAction(id: string, patch: Partial<SecureActionRecord>): SecureActionRecord {
-    const current = this.#db.prepare('SELECT * FROM secure_actions WHERE id = ?').get(id);
-    if (current === undefined) {
+  completeSecureAction(id: string, valuesJson: string, completedAt: string): SecureActionRecord {
+    const result = this.#db
+      .prepare(
+        `UPDATE secure_actions
+         SET status = 'completed', values_json = ?, completed_at = ?
+         WHERE id = ? AND status = 'pending' AND expires_at > ?`,
+      )
+      .run(valuesJson, completedAt, id, completedAt);
+    if (Number(result.changes) === 0) {
+      const current = this.#db
+        .prepare('SELECT id, status FROM secure_actions WHERE id = ?')
+        .get(id) as { id: string; status: string } | undefined;
+      if (current === undefined) {
+        throw new AppError('secure_action_not_found', 'Secure action not found', 404);
+      }
+      throw new AppError('secure_action_used', 'Secure action was already used', 400);
+    }
+    const completed = this.#db.prepare('SELECT * FROM secure_actions WHERE id = ?').get(id);
+    if (completed === undefined) {
       throw new AppError('secure_action_not_found', 'Secure action not found', 404);
     }
-    const merged = secureActionRecordSchema.parse({
-      ...this.#parseSecureAction(current),
-      ...patch,
-    });
-    this.#db
-      .prepare(
-        `UPDATE secure_actions SET
-           status = ?, values_json = ?, expires_at = ?, completed_at = ?
-         WHERE id = ?`,
-      )
-      .run(merged.status, merged.valuesJson, merged.expiresAt, merged.completedAt, merged.id);
-    return merged;
+    return this.#parseSecureAction(completed);
   }
 
   #callWhere(filter: ToolCallFilter): {
@@ -1633,7 +1745,8 @@ export class SqliteStore implements Store {
       entryId: parsed.entry_id,
       entryVersion: parsed.entry_version,
       recipeRevision: parsed.recipe_revision,
-      serverId: parsed.server_id,
+      targetType: parsed.target_type,
+      targetId: parsed.target_id,
       credentialId: parsed.credential_id,
       installedAt: parsed.installed_at,
     });
@@ -1678,6 +1791,7 @@ export class SqliteStore implements Store {
       name: parsed.name,
       command: parsed.command,
       executionMode: parsed.execution_mode as 'host' | 'docker',
+      entrypoint: parsed.entrypoint,
       allowList: parseJson(parsed.allow_list_json),
       interactive: parsed.interactive === 1,
       credentialId: parsed.credential_id,

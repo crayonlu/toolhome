@@ -1,8 +1,8 @@
 export interface MarketRequirement {
-  name: string
-  description: string
-  secret?: boolean
-  required?: boolean
+  name: string;
+  description: string;
+  secret?: boolean;
+  required?: boolean;
 }
 
 export type CredentialSpec =
@@ -10,29 +10,42 @@ export type CredentialSpec =
   | { type: 'env' }
   | { type: 'bearer'; tokenKey: string }
   | { type: 'api-key'; headerName: string; valueKey: string }
-  | { type: 'headers'; headers: { name: string; valueKey?: string; value?: string }[] }
+  | { type: 'headers'; headers: { name: string; valueKey?: string; value?: string }[] };
 
 export interface MarketEntry {
-  id: string
-  name: string
-  description: string
-  category: string
-  kind: 'home-stdio' | 'remote' | 'uvx' | 'docker'
-  package?: string
-  bin?: string
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  /** Hosting plane: MCP servers (default) or hosted CLIs */
+  plane?: 'mcp' | 'cli';
+  kind: 'home-stdio' | 'remote' | 'uvx' | 'docker' | 'cli-binary' | 'cli-image';
+  package?: string;
+  bin?: string;
   /** Pinned exact artifact version (npm `@x.y.z`, uvx `==x.y.z`); installs never drift with latest */
-  version?: string
+  version?: string;
   /** Docker image to run via `docker run --rm -i` (kind: docker); the host socket must be mounted */
-  image?: string
+  image?: string;
   /** Inline Dockerfile used to build the image when it is not present and not pullable */
-  dockerfile?: string
-  url?: string
+  dockerfile?: string;
+  url?: string;
   /** Extra dependencies pinned into the uv tool env (e.g. ["mcp<2"]) to work around upstream breaks */
-  uvWith?: string[]
-  credential: CredentialSpec
-  requires: MarketRequirement[]
-  argsTemplate?: string[]
-  docs?: string
+  uvWith?: string[];
+  /** Executed argv prefix baked into every MCP stdio exec (after the binary). */
+  argsTemplate?: string[];
+  /** Explicit argv rules required for hosted CLI execution. */
+  allowList?: { allow: string[][]; deny: string[][] };
+  credential: CredentialSpec;
+  requires: MarketRequirement[];
+  /** Optional Docker entrypoint used when the image does not declare its CLI binary. */
+  entrypoint?: string;
+  /** Status probe argv for the installed CLI (runs with this entry's command/entrypoint). */
+  probe?: { command: string; args: string[] };
+  docs?: string;
+}
+
+export function entryPlane(entry: MarketEntry): 'mcp' | 'cli' {
+  return entry.plane ?? 'mcp';
 }
 
 export const marketCatalog: MarketEntry[] = [
@@ -324,7 +337,9 @@ export const marketCatalog: MarketEntry[] = [
     version: '2025.4.25',
     bin: 'mcp-server-sqlite',
     credential: { type: 'env' },
-    requires: [{ name: 'DB_PATH', description: 'Path to the SQLite database file', required: true }],
+    requires: [
+      { name: 'DB_PATH', description: 'Path to the SQLite database file', required: true },
+    ],
     argsTemplate: ['--db', '${DB_PATH}'],
     docs: 'https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite',
   },
@@ -419,4 +434,82 @@ ENTRYPOINT ["markitdown-mcp"]`,
     ],
     docs: 'https://github.com/crayonlu/Mosaic/tree/main/packages/mcp-server',
   },
-]
+
+  // ── CLI plane (Form A): hosted CLIs, parallel to MCP entries ───────────
+  {
+    id: 'azure-cli',
+    name: 'Azure CLI (az)',
+    description: 'Manage Azure resources, subscriptions, and deployments from the host',
+    category: 'infra',
+    plane: 'cli',
+    kind: 'cli-image',
+    image: 'mcr.microsoft.com/azure-cli',
+    entrypoint: 'az',
+    credential: { type: 'env' },
+    requires: [
+      {
+        name: 'AZURE_CLIENT_ID',
+        description: 'Service principal app id (optional)',
+        required: false,
+      },
+      {
+        name: 'AZURE_CLIENT_SECRET',
+        description: 'Service principal secret (collected via one-time URL)',
+        secret: true,
+        required: false,
+      },
+      { name: 'AZURE_TENANT_ID', description: 'Tenant id (optional)', required: false },
+    ],
+    allowList: {
+      allow: [
+        ['account', 'show'],
+        ['group', 'list'],
+        ['resource', 'list'],
+      ],
+      deny: [['login'], ['account', 'clear']],
+    },
+    probe: { command: 'az', args: ['version', '--output', 'tsv', '--query', 'coreVersion'] },
+    docs: 'https://learn.microsoft.com/cli/azure/',
+  },
+  {
+    id: 'gh-cli',
+    name: 'GitHub CLI (gh)',
+    description: 'GitHub repos, issues, PRs, and Actions from the host shell',
+    category: 'devtools',
+    plane: 'cli',
+    kind: 'cli-image',
+    image: 'ghcr.io/cli/cli',
+    entrypoint: 'gh',
+    credential: { type: 'env' },
+    requires: [
+      {
+        name: 'GH_TOKEN',
+        description: 'GitHub token (collected via one-time URL)',
+        secret: true,
+        required: true,
+      },
+    ],
+    allowList: {
+      allow: [['--version'], ['repo', 'view', '*'], ['issue', 'list'], ['pr', 'list']],
+      deny: [
+        ['auth', 'login'],
+        ['auth', 'token'],
+      ],
+    },
+    probe: { command: 'gh', args: ['--version'] },
+    docs: 'https://cli.github.com/',
+  },
+  {
+    id: 'host-shell',
+    name: 'Host Shell (sh)',
+    description: 'Run trusted commands with the host shell binary (explicit opt-in)',
+    category: 'infra',
+    plane: 'cli',
+    kind: 'cli-binary',
+    bin: '/bin/sh',
+    allowList: { allow: [['-c', '*']], deny: [] },
+    credential: { type: 'env' },
+    requires: [],
+    docs: 'https://docs.toolhome.dev/cli-plane',
+  },
+];

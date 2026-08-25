@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { useState } from 'react';
+import { Link, useParams } from 'react-router';
 import {
   useDeleteServer,
   useServer,
@@ -9,66 +9,71 @@ import {
   useServerProjection,
   useSetProjection,
   useUpdateServer,
-} from '../../app/queries'
-import { useI18n } from '../../i18n'
-import { useToast } from '../../components/ui/Toast'
-import { useConfirm } from '../../components/ui/ConfirmDialog'
-import { Badge, StatusDot } from '../../components/ui/Badge'
-import { Button } from '../../components/ui/Button'
-import { CopyButton } from '../../components/ui/CopyButton'
-import { Toggle } from '../../components/ui/Toggle'
-import { ActionsMenu } from '../../components/ui/Menu'
-import { TabsView, type TabItem } from '../../components/ui/Tabs'
-import { ServerFormSheet, type ServerFormValue } from './ServerForm'
-import { runtimeStatusLabel, runtimeStatusMeta } from '../../app/status'
-import type { ServerRecord } from '../../api/types'
+  useOverview,
+} from '../../app/queries';
+import { useI18n } from '../../i18n';
+import { useToast } from '../../components/ui/Toast';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
+import { Badge, StatusDot } from '../../components/ui/Badge';
+import { Button } from '../../components/ui/Button';
+import { CopyButton } from '../../components/ui/CopyButton';
+import { Toggle } from '../../components/ui/Toggle';
+import { ActionsMenu } from '../../components/ui/Menu';
+import { TabsView, type TabItem } from '../../components/ui/Tabs';
+import { ServerFormSheet, type ServerFormValue } from './ServerForm';
+import { runtimeStatusLabel, runtimeStatusMeta } from '../../app/status';
+import type { ServerRecord } from '../../api/types';
 
 export function ServerDetailPage() {
-  const { id = '' } = useParams()
-  const { t, locale } = useI18n()
-  const { toast } = useToast()
-  const confirm = useConfirm()
-  const { data: server, isLoading } = useServer(id)
-  const { data: capability } = useServerCapabilities(id)
-  const { data: logs } = useServerLogs(id)
-  const { data: projection } = useServerProjection(id)
-  const setProjection = useSetProjection(id)
-  const updateServer = useUpdateServer()
-  const deleteServer = useDeleteServer()
-  const serverAction = useServerAction()
-  const [tab, setTab] = useState('overview')
-  const [editOpen, setEditOpen] = useState(false)
+  const { id = '' } = useParams();
+  const { t, locale } = useI18n();
+  const { toast } = useToast();
+  const confirm = useConfirm();
+  const { data: server, isLoading } = useServer(id);
+  const { data: overview } = useOverview();
+  const { data: capability } = useServerCapabilities(id);
+  const { data: logs } = useServerLogs(id);
+  const { data: projection } = useServerProjection(id);
+  const setProjection = useSetProjection(id);
+  const updateServer = useUpdateServer();
+  const deleteServer = useDeleteServer();
+  const serverAction = useServerAction();
+  const [tab, setTab] = useState('overview');
+  const [editOpen, setEditOpen] = useState(false);
 
   if (isLoading || !server) {
-    return <div className="text-sm text-ink-3">{t('common.loading')}</div>
+    return <div className="text-sm text-ink-3">{t('common.loading')}</div>;
   }
 
-  const meta = runtimeStatusMeta(server.runtime?.status ?? 'unknown')
-  const endpoint = `https://mcp.cyncyn.xyz/mcp/${server.slug}`
-  const actionBusy = serverAction.isPending && serverAction.variables?.id === id
-  const deleting = deleteServer.isPending && deleteServer.variables?.id === id
+  const meta = runtimeStatusMeta(server.runtime?.status ?? 'unknown');
+  const endpoint = `${overview?.endpoints.aggregate.replace(/\/mcp$/, '') ?? window.location.origin}/mcp/${server.slug}`;
+  const actionBusy = serverAction.isPending && serverAction.variables?.id === id;
+  const deleting = deleteServer.isPending && deleteServer.variables?.id === id;
 
   const tabs: TabItem[] = [
     { value: 'overview', label: t('server.overview') },
     { value: 'capability', label: `${t('server.capability')} (${capability?.tools.length ?? 0})` },
     { value: 'logs', label: t('server.logs') },
     { value: 'settings', label: t('server.settings') },
-  ]
+  ];
 
   const handleSubmit = (value: ServerFormValue) => {
     updateServer.mutate(
       { id, input: value },
       {
         onSuccess: () => {
-          setEditOpen(false)
-          toast(t('common.save'), 'success')
+          setEditOpen(false);
+          toast(t('common.save'), 'success');
         },
         onError: (error) => toast(error.message, 'error'),
       },
-    )
-  }
+    );
+  };
 
-  const endpointUrl = server.transport.type === 'streamable-http' ? server.transport.url : `${server.transport.command} ${(server.transport.args ?? []).join(' ')}`
+  const endpointUrl =
+    server.transport.type === 'streamable-http'
+      ? server.transport.url
+      : `${server.transport.command} ${(server.transport.args ?? []).join(' ')}`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,7 +94,10 @@ export function ServerDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button loading={actionBusy} onClick={() => serverAction.mutate({ id, action: 'refresh' })}>
+          <Button
+            loading={actionBusy}
+            onClick={() => serverAction.mutate({ id, action: 'refresh' })}
+          >
             {actionBusy && serverAction.variables?.action === 'restart'
               ? t('server.restarting')
               : t('common.refresh')}
@@ -154,7 +162,7 @@ export function ServerDetailPage() {
                   </div>
                 </div>
               </div>
-            )
+            );
           }
           if (value === 'capability') {
             const tools =
@@ -164,7 +172,7 @@ export function ServerDetailPage() {
                 description: tool.description ?? '',
                 visible: true,
               })) ??
-              []
+              [];
             return (
               <div className="flex flex-col gap-4">
                 {!capability ? (
@@ -194,50 +202,49 @@ export function ServerDetailPage() {
                       ) : (
                         <div className="grid grid-cols-1 gap-px bg-ink-3/10 sm:grid-cols-2">
                           {tools.map((tool) => (
-                            <div key={tool.name} className="flex items-start gap-3 bg-surface px-3 py-2">
-                                <div className="flex min-w-0 flex-1 flex-col">
-                                  <div className="font-mono text-[13px] text-ink">{tool.name}</div>
-                                  {tool.description && (
-                                    <div className="mt-0.5 line-clamp-2 text-xs text-ink-3">
-                                      {tool.description}
-                                    </div>
-                                  )}
-                                </div>
-                                <Badge tone={tool.visible ? 'success' : 'neutral'}>
-                                  {tool.visible
-                                    ? t('server.toolVisible')
-                                    : t('server.toolHidden')}
-                                </Badge>
-                                <ActionsMenu
-                                  actions={[
-                                    {
-                                      label: t('server.visibilityInherit'),
-                                      disabled: setProjection.isPending,
-                                      onSelect: () =>
-                                        setProjection.mutate({
-                                          overrides: [
-                                            { tool: tool.name, visibility: 'inherit' },
-                                          ],
-                                        }),
-                                    },
-                                    {
-                                      label: t('server.toolVisible'),
-                                      disabled: setProjection.isPending,
-                                      onSelect: () =>
-                                        setProjection.mutate({
-                                          overrides: [{ tool: tool.name, visibility: 'visible' }],
-                                        }),
-                                    },
-                                    {
-                                      label: t('server.toolHidden'),
-                                      disabled: setProjection.isPending,
-                                      onSelect: () =>
-                                        setProjection.mutate({
-                                          overrides: [{ tool: tool.name, visibility: 'hidden' }],
-                                        }),
-                                    },
-                                  ]}
-                                />
+                            <div
+                              key={tool.name}
+                              className="flex items-start gap-3 bg-surface px-3 py-2"
+                            >
+                              <div className="flex min-w-0 flex-1 flex-col">
+                                <div className="font-mono text-[13px] text-ink">{tool.name}</div>
+                                {tool.description && (
+                                  <div className="mt-0.5 line-clamp-2 text-xs text-ink-3">
+                                    {tool.description}
+                                  </div>
+                                )}
+                              </div>
+                              <Badge tone={tool.visible ? 'success' : 'neutral'}>
+                                {tool.visible ? t('server.toolVisible') : t('server.toolHidden')}
+                              </Badge>
+                              <ActionsMenu
+                                actions={[
+                                  {
+                                    label: t('server.visibilityInherit'),
+                                    disabled: setProjection.isPending,
+                                    onSelect: () =>
+                                      setProjection.mutate({
+                                        overrides: [{ tool: tool.name, visibility: 'inherit' }],
+                                      }),
+                                  },
+                                  {
+                                    label: t('server.toolVisible'),
+                                    disabled: setProjection.isPending,
+                                    onSelect: () =>
+                                      setProjection.mutate({
+                                        overrides: [{ tool: tool.name, visibility: 'visible' }],
+                                      }),
+                                  },
+                                  {
+                                    label: t('server.toolHidden'),
+                                    disabled: setProjection.isPending,
+                                    onSelect: () =>
+                                      setProjection.mutate({
+                                        overrides: [{ tool: tool.name, visibility: 'hidden' }],
+                                      }),
+                                  },
+                                ]}
+                              />
                             </div>
                           ))}
                         </div>
@@ -253,7 +260,7 @@ export function ServerDetailPage() {
                   </>
                 )}
               </div>
-            )
+            );
           }
           if (value === 'logs') {
             return (
@@ -268,7 +275,7 @@ export function ServerDetailPage() {
                 ))}
                 {logs?.length === 0 && <div className="text-sm text-ink-3">—</div>}
               </div>
-            )
+            );
           }
           return (
             <div className="flex flex-col gap-4">
@@ -303,12 +310,12 @@ export function ServerDetailPage() {
                         description: `${t('common.delete')} ${server.name}?`,
                         confirmLabel: t('common.delete'),
                         danger: true,
-                      })
-                      if (!ok) return
+                      });
+                      if (!ok) return;
                       deleteServer.mutate(
                         { id },
                         { onSuccess: () => (window.location.href = '/servers') },
-                      )
+                      );
                     }}
                   >
                     {t('common.delete')}
@@ -316,11 +323,11 @@ export function ServerDetailPage() {
                 </div>
               </div>
             </div>
-          )
+          );
         }}
       />
     </div>
-  )
+  );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -329,5 +336,5 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <div className="text-[13px] font-medium text-ink-3">{title}</div>
       {children}
     </div>
-  )
+  );
 }

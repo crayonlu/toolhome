@@ -14,20 +14,20 @@ import {
   SquareTerminal,
   Sun,
   SunMoon,
-} from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { useMediaQuery } from './useMediaQuery'
-import { useTheme } from './theme'
-import { useI18n } from '../i18n'
-import { clearKey } from '../api/client'
-import { Sheet } from '../components/ui/Sheet'
+} from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { useMediaQuery } from './useMediaQuery';
+import { useTheme } from './theme';
+import { useI18n } from '../i18n';
+import { clearKey } from '../api/client';
+import { Sheet } from '../components/ui/Sheet';
 
 interface NavItem {
-  to: string
-  key: string
-  icon: typeof Server
-  end?: boolean
+  to: string;
+  key: string;
+  icon: typeof Server;
+  end?: boolean;
 }
 
 const desktopNav: NavItem[] = [
@@ -42,18 +42,18 @@ const desktopNav: NavItem[] = [
   { to: '/diagnostics', key: 'nav.diagnostics', icon: Activity },
   { to: '/events', key: 'nav.events', icon: ScrollText },
   { to: '/settings', key: 'nav.settings', icon: Settings },
-]
+];
 
 const mobileTabs: NavItem[] = desktopNav.filter((item) =>
   ['/', '/servers', '/credentials'].includes(item.to),
-)
+);
 const mobileMore: NavItem[] = desktopNav.filter(
   (item) => !mobileTabs.some((tab) => tab.to === item.to),
-)
+);
 
 function ThemeSwitch() {
-  const { theme, setTheme } = useTheme()
-  const Icon = theme === 'dark' ? Moon : theme === 'light' ? Sun : SunMoon
+  const { theme, setTheme } = useTheme();
+  const Icon = theme === 'dark' ? Moon : theme === 'light' ? Sun : SunMoon;
   return (
     <button
       type="button"
@@ -63,11 +63,11 @@ function ThemeSwitch() {
     >
       <Icon className="size-4" />
     </button>
-  )
+  );
 }
 
 function LangSwitch() {
-  const { locale, setLocale } = useI18n()
+  const { locale, setLocale } = useI18n();
   return (
     <button
       type="button"
@@ -76,39 +76,39 @@ function LangSwitch() {
     >
       {locale === 'zh' ? 'EN' : '中'}
     </button>
-  )
+  );
 }
 
 function LogoutButton() {
-  const { t } = useI18n()
-  const navigate = useNavigate()
+  const { t } = useI18n();
+  const navigate = useNavigate();
   return (
     <button
       type="button"
       onClick={() => {
-        clearKey()
-        navigate('/login')
+        clearKey();
+        navigate('/login');
       }}
       className="flex h-8 items-center gap-1.5 px-2 text-[13px] text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger"
     >
       <LogOut className="size-3.5" />
       {t('logout')}
     </button>
-  )
+  );
 }
 
 function Brand() {
-  const { t } = useI18n()
+  const { t } = useI18n();
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 px-4">
       <span className="size-2 bg-accent" />
       <span className="text-[15px] font-semibold tracking-[-0.01em]">{t('app.title')}</span>
     </div>
-  )
+  );
 }
 
 function SideNav() {
-  const { t } = useI18n()
+  const { t } = useI18n();
   return (
     <nav className="flex flex-1 flex-col gap-0.5 px-2">
       {desktopNav.map((item) => (
@@ -127,31 +127,31 @@ function SideNav() {
         </NavLink>
       ))}
     </nav>
-  )
+  );
 }
 
 function pageKeyFor(path: string): string {
-  if (path === '/') return 'nav.overview'
-  if (path.startsWith('/servers')) return 'nav.servers'
-  if (path.startsWith('/clis')) return 'nav.clis'
-  if (path.startsWith('/credentials')) return 'nav.credentials'
-  if (path.startsWith('/access-keys')) return 'nav.accessKeys'
-  if (path.startsWith('/market')) return 'nav.market'
-  if (path.startsWith('/endpoints')) return 'nav.endpoints'
-  if (path.startsWith('/diagnostics')) return 'nav.diagnostics'
-  if (path.startsWith('/events')) return 'nav.events'
-  if (path.startsWith('/calls')) return 'nav.calls'
-  if (path.startsWith('/settings')) return 'nav.settings'
-  return 'nav.overview'
+  if (path === '/') return 'nav.overview';
+  if (path.startsWith('/servers')) return 'nav.servers';
+  if (path.startsWith('/clis')) return 'nav.clis';
+  if (path.startsWith('/credentials')) return 'nav.credentials';
+  if (path.startsWith('/access-keys')) return 'nav.accessKeys';
+  if (path.startsWith('/market')) return 'nav.market';
+  if (path.startsWith('/endpoints')) return 'nav.endpoints';
+  if (path.startsWith('/diagnostics')) return 'nav.diagnostics';
+  if (path.startsWith('/events')) return 'nav.events';
+  if (path.startsWith('/calls')) return 'nav.calls';
+  if (path.startsWith('/settings')) return 'nav.settings';
+  return 'nav.overview';
 }
 
 export function AppShell() {
-  const { t } = useI18n()
-  const isMobile = useMediaQuery('(max-width: 767px)')
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [moreOpen, setMoreOpen] = useState(false)
-  const pageKey = useMemo(() => pageKeyFor(location.pathname), [location.pathname])
+  const { t } = useI18n();
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const pageKey = useMemo(() => pageKeyFor(location.pathname), [location.pathname]);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
@@ -171,15 +171,13 @@ export function AppShell() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="glass flex h-12 shrink-0 items-center gap-2 px-4 md:hidden">
           <span className="size-2 bg-accent" />
-          <span className="flex-1 text-[15px] font-semibold tracking-[-0.01em]">
-            {t(pageKey)}
-          </span>
+          <span className="flex-1 text-[15px] font-semibold tracking-[-0.01em]">{t(pageKey)}</span>
           <ThemeSwitch />
           <LangSwitch />
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-6xl px-4 py-5 md:px-8 md:py-6">
+          <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-5 md:px-8 md:py-6">
             <Outlet />
           </div>
         </div>
@@ -220,8 +218,8 @@ export function AppShell() {
               key={item.to}
               type="button"
               onClick={() => {
-                setMoreOpen(false)
-                navigate(item.to)
+                setMoreOpen(false);
+                navigate(item.to);
               }}
               className="flex h-11 items-center gap-3 px-2 text-sm text-ink-2"
             >
@@ -232,5 +230,5 @@ export function AppShell() {
         </div>
       </Sheet>
     </div>
-  )
+  );
 }

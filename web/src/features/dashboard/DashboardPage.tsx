@@ -1,9 +1,9 @@
-import { Activity, KeyRound, Link2, Server } from 'lucide-react'
-import { Link } from 'react-router'
-import { useOverview } from '../../app/queries'
-import { useI18n } from '../../i18n'
-import { CopyButton } from '../../components/ui/CopyButton'
-import { StatusDot } from '../../components/ui/Badge'
+import { Activity, KeyRound, Link2, Server, SquareTerminal } from 'lucide-react';
+import { Link } from 'react-router';
+import { useOverview } from '../../app/queries';
+import { useI18n } from '../../i18n';
+import { CopyButton } from '../../components/ui/CopyButton';
+import { StatusDot } from '../../components/ui/Badge';
 
 function StatCard({
   label,
@@ -12,13 +12,13 @@ function StatCard({
   to,
   tone,
 }: {
-  label: string
-  value: string | number
-  icon: typeof Server
-  to: string
-  tone?: 'success' | 'danger' | 'neutral'
+  label: string;
+  value: string | number;
+  icon: typeof Server;
+  to: string;
+  tone?: 'success' | 'danger' | 'neutral';
 }) {
-  const toneDot = tone === 'success' ? 'bg-success' : tone === 'danger' ? 'bg-danger' : 'bg-ink-3'
+  const toneDot = tone === 'success' ? 'bg-success' : tone === 'danger' ? 'bg-danger' : 'bg-ink-3';
   return (
     <Link
       to={to}
@@ -31,18 +31,18 @@ function StatCard({
       </div>
       <span className={`size-2 ${toneDot}`} />
     </Link>
-  )
+  );
 }
 
 export function DashboardPage() {
-  const { t } = useI18n()
-  const { data: overview, isLoading } = useOverview()
+  const { t } = useI18n();
+  const { data: overview, isLoading } = useOverview();
 
   if (isLoading || !overview) {
-    return <div className="text-sm text-ink-3">{t('common.loading')}</div>
+    return <div className="text-sm text-ink-3">{t('common.loading')}</div>;
   }
 
-  const { servers, endpoints } = overview
+  const { servers, endpoints } = overview;
 
   return (
     <div className="flex flex-col gap-5">
@@ -54,13 +54,19 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <StatCard
           label={t('nav.servers')}
           value={`${servers.ready}/${servers.total}`}
           icon={Server}
           to="/servers"
           tone={servers.unhealthy > 0 ? 'danger' : 'success'}
+        />
+        <StatCard
+          label={t('nav.clis')}
+          value={overview.clis.total}
+          icon={SquareTerminal}
+          to="/clis"
         />
         <StatCard
           label={t('nav.credentials')}
@@ -93,5 +99,5 @@ export function DashboardPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

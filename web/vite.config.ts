@@ -1,6 +1,6 @@
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -8,6 +8,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:3344', changeOrigin: true },
+      '/cli/': { target: 'http://127.0.0.1:3344', changeOrigin: true },
       '/healthz': { target: 'http://127.0.0.1:3344', changeOrigin: true },
     },
   },
@@ -19,4 +20,4 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: true,
   },
-})
+});

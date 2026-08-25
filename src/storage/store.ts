@@ -81,7 +81,12 @@ export interface Store {
   getRuntimeState(serverId: string): RuntimeState | null;
   saveRuntimeState(state: RuntimeState): RuntimeState;
   appendEvent(event: Omit<EventRecord, 'id' | 'createdAt'>): EventRecord;
-  listEvents(options?: { serverId?: string; limit?: number }): EventRecord[];
+  listEvents(options?: {
+    serverId?: string;
+    limit?: number;
+    level?: EventRecord['level'];
+    plane?: 'mcp' | 'cli';
+  }): EventRecord[];
 
   // ── Tool visibility projection ──────────────────────────────────────────
   getServerProjection(serverId: string): ServerProjection | null;
@@ -121,5 +126,5 @@ export interface Store {
   // ── Secure actions (URL-mode secret elicitation) ───────────────────────
   createSecureAction(input: Omit<SecureActionRecord, 'id' | 'createdAt'>): SecureActionRecord;
   getSecureAction(id: string): SecureActionRecord | null;
-  updateSecureAction(id: string, patch: Partial<SecureActionRecord>): SecureActionRecord;
+  completeSecureAction(id: string, valuesJson: string, completedAt: string): SecureActionRecord;
 }

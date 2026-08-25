@@ -1,6 +1,6 @@
 import { Plus, TerminalSquare } from 'lucide-react';
 import { useState } from 'react';
-import { useClis, useCreateCli, useCliExec, useDeleteCli, useUpdateCli } from '../../app/queries';
+import { useClis, useCreateCli, useDeleteCli, useUpdateCli } from '../../app/queries';
 import { useI18n } from '../../i18n';
 import { useToast } from '../../components/ui/Toast';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
@@ -24,7 +24,6 @@ export function ClisPage() {
   const createCli = useCreateCli();
   const updateCli = useUpdateCli();
   const deleteCli = useDeleteCli();
-  const execCli = useCliExec();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CliRecord | undefined>(undefined);
   const [execTarget, setExecTarget] = useState<CliRecord | undefined>(undefined);
@@ -58,16 +57,6 @@ export function ClisPage() {
       });
     }
   };
-
-  const handleExec = async (slug: string, argvText: string) => {
-    try {
-      await execCli.mutateAsync({ slug, input: { argv: argvText.split(/\s+/).filter(Boolean) } });
-    } catch {
-      // handled inside exec sheet
-    }
-  };
-
-  void handleExec;
 
   const removeCli = async (cli: CliRecord) => {
     const ok = await confirm({

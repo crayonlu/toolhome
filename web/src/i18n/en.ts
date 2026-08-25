@@ -1,4 +1,4 @@
-import type { Dict } from './types'
+import type { Dict } from './types';
 
 export const en: Dict = {
   'nav.overview': 'Overview',
@@ -32,6 +32,7 @@ export const en: Dict = {
   'common.name': 'Name',
   'common.type': 'Type',
   'common.status': 'Status',
+  'common.level': 'Level',
   'common.created': 'Created',
   'common.updated': 'Updated',
   'common.id': 'ID',
@@ -47,6 +48,7 @@ export const en: Dict = {
   'common.language': 'Language',
   'common.theme': 'Theme',
   'status.ready': 'Ready',
+  'status.configured': 'Configured',
   'status.pending': 'Pending',
   'status.connecting': 'Connecting',
   'status.unreachable': 'Unreachable',
@@ -62,6 +64,7 @@ export const en: Dict = {
   'cli.addTitle': 'Register CLI',
   'cli.command': 'Command / Image',
   'cli.executionMode': 'Execution mode',
+  'cli.entrypoint': 'Docker entrypoint',
   'cli.modeHost': 'host process (trusted)',
   'cli.modeDocker': 'docker container (isolated)',
   'cli.allowRules': 'Allow rules (one per line, * matches a token)',
@@ -74,8 +77,9 @@ export const en: Dict = {
   'cli.probeArgs': 'Probe args (space-separated)',
   'cli.probeHint':
     'Probe stdout is parsed for version=… and loggedIn=true|false; exit code 0 means installed.',
-  'cli.argv': 'argv (space-separated, never a shell string)',
-  'cli.execHint': 'Runs on the ToolHome host with the record allow-list applied.',
+  'cli.argv': 'argv (one argument per line; never a shell string)',
+  'cli.execHint':
+    'Enter one argv argument per line. Runs on the ToolHome host with the record allow-list applied.',
   'cli.run': 'Run',
   'cli.exitCode': 'exit',
   'cli.truncated': 'output truncated',
@@ -100,7 +104,8 @@ export const en: Dict = {
   'server.prompts': 'Prompts',
   'server.visibility': 'Visibility',
   'server.defaultVisibility': 'Default visibility',
-  'server.visibilityHint': 'Hidden only affects the aggregate /mcp endpoint; individual endpoints stay lossless',
+  'server.visibilityHint':
+    'Hidden only affects the aggregate /mcp endpoint; individual endpoints stay lossless',
   'server.visibilityInherit': 'Inherit',
   'server.toolVisible': 'Visible',
   'server.toolHidden': 'Hidden',
@@ -113,6 +118,9 @@ export const en: Dict = {
   'calls.p50': 'p50',
   'calls.p95': 'p95',
   'calls.server': 'Server',
+  'calls.type': 'Type',
+  'calls.aggregate': 'aggregate',
+  'calls.individual': 'individual',
   'calls.tool': 'Tool',
   'calls.status': 'Status',
   'calls.window': 'Window',
@@ -147,15 +155,23 @@ export const en: Dict = {
   'market.installedAuthorize': 'Installed — authorize {name}',
   'market.authorizeAfter': 'Authorize after install',
   'market.noConfig': 'No configuration needed',
-  'market.uninstallConfirm': 'Uninstall {name}? Its server and credential will be removed.',
+  'market.secretRequired': 'A secret is required before installation can continue.',
+  'market.secretRequiredHint':
+    'Open the one-time secure action page, submit the secret, then this install will resume automatically.',
+  'market.openSecretAction': 'Open secure action',
+  'market.installInterrupted': 'This install was interrupted. Close this sheet and retry.',
+  'market.secretLinkExpired': 'The secure action link expired before the secret was submitted. Retry the install to get a fresh link.',
+  'market.uninstallConfirm': 'Uninstall {name}? Its hosted record and credential will be removed.',
   'secureAction.title': 'Secure action',
   'secureAction.entryLabel': 'Entry: ',
-  'secureAction.hint': 'One-time action bound to the requesting principal and target. Secrets are entered here only and never reach the agent context.',
+  'secureAction.hint':
+    'One-time action bound to the requesting principal and target. Secrets are entered here only and never reach the agent context.',
   'secureAction.complete': 'Submit',
   'secureAction.completed': 'Submitted — install resumed',
   'secureAction.expired': 'This action was used or has expired',
   'secureAction.noFields': 'No secret required',
-  'secureAction.done': 'Secret stored securely; the install continues. Check the console for progress.',
+  'secureAction.done':
+    'Secret stored securely; the install continues. Check the console for progress.',
   'settings.controlKeys': 'Control Keys',
   'settings.config': 'Config',
   'settings.rawApi': 'Raw API',
@@ -163,10 +179,12 @@ export const en: Dict = {
   'settings.keyScope': 'Key scope',
   'settings.scopeAdmin': 'Admin',
   'settings.scopeAgent': 'Agent',
-  'settings.scopeAgentHint': 'Agent keys can read state and run enable/disable/refresh/install operations, but cannot access credentials, keys, or deletions.',
+  'settings.scopeAgentHint':
+    'Agent keys can read state and run enable/disable/refresh/install operations, but cannot access credentials, keys, or deletions.',
   'settings.management': 'Management MCP',
   'settings.managementEndpoint': 'Management endpoint (control keys only)',
-  'settings.managementHint': 'Connect /manage/mcp with an agent-scoped control key so an AI can read state and run safe operations.',
+  'settings.managementHint':
+    'Connect /manage/mcp with an agent-scoped control key so an AI can read state and run safe operations.',
   'settings.export': 'Export',
   'settings.exportSecrets': 'Export (secrets)',
   'settings.import': 'Import',
@@ -190,10 +208,10 @@ export const en: Dict = {
   'login.submit': 'Sign in',
   'login.error': 'Invalid Control Key',
   'login.remember': 'Remember on this device',
-  'logout': 'Sign out',
+  logout: 'Sign out',
   'theme.dark': 'Dark',
   'theme.light': 'Light',
   'theme.auto': 'Auto',
   'lang.zh': '中文',
   'lang.en': 'English',
-}
+};

@@ -41,8 +41,8 @@ export class SecureActionService {
     return { action, token, url: this.#url(action, token) };
   }
 
-  /** Verify token + expiry + one-time use + principal binding; returns the action. */
-  verify(id: string, token: string, principalId: string): SecureActionRecord {
+  /** Verify token + expiry + one-time use; the token carries the principal binding. */
+  verify(id: string, token: string, principalId?: string): SecureActionRecord {
     const action = this.#store.getSecureAction(id);
     if (!action) throw new AppError('secure_action_not_found', 'Secure action not found', 404);
     if (action.status !== 'pending') {
@@ -51,7 +51,22 @@ export class SecureActionService {
     if (Date.parse(action.expiresAt) < Date.now()) {
       throw new AppError('secure_action_expired', 'Secure action has expired', 400);
     }
-    if (action.principalId !== principalId) {
+    this.#verifyToken(action, token, principalId);
+    return action;
+  }
+
+  complete(
+    id: string,
+    token: string,
+    principalId: string | undefined,
+    values: Record<string, string>,
+  ): SecureActionRecord {
+    this.verify(id, token, principalId);
+    return this.#store.completeSecureAction(id, JSON.stringify(values), new Date().toISOString());
+  }
+
+  #verifyToken(action: SecureActionRecord, token: string, principalId?: string): void {
+    if (principalId !== undefined && action.principalId !== principalId) {
       throw new AppError('forbidden', 'Secure action belongs to another principal', 403);
     }
     const expected = this.#mint(action);
@@ -60,21 +75,6 @@ export class SecureActionService {
     if (actual.length !== check.length || !timingSafeEqual(actual, check)) {
       throw new AppError('secure_action_invalid', 'Invalid secure action token', 400);
     }
-    return action;
-  }
-
-  complete(
-    id: string,
-    token: string,
-    principalId: string,
-    values: Record<string, string>,
-  ): SecureActionRecord {
-    this.verify(id, token, principalId);
-    return this.#store.updateSecureAction(id, {
-      status: 'completed',
-      valuesJson: JSON.stringify(values),
-      completedAt: new Date().toISOString(),
-    });
   }
 
   #mint(action: SecureActionRecord): string {

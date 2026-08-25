@@ -5,6 +5,7 @@
 //   err   <text...>       print text to stderr, exit 0
 //   mix                   stdout line + stderr line, exit 1
 //   env   <NAME...>       print NAME=VALUE for each env var, exit 0
+//   stdin                echo stdin after EOF, exit 0
 //   exit  <code>          exit with the given code
 //   sleep <ms>            wait, then exit 0
 //   huge  <bytes>         emit <bytes> of 'x' to stdout, exit 0
@@ -29,6 +30,14 @@ switch (sub) {
     break;
   case 'env':
     for (const name of rest) out(`${name}=${process.env[name] ?? ''}`);
+    break;
+  case 'stdin':
+    process.stdin.setEncoding('utf8');
+    let input = '';
+    process.stdin.on('data', (chunk) => {
+      input += chunk;
+    });
+    process.stdin.on('end', () => out(input));
     break;
   case 'exit':
     process.exit(Number(rest[0] ?? 0));

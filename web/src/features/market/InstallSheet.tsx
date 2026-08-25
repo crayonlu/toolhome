@@ -1,91 +1,131 @@
-import { useEffect, useRef, useState } from 'react'
-import { api } from '../../api/client'
-import { useI18n } from '../../i18n'
-import { useToast } from '../../components/ui/Toast'
-import { Sheet } from '../../components/ui/Sheet'
-import { Button, Spinner } from '../../components/ui/Button'
-import { FieldGroup, TextField } from '../../components/ui/Field'
-import type { MarketEntry } from '../../api/types'
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../../api/client';
+import { useI18n } from '../../i18n';
+import { useToast } from '../../components/ui/Toast';
+import { Sheet } from '../../components/ui/Sheet';
+import { Button, Spinner } from '../../components/ui/Button';
+import { FieldGroup, TextField } from '../../components/ui/Field';
+import { CopyButton } from '../../components/ui/CopyButton';
+import type { MarketEntry } from '../../api/types';
+import { toConsoleActionUrl } from './secure-action-url';
+import {
+  isInstallPending,
+  isInstallRunning,
+  SECURE_ACTION_EXPIRED,
+  type InstallStatus,
+} from './install-job';
 
 interface InstallJob {
-  status: 'installing' | 'completed' | 'failed'
-  step: string
-  output: string
-  result?: unknown
-  error?: string
+  status: InstallStatus;
+  step: string;
+  output: string;
+  result?: unknown;
+  error?: string;
 }
-
 export function InstallSheet({
   entry,
   onOpenChange,
   onInstalled,
 }: {
-  entry: MarketEntry | null
-  onOpenChange: (open: boolean) => void
-  onInstalled: (slug: string) => void
+  entry: MarketEntry | null;
+  onOpenChange: (open: boolean) => void;
+  onInstalled: (slug: string) => void;
 }) {
-  const { t } = useI18n()
-  const { toast } = useToast()
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [job, setJob] = useState<InstallJob | null>(null)
-  const [installing, setInstalling] = useState(false)
-  const outputRef = useRef<HTMLPreElement>(null)
+  const { t } = useI18n();
+  const { toast } = useToast();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [job, setJob] = useState<InstallJob | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [actionUrl, setActionUrl] = useState<string | null>(null);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const activeRef = useRef(true);
+
+  useEffect(() => {
+    activeRef.current = entry !== null;
+    return () => {
+      activeRef.current = false;
+    };
+  }, [entry]);
 
   useEffect(() => {
     if (entry) {
-      setValues({})
-      setJob(null)
-      setInstalling(false)
+      setValues({});
+      setJob(null);
+      setInstalling(false);
+      setActionUrl(null);
     }
-  }, [entry])
+  }, [entry]);
 
   useEffect(() => {
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight
-  }, [job?.output])
+    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [job?.output]);
 
-  if (!entry) return null
+  if (!entry) return null;
 
   const missing = entry.requires.some(
-    (requirement) => requirement.required && !values[requirement.name],
-  )
+    (requirement) => requirement.required && !requirement.secret && !values[requirement.name],
+  );
 
   const submit = async () => {
-    setInstalling(true)
-    setJob({ status: 'installing', step: 'starting', output: '' })
+    setInstalling(true);
+    setJob({ status: 'installing', step: 'starting', output: '' });
     try {
       const started = (await api.post(`/api/v1/market/${entry.id}/install`, {
         values,
-      })) as { jobId: string }
+      })) as { jobId: string; status: InstallJob['status']; actionUrl?: string };
+      setActionUrl(
+        started.actionUrl === undefined
+          ? null
+          : toConsoleActionUrl(started.actionUrl, window.location.origin),
+      );
       for (;;) {
-        const current = await api.get<InstallJob>(`/api/v1/market/install/${started.jobId}`)
-        setJob(current)
-        if (current.status !== 'installing') {
-          setInstalling(false)
-          if (current.status === 'failed') {
-            toast(current.error ?? 'install failed', 'error')
-            return
-          }
-          onOpenChange(false)
-          if (entry.credential.type === 'oauth') {
-            toast(t('market.installedAuthorize', { name: entry.name }), 'success')
-          } else {
-            toast(`✓ ${entry.name} ${t('market.install')}`, 'success')
-          }
-          onInstalled(entry.id)
-          return
+        const current = await api.get<InstallJob>(`/api/v1/market/install/${started.jobId}`);
+        if (!activeRef.current) return;
+        setJob(current);
+        if (current.status === 'interrupted') {
+          setInstalling(false);
+          return;
         }
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+        if (current.status === 'awaiting_secret') {
+          setInstalling(false);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+        if (!isInstallPending(current.status)) {
+          setInstalling(false);
+          if (current.status === 'failed') {
+            toast(current.error ?? 'install failed', 'error');
+            return;
+          }
+          onOpenChange(false);
+          if (entry.credential.type === 'oauth') {
+            toast(t('market.installedAuthorize', { name: entry.name }), 'success');
+          } else {
+            toast(`✓ ${entry.name} ${t('market.install')}`, 'success');
+          }
+          onInstalled(entry.id);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     } catch (error) {
-      setInstalling(false)
-      toast((error as Error).message, 'error')
+      setInstalling(false);
+      toast((error as Error).message, 'error');
     }
-  }
+  };
 
-  const installingNow = installing && job?.status === 'installing'
+  const installingNow = installing && job !== null && isInstallRunning(job.status);
+  const awaitingSecret = job?.status === 'awaiting_secret' && actionUrl !== null;
 
   return (
-    <Sheet open onOpenChange={onOpenChange} title={`${t('market.install')} · ${entry.name}`}>
+    <Sheet
+      open
+      onOpenChange={(open) => {
+        if (!open) activeRef.current = false;
+        onOpenChange(open);
+      }}
+      title={`${t('market.install')} · ${entry.name}`}
+    >
       <p className="mb-4 text-sm text-ink-2">{entry.description}</p>
       <FieldGroup>
         {entry.requires.map((requirement) => (
@@ -99,17 +139,35 @@ export function InstallSheet({
             type={requirement.secret ? 'password' : 'text'}
             mono
             required={requirement.required}
-            disabled={installingNow}
+            disabled={installingNow || awaitingSecret}
           />
         ))}
         {entry.requires.length === 0 && (
           <div className="text-sm text-ink-3">
-            {entry.credential.type === 'oauth'
-              ? t('market.authorizeAfter')
-              : t('market.noConfig')}
+            {entry.credential.type === 'oauth' ? t('market.authorizeAfter') : t('market.noConfig')}
           </div>
         )}
       </FieldGroup>
+
+      {awaitingSecret && (
+        <div className="mt-4 flex flex-col gap-3 bg-surface-2 p-3">
+          <div className="text-sm text-ink">{t('market.secretRequired')}</div>
+          <p className="text-xs text-ink-3">{t('market.secretRequiredHint')}</p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2">
+              {actionUrl}
+            </code>
+            <CopyButton text={actionUrl} />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => window.open(actionUrl, '_blank', 'noopener,noreferrer')}
+            >
+              {t('market.openSecretAction')}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {installingNow && (
         <div className="mt-4 flex flex-col gap-2">
@@ -129,12 +187,22 @@ export function InstallSheet({
         </div>
       )}
 
+      {job?.status === 'interrupted' && (
+        <div className="mt-4 text-sm text-danger">{t('market.installInterrupted')}</div>
+      )}
+
       {job?.status === 'failed' && (
         <div className="mt-4 flex flex-col gap-3">
-          <div className="text-sm text-danger">{job.error}</div>
-          <pre className="max-h-40 overflow-auto bg-surface-2 p-3 font-mono text-xs text-ink-2">
-            {job.output}
-          </pre>
+          <div className="text-sm text-danger">
+            {job.error === SECURE_ACTION_EXPIRED
+              ? t('market.secretLinkExpired')
+              : (job.error ?? '')}
+          </div>
+          {job.error !== SECURE_ACTION_EXPIRED && (
+            <pre className="max-h-40 overflow-auto bg-surface-2 p-3 font-mono text-xs text-ink-2">
+              {job.output}
+            </pre>
+          )}
           <div>
             <Button variant="primary" onClick={submit}>
               {t('common.retry')}
@@ -150,12 +218,12 @@ export function InstallSheet({
         <Button
           variant="primary"
           loading={installingNow}
-          disabled={missing || installingNow}
+          disabled={missing || installingNow || awaitingSecret}
           onClick={submit}
         >
           {installingNow ? t('market.installing') : t('common.create')}
         </Button>
       </div>
     </Sheet>
-  )
+  );
 }

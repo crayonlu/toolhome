@@ -1,22 +1,22 @@
-import { useMemo, useState } from 'react'
-import { useI18n } from '../../i18n'
+import { useMemo, useState } from 'react';
+import { useI18n } from '../../i18n';
 
 export interface CallSeriesPoint {
-  bucket: string
-  total: number
-  success: number
-  error: number
+  bucket: string;
+  total: number;
+  success: number;
+  error: number;
 }
 
-const VIEW_W = 100
-const VIEW_H = 40
+const VIEW_W = 100;
+const VIEW_H = 40;
 
 function formatTime(value: string, locale: string, bucketSeconds: number): string {
-  const date = new Date(value)
+  const date = new Date(value);
   if (bucketSeconds >= 86_400) {
-    return date.toLocaleString(locale, { month: 'numeric', day: 'numeric' })
+    return date.toLocaleString(locale, { month: 'numeric', day: 'numeric' });
   }
-  return date.toLocaleString(locale, { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleString(locale, { hour: '2-digit', minute: '2-digit' });
 }
 
 /**
@@ -28,37 +28,37 @@ export function CallChart({
   points,
   bucketSeconds,
 }: {
-  points: CallSeriesPoint[]
-  bucketSeconds: number
+  points: CallSeriesPoint[];
+  bucketSeconds: number;
 }) {
-  const { t, locale } = useI18n()
-  const [hover, setHover] = useState<number | null>(null)
+  const { t, locale } = useI18n();
+  const [hover, setHover] = useState<number | null>(null);
 
-  const max = useMemo(
-    () => Math.max(1, ...points.map((point) => point.total)),
-    [points],
-  )
-  const y = (value: number) => VIEW_H - (value / max) * VIEW_H
-  const x = (index: number) => (points.length <= 1 ? VIEW_W / 2 : (index / (points.length - 1)) * VIEW_W)
+  const max = useMemo(() => Math.max(1, ...points.map((point) => point.total)), [points]);
+  const y = (value: number) => VIEW_H - (value / max) * VIEW_H;
+  const x = (index: number) =>
+    points.length <= 1 ? VIEW_W / 2 : (index / (points.length - 1)) * VIEW_W;
 
   const { areaPoints, totalPoints, errorPoints } = useMemo(() => {
-    if (points.length === 0) return { areaPoints: '', totalPoints: '', errorPoints: '' }
+    if (points.length === 0) return { areaPoints: '', totalPoints: '', errorPoints: '' };
     const line = (key: 'total' | 'error') =>
-      points.map((point, index) => `${x(index)},${y(point[key])}`).join(' ')
-    const total = line('total')
-    const area = `${total} ${x(points.length - 1)},${VIEW_H} ${x(0)},${VIEW_H}`
-    return { areaPoints: area, totalPoints: total, errorPoints: line('error') }
-  }, [points, max])
+      points.map((point, index) => `${x(index)},${y(point[key])}`).join(' ');
+    const total = line('total');
+    const area = `${total} ${x(points.length - 1)},${VIEW_H} ${x(0)},${VIEW_H}`;
+    return { areaPoints: area, totalPoints: total, errorPoints: line('error') };
+  }, [points, max]);
 
   if (points.length === 0) {
-    return <div className="text-xs text-ink-3">—</div>
+    return <div className="text-xs text-ink-3">—</div>;
   }
 
-  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) =>
-    Math.round((points.length - 1) * fraction),
-  )
-  const hoverPoint = hover === null ? null : points[hover]
-  const hoverX = hover === null ? null : x(hover)
+  const xTicks = [
+    ...new Set(
+      [0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round((points.length - 1) * fraction)),
+    ),
+  ];
+  const hoverPoint = hover === null ? null : points[hover];
+  const hoverX = hover === null ? null : x(hover);
 
   return (
     <div>
@@ -71,9 +71,9 @@ export function CallChart({
         <div
           className="relative h-44 flex-1 cursor-crosshair select-none"
           onPointerMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-            setHover(Math.round(fraction * (points.length - 1)))
+            const rect = event.currentTarget.getBoundingClientRect();
+            const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+            setHover(Math.round(fraction * (points.length - 1)));
           }}
           onPointerLeave={() => setHover(null)}
         >
@@ -95,10 +95,7 @@ export function CallChart({
               />
             ))}
             {areaPoints && (
-              <polygon
-                points={areaPoints}
-                className="fill-[var(--mch-accent)] opacity-[0.08]"
-              />
+              <polygon points={areaPoints} className="fill-[var(--mch-accent)] opacity-[0.08]" />
             )}
             <polyline
               points={totalPoints}
@@ -149,5 +146,5 @@ export function CallChart({
         ))}
       </div>
     </div>
-  )
+  );
 }

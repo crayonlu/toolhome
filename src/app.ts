@@ -103,7 +103,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     upstreamOAuth,
   );
   const secureActions = new SecureActionService(store, config.masterKey, config.publicUrl);
-  const cli = new CliService(store);
+  const cli = new CliService(store, callRecorder);
   const market = new MarketService(
     control,
     store,

@@ -325,10 +325,7 @@ export class ControlService {
     if (!key || key.revokedAt !== null) {
       throw new AppError('api_key_not_found', 'API key not found', 404);
     }
-    if (
-      kind === 'control' &&
-      this.#store.listApiKeys('control').length <= 1
-    ) {
+    if (kind === 'control' && this.#store.listApiKeys('control').length <= 1) {
       throw new AppError(
         'last_control_key',
         'Create another Control API Key before revoking the last active key',
@@ -340,6 +337,7 @@ export class ControlService {
 
   overview() {
     const servers = this.#store.listServers();
+    const clis = this.#store.listClis();
     const states = servers.map((server) => this.#store.getRuntimeState(server.id));
     const unhealthy = states.filter(
       (state) => state && !['ready', 'disabled', 'unknown'].includes(state.status),
@@ -352,6 +350,10 @@ export class ControlService {
         home: servers.filter((server) => server.kind === 'home').length,
         ready: states.filter((state) => state?.status === 'ready').length,
         unhealthy,
+      },
+      clis: {
+        total: clis.length,
+        enabled: clis.filter((cli) => cli.enabled).length,
       },
       credentials: this.#store.listCredentials().length,
       accessKeys: this.#store.listApiKeys('access').length,
@@ -371,6 +373,7 @@ export class ControlService {
 
   diagnostics() {
     const servers = this.#store.listServers();
+    const clis = this.#store.listClis();
     return {
       ok: servers.every((server) => {
         const status = this.#store.getRuntimeState(server.id)?.status;
@@ -383,6 +386,12 @@ export class ControlService {
         enabled: server.enabled,
         status: this.#store.getRuntimeState(server.id)?.status ?? 'unknown',
         hasSnapshot: this.#store.getSnapshot(server.id) !== null,
+      })),
+      clis: clis.map((cli) => ({
+        id: cli.id,
+        slug: cli.slug,
+        enabled: cli.enabled,
+        status: cli.enabled ? 'configured' : 'disabled',
       })),
     };
   }
@@ -474,55 +483,62 @@ export class ControlService {
         entries: entries.map((entry) => this.#harnessPreview(entry, mode)),
       };
     }
-    const results = await Promise.all(entries.map(async (entry) => {
-      const existing = this.#store.getServerBySlug(entry.slug);
-      if (existing) {
-        if (mode === 'create') {
-          return {
-            name: entry.name,
-            slug: entry.slug,
-            status: 'conflict',
-            message: `A server with slug "${entry.slug}" already exists`,
-            warnings: entry.warnings,
-          };
+    const results = await Promise.all(
+      entries.map(async (entry) => {
+        const existing = this.#store.getServerBySlug(entry.slug);
+        if (existing) {
+          if (mode === 'create') {
+            return {
+              name: entry.name,
+              slug: entry.slug,
+              status: 'conflict',
+              message: `A server with slug "${entry.slug}" already exists`,
+              warnings: entry.warnings,
+            };
+          }
+          const changes = this.#harnessDiff(entry, existing);
+          if (changes.length === 0) {
+            return {
+              name: entry.name,
+              slug: entry.slug,
+              status: 'unchanged',
+              warnings: entry.warnings,
+            };
+          }
+          const outcome = this.#applyHarnessUpdate(entry, existing, changes);
+          return outcome;
         }
-        const changes = this.#harnessDiff(entry, existing);
-        if (changes.length === 0) {
-          return { name: entry.name, slug: entry.slug, status: 'unchanged', warnings: entry.warnings };
-        }
-        const outcome = this.#applyHarnessUpdate(entry, existing, changes);
-        return outcome;
-      }
-      const created = this.#store.transaction(() => {
-        let credentialId: string | null = null;
-        if (entry.credential !== null) {
-          credentialId = this.#store.createCredential({
-            name: entry.credential.name,
-            payload: entry.credential.payload,
-          }).id;
-        }
-        const server = this.#store.createServer(
-          createServerInputSchema.parse({
-            slug: entry.slug,
-            name: entry.name,
-            kind: entry.kind,
-            transport: entry.transport,
-            credentialId,
-            enabled: true,
-          }),
-        );
-        return { serverId: server.id, credentialId };
-      });
-      this.#refreshInBackground(created.serverId);
-      return {
-        name: entry.name,
-        slug: entry.slug,
-        status: 'created',
-        serverId: created.serverId,
-        credentialId: created.credentialId,
-        warnings: entry.warnings,
-      };
-    }));
+        const created = this.#store.transaction(() => {
+          let credentialId: string | null = null;
+          if (entry.credential !== null) {
+            credentialId = this.#store.createCredential({
+              name: entry.credential.name,
+              payload: entry.credential.payload,
+            }).id;
+          }
+          const server = this.#store.createServer(
+            createServerInputSchema.parse({
+              slug: entry.slug,
+              name: entry.name,
+              kind: entry.kind,
+              transport: entry.transport,
+              credentialId,
+              enabled: true,
+            }),
+          );
+          return { serverId: server.id, credentialId };
+        });
+        this.#refreshInBackground(created.serverId);
+        return {
+          name: entry.name,
+          slug: entry.slug,
+          status: 'created',
+          serverId: created.serverId,
+          credentialId: created.credentialId,
+          warnings: entry.warnings,
+        };
+      }),
+    );
     return { preview: false, entries: results };
   }
 
@@ -616,7 +632,8 @@ export class ControlService {
     serverId?: string,
   ): void {
     if (credentialId === null) return;
-    const payload = this.#store.getCredentialPayload(credentialId);    if (!payload) throw new AppError('credential_not_found', 'Credential not found', 400);
+    const payload = this.#store.getCredentialPayload(credentialId);
+    if (!payload) throw new AppError('credential_not_found', 'Credential not found', 400);
     this.#assertCredentialPayload(payload, serverKind);
     if (payload.type !== 'oauth') return;
     const reused = this.#store
@@ -727,6 +744,7 @@ export class ControlService {
     const input = {
       serverId: value.server_id,
       tool: value.tool,
+      endpointType: value.endpoint_type,
       from: value.from,
       to: value.to,
     };
@@ -744,11 +762,24 @@ export class ControlService {
     );
     const now = new Date();
     const from =
-      typeof value.from === 'string' ? value.from : new Date(now.getTime() - 24 * 3_600_000).toISOString();
+      typeof value.from === 'string'
+        ? value.from
+        : new Date(now.getTime() - 24 * 3_600_000).toISOString();
     const to = typeof value.to === 'string' ? value.to : now.toISOString();
     const serverId = typeof value.server_id === 'string' ? value.server_id : undefined;
     const tool = typeof value.tool === 'string' ? value.tool : undefined;
-    const buckets = this.#store.toolCallSeries({ from, to, bucketSeconds, serverId, tool });
+    const endpointType =
+      value.endpoint_type === undefined
+        ? undefined
+        : z.enum(['aggregate', 'individual', 'management', 'cli']).parse(value.endpoint_type);
+    const buckets = this.#store.toolCallSeries({
+      from,
+      to,
+      bucketSeconds,
+      serverId,
+      tool,
+      endpointType,
+    });
 
     const start = Math.floor(Date.parse(from) / 1000 / bucketSeconds);
     const end = Math.floor(Date.parse(to) / 1000 / bucketSeconds);
