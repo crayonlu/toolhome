@@ -34,19 +34,19 @@ docker run -d \
   --name toolhome \
   -p 3344:3344 \
   -v toolhome-data:/data \
-  -e MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)" \
-  -e MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" \
-  -e MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz" \
+  -e TOOLHOME_MASTER_KEY="$(openssl rand -base64 48)" \
+  -e TOOLHOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" \
+  -e TOOLHOME_PUBLIC_URL="https://tool.cyncyn.xyz" \
   ghcr.io/crayonlu/toolhome:latest
 ```
 
-Or with Docker Compose (see `references/deployment.md`). After startup, open the web console at `MCP_HOME_PUBLIC_URL` and sign in with the bootstrap Control Key.
+Or with Docker Compose (see `references/deployment.md`). After startup, open the web console at `TOOLHOME_PUBLIC_URL` and sign in with the bootstrap Control Key.
 
 ### 2. Install the CLI (npm)
 
 ```bash
 npm install -g toolhome
-toolhome auth login --url https://tool.cyncyn.xyz --control-key "$MCP_HOME_CONTROL_KEY"
+toolhome auth login --url https://tool.cyncyn.xyz --control-key "$TOOLHOME_CONTROL_KEY"
 ```
 
 The CLI manages servers, credentials, OAuth, Market, and diagnostics from any terminal.
@@ -198,16 +198,16 @@ toolhome events              # recent events with level filter
 
 | Env                              | Description                                        | Default                        |
 | -------------------------------- | -------------------------------------------------- | ------------------------------ |
-| `MCP_HOME_PUBLIC_URL`            | External HTTPS origin                              | required                       |
-| `MCP_HOME_MASTER_KEY`            | Secret encryption key (32+ chars)                  | required                       |
-| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | First-boot Control Key                             | required on first boot         |
-| `MCP_HOST` / `MCP_HOME_PORT`     | Listen address                                     | `127.0.0.1:3344`               |
-| `MCP_HOME_DATA_DIR`              | SQLite + market data                               | `/data`                        |
-| `MCP_HOME_MARKET_DIR`            | Market npm install dir                             | `<dataDir>/market`             |
-| `MCP_HOME_WEB_DIR`               | Web console static files                           | disabled (set in Docker image) |
-| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | Global OAuth client registration                   | `true` (URL-based)             |
-| `MCP_HOME_UV_INDEX_URL`          | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
-| `MCP_HOME_CALLS_RETENTION_DAYS`  | Tool call record retention in days (metadata only) | `30`                           |
+| `TOOLHOME_PUBLIC_URL`            | External HTTPS origin                              | required                       |
+| `TOOLHOME_MASTER_KEY`            | Secret encryption key (32+ chars)                  | required                       |
+| `TOOLHOME_BOOTSTRAP_CONTROL_KEY` | First-boot Control Key                             | required on first boot         |
+| `TOOLHOME_HOST` / `TOOLHOME_PORT` | Listen address                                     | `127.0.0.1:3344`               |
+| `TOOLHOME_DATA_DIR`              | SQLite + market data                               | `/data`                        |
+| `TOOLHOME_MARKET_DIR`            | Market npm install dir                             | `<dataDir>/market`             |
+| `TOOLHOME_WEB_DIR`               | Web console static files                           | disabled (set in Docker image) |
+| `TOOLHOME_OAUTH_URL_CLIENT_ID`   | Global OAuth client registration                   | `true` (URL-based)             |
+| `TOOLHOME_UV_INDEX_URL`          | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
+| `TOOLHOME_CALLS_RETENTION_DAYS`  | Tool call record retention in days (metadata only) | `30`                           |
 
 ## Deep Dives
 

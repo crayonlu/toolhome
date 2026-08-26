@@ -3,13 +3,13 @@
 ## auth
 
 ```bash
-export MCP_HOME_URL="https://tool.cyncyn.xyz"
-export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+export TOOLHOME_URL="https://tool.cyncyn.xyz"
+export TOOLHOME_CONTROL_KEY="tch_ctl_<your-control-key>"
 toolhome auth login
 toolhome auth logout
 ```
 
-Credentials saved to `~/.config/toolhome/config.json` (0600). Supports env vars `MCP_HOME_URL` and `MCP_HOME_CONTROL_KEY`.
+Credentials saved to `~/.config/toolhome/config.json` (0600). Supports env vars `TOOLHOME_URL`, `TOOLHOME_CONTROL_KEY`, and `TOOLHOME_CONFIG` (an alternate config-file path).
 
 ## server
 
@@ -224,7 +224,7 @@ Semantics:
 ## global options
 
 ```
---url <url>           control API URL (or MCP_HOME_URL env)
---control-key <key>   control key (or MCP_HOME_CONTROL_KEY env)
+--url <url>           control API URL (or TOOLHOME_URL env)
+--control-key <key>   control key (or TOOLHOME_CONTROL_KEY env)
 --output <human|json> output format (default human)
 ```

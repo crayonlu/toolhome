@@ -605,8 +605,8 @@ function run<TArgs extends unknown[]>(
 function resolveConnection(options: GlobalOptions): z.infer<typeof localConfigSchema> {
   const stored = loadLocalConfig();
   return localConfigSchema.parse({
-    url: options.url ?? process.env.MCP_HOME_URL ?? stored?.url,
-    controlKey: options.key ?? process.env.MCP_HOME_CONTROL_KEY ?? stored?.controlKey,
+    url: options.url ?? process.env.TOOLHOME_URL ?? stored?.url,
+    controlKey: options.key ?? process.env.TOOLHOME_CONTROL_KEY ?? stored?.controlKey,
   });
 }
 
@@ -616,7 +616,7 @@ function loadLocalConfig(): z.infer<typeof localConfigSchema> | null {
   } catch {
     // 0.4.0 moved the default location from ~/.config/mcp-home to ~/.config/toolhome;
     // read a pre-existing legacy config so saved logins survive the rename.
-    if (process.env.MCP_HOME_CONFIG) return null;
+    if (process.env.TOOLHOME_CONFIG) return null;
     try {
       return localConfigSchema.parse(
         JSON.parse(readFileSync(resolve(homedir(), '.config', 'mcp-home', 'config.json'), 'utf8')),
@@ -628,7 +628,7 @@ function loadLocalConfig(): z.infer<typeof localConfigSchema> | null {
 }
 
 function configPath(): string {
-  return process.env.MCP_HOME_CONFIG ?? resolve(homedir(), '.config', 'toolhome', 'config.json');
+  return process.env.TOOLHOME_CONFIG ?? resolve(homedir(), '.config', 'toolhome', 'config.json');
 }
 
 function readJson(path: string): unknown {

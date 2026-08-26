@@ -20,23 +20,23 @@ const publicUrlSchema = z.url().superRefine((value, context) => {
 
 const envSchema = z
   .object({
-    MCP_HOME_HOST: z.string().default('127.0.0.1'),
-    MCP_HOME_PORT: z.coerce.number().int().min(1).max(65_535).default(3344),
-    MCP_HOME_PUBLIC_URL: publicUrlSchema.default('http://127.0.0.1:3344'),
-    MCP_HOME_DATA_DIR: z.string().default('./data'),
-    MCP_HOME_MASTER_KEY: z.string().min(32),
-    MCP_HOME_BOOTSTRAP_CONTROL_KEY: z.string().min(32).optional(),
-    MCP_HOME_ALLOWED_HOSTS: z.string().optional(),
-    MCP_HOME_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-    MCP_HOME_OAUTH_URL_CLIENT_ID: z.enum(['true', 'false']).default('true'),
-    MCP_HOME_WEB_DIR: z.string().optional(),
-    MCP_HOME_MARKET_DIR: z.string().optional(),
-    MCP_HOME_UV_INDEX_URL: z.preprocess(
+    TOOLHOME_HOST: z.string().default('127.0.0.1'),
+    TOOLHOME_PORT: z.coerce.number().int().min(1).max(65_535).default(3344),
+    TOOLHOME_PUBLIC_URL: publicUrlSchema.default('http://127.0.0.1:3344'),
+    TOOLHOME_DATA_DIR: z.string().default('./data'),
+    TOOLHOME_MASTER_KEY: z.string().min(32),
+    TOOLHOME_BOOTSTRAP_CONTROL_KEY: z.string().min(32).optional(),
+    TOOLHOME_ALLOWED_HOSTS: z.string().optional(),
+    TOOLHOME_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    TOOLHOME_OAUTH_URL_CLIENT_ID: z.enum(['true', 'false']).default('true'),
+    TOOLHOME_WEB_DIR: z.string().optional(),
+    TOOLHOME_MARKET_DIR: z.string().optional(),
+    TOOLHOME_UV_INDEX_URL: z.preprocess(
       (value) => (value === '' ? undefined : value),
       z.url().optional(),
     ),
-    MCP_HOME_CALLS_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
-    MCP_HOME_OAUTH_REFRESH_INTERVAL_SECONDS: z.coerce
+    TOOLHOME_CALLS_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
+    TOOLHOME_OAUTH_REFRESH_INTERVAL_SECONDS: z.coerce
       .number()
       .int()
       .min(1)
@@ -44,10 +44,10 @@ const envSchema = z
       .default(300),
   })
   .superRefine((value, context) => {
-    if (value.MCP_HOME_BOOTSTRAP_CONTROL_KEY === value.MCP_HOME_MASTER_KEY) {
+    if (value.TOOLHOME_BOOTSTRAP_CONTROL_KEY === value.TOOLHOME_MASTER_KEY) {
       context.addIssue({
         code: 'custom',
-        path: ['MCP_HOME_BOOTSTRAP_CONTROL_KEY'],
+        path: ['TOOLHOME_BOOTSTRAP_CONTROL_KEY'],
         message: 'Bootstrap Control Key must differ from the master key',
       });
     }
@@ -74,32 +74,32 @@ export interface RuntimeConfig {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const parsed = envSchema.parse(env);
-  const dataDir = resolve(parsed.MCP_HOME_DATA_DIR);
+  const dataDir = resolve(parsed.TOOLHOME_DATA_DIR);
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   chmodSync(dataDir, 0o700);
-  const bootstrap = parsed.MCP_HOME_BOOTSTRAP_CONTROL_KEY;
-  const publicUrl = new URL(parsed.MCP_HOME_PUBLIC_URL);
+  const bootstrap = parsed.TOOLHOME_BOOTSTRAP_CONTROL_KEY;
+  const publicUrl = new URL(parsed.TOOLHOME_PUBLIC_URL);
   const configuredHosts =
-    parsed.MCP_HOME_ALLOWED_HOSTS?.split(',')
+    parsed.TOOLHOME_ALLOWED_HOSTS?.split(',')
       .map((host) => host.trim())
       .filter(Boolean) ?? [];
   return {
-    host: parsed.MCP_HOME_HOST,
-    port: parsed.MCP_HOME_PORT,
+    host: parsed.TOOLHOME_HOST,
+    port: parsed.TOOLHOME_PORT,
     publicUrl,
     dataDir,
     databasePath: resolve(dataDir, 'toolhome.sqlite'),
-    masterKey: parsed.MCP_HOME_MASTER_KEY,
+    masterKey: parsed.TOOLHOME_MASTER_KEY,
     ...(bootstrap === undefined ? {} : { bootstrapControlKey: bootstrap }),
     allowedHosts: configuredHosts.length === 0 ? [publicUrl.hostname] : configuredHosts,
-    logLevel: parsed.MCP_HOME_LOG_LEVEL,
-    oauthUrlClientId: parsed.MCP_HOME_OAUTH_URL_CLIENT_ID === 'true',
-    ...(parsed.MCP_HOME_WEB_DIR === undefined ? {} : { webDir: resolve(parsed.MCP_HOME_WEB_DIR) }),
-    marketDir: resolve(parsed.MCP_HOME_MARKET_DIR ?? join(dataDir, 'market')),
-    ...(parsed.MCP_HOME_UV_INDEX_URL === undefined
+    logLevel: parsed.TOOLHOME_LOG_LEVEL,
+    oauthUrlClientId: parsed.TOOLHOME_OAUTH_URL_CLIENT_ID === 'true',
+    ...(parsed.TOOLHOME_WEB_DIR === undefined ? {} : { webDir: resolve(parsed.TOOLHOME_WEB_DIR) }),
+    marketDir: resolve(parsed.TOOLHOME_MARKET_DIR ?? join(dataDir, 'market')),
+    ...(parsed.TOOLHOME_UV_INDEX_URL === undefined
       ? {}
-      : { uvIndexUrl: parsed.MCP_HOME_UV_INDEX_URL.toString() }),
-    callsRetentionDays: parsed.MCP_HOME_CALLS_RETENTION_DAYS,
-    oauthRefreshIntervalSeconds: parsed.MCP_HOME_OAUTH_REFRESH_INTERVAL_SECONDS,
+      : { uvIndexUrl: parsed.TOOLHOME_UV_INDEX_URL.toString() }),
+    callsRetentionDays: parsed.TOOLHOME_CALLS_RETENTION_DAYS,
+    oauthRefreshIntervalSeconds: parsed.TOOLHOME_OAUTH_REFRESH_INTERVAL_SECONDS,
   };
 }

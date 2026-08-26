@@ -11,7 +11,7 @@ ToolHome supports two OAuth client registration methods for upstream MCP servers
 The method is controlled by `settings.urlClientId` per server:
 - `true` (default) = URL-based
 - `false` = DCR
-- `undefined` = inherit global `MCP_HOME_OAUTH_URL_CLIENT_ID` (default `true`)
+- `undefined` = inherit global `TOOLHOME_OAUTH_URL_CLIENT_ID` (default `true`)
 
 ## Per-Server Configuration
 

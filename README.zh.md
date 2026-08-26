@@ -79,7 +79,7 @@ npm install
 cp .env.example .env
 ```
 
-生成两个独立随机值，分别填写 `MCP_HOME_MASTER_KEY` 和首次启动所需的 `MCP_HOME_BOOTSTRAP_CONTROL_KEY`。二者都至少 32 个字符，且不能相同。
+生成两个独立随机值，分别填写 `TOOLHOME_MASTER_KEY` 和首次启动所需的 `TOOLHOME_BOOTSTRAP_CONTROL_KEY`。二者都至少 32 个字符，且不能相同。
 
 ```bash
 npm run build
@@ -89,7 +89,7 @@ set +a
 npm start
 ```
 
-打开 `MCP_HOME_PUBLIC_URL`，使用 bootstrap Control API Key 登录 Web 控制台。创建新的 Control Key 后，可以撤销 bootstrap key。
+打开 `TOOLHOME_PUBLIC_URL`，使用 bootstrap Control API Key 登录 Web 控制台。创建新的 Control Key 后，可以撤销 bootstrap key。
 
 开发模式分别运行：
 
@@ -103,14 +103,14 @@ Vite 会把 `/api` 请求代理到 `http://127.0.0.1:3344`。
 ## Docker
 
 ```bash
-export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
-export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
-export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
+export TOOLHOME_MASTER_KEY="$(openssl rand -base64 48)"
+export TOOLHOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+export TOOLHOME_PUBLIC_URL="https://tool.cyncyn.xyz"
+export TOOLHOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
 ```
 
-生产环境应在 ToolHome 前放置 HTTPS 反向代理。OAuth 回调、URL-based Client ID 和远程 Harness 接入都应使用稳定的 HTTPS `MCP_HOME_PUBLIC_URL`。该值必须是规范 origin，不能包含路径、查询、fragment 或用户名密码。数据保存在 `/data/toolhome.sqlite`，SQLite 使用 WAL 模式。
+生产环境应在 ToolHome 前放置 HTTPS 反向代理。OAuth 回调、URL-based Client ID 和远程 Harness 接入都应使用稳定的 HTTPS `TOOLHOME_PUBLIC_URL`。该值必须是规范 origin，不能包含路径、查询、fragment 或用户名密码。数据保存在 `/data/toolhome.sqlite`，SQLite 使用 WAL 模式。
 
 Market 安装器隐藏在 curated 能力条目之后，可以使用 npm、Go、GitHub Release archive、uvx 或 Docker recipe；产品表面仍然只有 MCP Server 和 Hosted 平台 CLI。Uvx 条目直接执行持久化 ToolHome 工具目录中的已安装二进制，不会在每次刷新时重新解析包。Docker 条目需要 `docker-compose.yml` 中的 Docker socket 挂载。Hosted CLI 的状态目录由条目显式声明为 Docker named volume，ToolHome 不会默认挂载用户本机的认证目录。
 
@@ -181,7 +181,7 @@ Remote-native Server 支持：
 
 OAuth/OIDC 使用 MCP TypeScript SDK 的官方认证编排器，覆盖 RFC 9728 发现、Authorization Server/OIDC metadata、PKCE、RFC 9207 issuer 校验、CIMD、DCR、刷新和 RFC 8707 resource indicator。OAuth Credential 与一个 Remote Server 一对一绑定，避免 token 跨 resource 或 issuer 复用。
 
-> 若上游授权服务器声明支持 URL-based Client Metadata 但无法从代理域名抓取（例如 Cloudflare 托管的 MCP），可设置 `MCP_HOME_OAUTH_URL_CLIENT_ID=false` 强制使用 Dynamic Client Registration。
+> 若上游授权服务器声明支持 URL-based Client Metadata 但无法从代理域名抓取（例如 Cloudflare 托管的 MCP），可设置 `TOOLHOME_OAUTH_URL_CLIENT_ID=false` 强制使用 Dynamic Client Registration。
 
 Home-hosted Server 使用 Environment Credential 或 transport 自身的 `env`。
 
@@ -192,8 +192,10 @@ Secret 应放入 Credential，而不是 Remote URL query 或 stdio arguments；�
 构建后可以运行 `toolhome`；源码开发时使用 `npm run cli --`。
 
 ```bash
-export MCP_HOME_URL="https://tool.cyncyn.xyz"
-export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+export TOOLHOME_URL="https://tool.cyncyn.xyz"
+export TOOLHOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+# 可选：覆盖默认的 ~/.config/toolhome/config.json 路径
+export TOOLHOME_CONFIG="$HOME/.config/toolhome/config.json"
 npm run cli -- auth login
 
 npm run cli -- server list
@@ -233,17 +235,17 @@ npm run cli -- config import backup.json
 
 | 环境变量                         | 说明                                              | 默认值                  |
 | -------------------------------- | ------------------------------------------------- | ----------------------- |
-| `MCP_HOME_HOST`                  | 监听地址                                          | `127.0.0.1`             |
-| `MCP_HOME_PORT`                  | 监听端口                                          | `3344`                  |
-| `MCP_HOME_PUBLIC_URL`            | 外部可访问的规范 origin，不含 path/query/fragment | `http://127.0.0.1:3344` |
-| `MCP_HOME_DATA_DIR`              | SQLite 与运行数据目录                             | `./data`                |
-| `MCP_HOME_MASTER_KEY`            | Secret 加密、签名与摘要根密钥，至少 32 字符       | 必填                    |
-| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | 数据库首次启动时写入的 Control Key                | 首次必填                |
-| `MCP_HOME_ALLOWED_HOSTS`         | 允许的 Host，逗号分隔                             | Public URL hostname     |
-| `MCP_HOME_LOG_LEVEL`             | `debug`、`info`、`warn`、`error`                  | `info`                  |
-| `MCP_HOME_WEB_DIR`               | Web 控制台静态文件目录                            | 未启用                  |
-| `MCP_HOME_MARKET_DIR`            | Market npm 安装目录                               | `<dataDir>/market`      |
-| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | 是否启用 URL-based Client Metadata                | `true`                  |
+| `TOOLHOME_HOST`                  | 监听地址                                          | `127.0.0.1`             |
+| `TOOLHOME_PORT`                  | 监听端口                                          | `3344`                  |
+| `TOOLHOME_PUBLIC_URL`            | 外部可访问的规范 origin，不含 path/query/fragment | `http://127.0.0.1:3344` |
+| `TOOLHOME_DATA_DIR`              | SQLite 与运行数据目录                             | `./data`                |
+| `TOOLHOME_MASTER_KEY`            | Secret 加密、签名与摘要根密钥，至少 32 字符       | 必填                    |
+| `TOOLHOME_BOOTSTRAP_CONTROL_KEY` | 数据库首次启动时写入的 Control Key                | 首次必填                |
+| `TOOLHOME_ALLOWED_HOSTS`         | 允许的 Host，逗号分隔                             | Public URL hostname     |
+| `TOOLHOME_LOG_LEVEL`             | `debug`、`info`、`warn`、`error`                  | `info`                  |
+| `TOOLHOME_WEB_DIR`               | Web 控制台静态文件目录                            | 未启用                  |
+| `TOOLHOME_MARKET_DIR`            | Market npm 安装目录                               | `<dataDir>/market`      |
+| `TOOLHOME_OAUTH_URL_CLIENT_ID`   | 是否启用 URL-based Client Metadata                | `true`                  |
 
 ## 安全模型
 
@@ -258,7 +260,7 @@ npm run cli -- config import backup.json
 - 下游 DCR Client ID 使用主密钥签名，可跨进程重启验证且不在数据库保存 Client Secret。
 - 诊断事件保留最近约 10,000 条；Home-hosted stderr 进入事件流前会按 transport env 与 Environment Credential 值脱敏。
 
-请备份数据库与 `MCP_HOME_MASTER_KEY`，或保存一份受严格保护的 `--include-secrets` 配置导出。丢失主密钥后，原数据库中的加密 Credential 无法恢复。
+请备份数据库与 `TOOLHOME_MASTER_KEY`，或保存一份受严格保护的 `--include-secrets` 配置导出。丢失主密钥后，原数据库中的加密 Credential 无法恢复。
 
 ## 工程命令
 

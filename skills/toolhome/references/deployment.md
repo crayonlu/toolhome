@@ -18,10 +18,10 @@ services:
 
 ```bash
 # .env
-MCP_HOME_MASTER_KEY=<32+ char random>
-MCP_HOME_BOOTSTRAP_CONTROL_KEY=tch_ctl_<random suffix, different from master>
-MCP_HOME_PUBLIC_URL=https://tool.cyncyn.xyz
-MCP_HOME_ALLOWED_HOSTS=tool.cyncyn.xyz
+TOOLHOME_MASTER_KEY=<32+ char random>
+TOOLHOME_BOOTSTRAP_CONTROL_KEY=tch_ctl_<random suffix, different from master>
+TOOLHOME_PUBLIC_URL=https://tool.cyncyn.xyz
+TOOLHOME_ALLOWED_HOSTS=tool.cyncyn.xyz
 ```
 
 ```bash

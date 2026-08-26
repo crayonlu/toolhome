@@ -679,7 +679,7 @@ export class SqliteStore implements Store {
       this.#db.close();
       throw new AppError(
         'credential_decryption_failed',
-        'Stored credentials cannot be decrypted with MCP_HOME_MASTER_KEY',
+        'Stored credentials cannot be decrypted with TOOLHOME_MASTER_KEY',
         500,
       );
     }
@@ -705,7 +705,7 @@ export class SqliteStore implements Store {
       this.#db.close();
       throw new AppError(
         'master_key_mismatch',
-        'Stored data cannot be decrypted with MCP_HOME_MASTER_KEY',
+        'Stored data cannot be decrypted with TOOLHOME_MASTER_KEY',
         500,
       );
     }

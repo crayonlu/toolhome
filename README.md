@@ -79,7 +79,7 @@ npm install
 cp .env.example .env
 ```
 
-Generate two independent random values for `MCP_HOME_MASTER_KEY` and the first-boot `MCP_HOME_BOOTSTRAP_CONTROL_KEY`. Both must be at least 32 characters and must differ.
+Generate two independent random values for `TOOLHOME_MASTER_KEY` and the first-boot `TOOLHOME_BOOTSTRAP_CONTROL_KEY`. Both must be at least 32 characters and must differ.
 
 ```bash
 npm run build
@@ -89,7 +89,7 @@ set +a
 npm start
 ```
 
-Open `MCP_HOME_PUBLIC_URL` and sign in to the web console with the bootstrap Control API Key. Once you create a new Control Key, you can revoke the bootstrap key.
+Open `TOOLHOME_PUBLIC_URL` and sign in to the web console with the bootstrap Control API Key. Once you create a new Control Key, you can revoke the bootstrap key.
 
 For development, run the server and web separately:
 
@@ -103,14 +103,14 @@ Vite proxies `/api` requests to `http://127.0.0.1:3344`.
 ## Docker
 
 ```bash
-export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
-export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
-export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
+export TOOLHOME_MASTER_KEY="$(openssl rand -base64 48)"
+export TOOLHOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+export TOOLHOME_PUBLIC_URL="https://tool.cyncyn.xyz"
+export TOOLHOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
 ```
 
-Put an HTTPS reverse proxy in front of ToolHome in production. OAuth callbacks, URL-based Client IDs, and remote harness connections should all use a stable HTTPS `MCP_HOME_PUBLIC_URL`. The value must be a canonical origin — no path, query, fragment, username, or password. Data lives in `/data/toolhome.sqlite` (SQLite, WAL mode).
+Put an HTTPS reverse proxy in front of ToolHome in production. OAuth callbacks, URL-based Client IDs, and remote harness connections should all use a stable HTTPS `TOOLHOME_PUBLIC_URL`. The value must be a canonical origin — no path, query, fragment, username, or password. Data lives in `/data/toolhome.sqlite` (SQLite, WAL mode).
 
 Market installers are hidden behind curated capability entries. The catalog can use npm, Go, GitHub Release archives, uvx, or Docker recipes; the product surface remains MCP servers and Hosted platform CLIs. Uvx entries execute the installed binary from the persistent ToolHome tool directory instead of resolving the package again on every refresh. Docker-backed entries require the Docker socket mount shown in `docker-compose.yml`. Hosted CLI state directories are explicit named volumes, never implicit mounts of a user's local credential directory.
 
@@ -181,7 +181,7 @@ Remote-native servers support:
 
 OAuth/OIDC uses the official MCP TypeScript SDK auth orchestrator, covering RFC 9728 discovery, Authorization Server/OIDC metadata, PKCE, RFC 9207 issuer validation, CIMD, DCR, refresh, and RFC 8707 resource indicators. An OAuth Credential is bound 1:1 to a Remote Server, preventing token reuse across resources or issuers.
 
-> If an upstream authorization server advertises URL-based Client Metadata support but cannot fetch it from a proxied origin (for example Cloudflare-hosted MCP), set `MCP_HOME_OAUTH_URL_CLIENT_ID=false` to force Dynamic Client Registration.
+> If an upstream authorization server advertises URL-based Client Metadata support but cannot fetch it from a proxied origin (for example Cloudflare-hosted MCP), set `TOOLHOME_OAUTH_URL_CLIENT_ID=false` to force Dynamic Client Registration.
 
 Home-hosted servers use an Environment Credential or the transport's own `env`.
 
@@ -192,8 +192,10 @@ Put secrets in Credentials, not in Remote URL query strings or stdio arguments �
 After building, run `toolhome`; from source, use `npm run cli --`.
 
 ```bash
-export MCP_HOME_URL="https://tool.cyncyn.xyz"
-export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+export TOOLHOME_URL="https://tool.cyncyn.xyz"
+export TOOLHOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+# Optional: override the default ~/.config/toolhome/config.json path
+export TOOLHOME_CONFIG="$HOME/.config/toolhome/config.json"
 npm run cli -- auth login
 
 npm run cli -- server list
@@ -247,17 +249,17 @@ Backups contain plaintext secrets and deserve the same protection as the master 
 
 | Environment variable             | Description                                                                   | Default                 |
 | -------------------------------- | ----------------------------------------------------------------------------- | ----------------------- |
-| `MCP_HOME_HOST`                  | Listen address                                                                | `127.0.0.1`             |
-| `MCP_HOME_PORT`                  | Listen port                                                                   | `3344`                  |
-| `MCP_HOME_PUBLIC_URL`            | Externally reachable canonical origin (production: `https://tool.cyncyn.xyz`) | `http://127.0.0.1:3344` |
-| `MCP_HOME_DATA_DIR`              | SQLite and runtime data directory                                             | `./data`                |
-| `MCP_HOME_MASTER_KEY`            | Root key for secret encryption/signing/digests                                | required                |
-| `MCP_HOME_BOOTSTRAP_CONTROL_KEY` | Control Key written on first database boot                                    | required on first boot  |
-| `MCP_HOME_ALLOWED_HOSTS`         | Allowed Hosts, comma-separated                                                | Public URL hostname     |
-| `MCP_HOME_LOG_LEVEL`             | `debug`, `info`, `warn`, `error`                                              | `info`                  |
-| `MCP_HOME_WEB_DIR`               | Web console static files directory                                            | disabled                |
-| `MCP_HOME_MARKET_DIR`            | Market npm install directory                                                  | `<dataDir>/market`      |
-| `MCP_HOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata                                              | `true`                  |
+| `TOOLHOME_HOST`                  | Listen address                                                                | `127.0.0.1`             |
+| `TOOLHOME_PORT`                  | Listen port                                                                   | `3344`                  |
+| `TOOLHOME_PUBLIC_URL`            | Externally reachable canonical origin (production: `https://tool.cyncyn.xyz`) | `http://127.0.0.1:3344` |
+| `TOOLHOME_DATA_DIR`              | SQLite and runtime data directory                                             | `./data`                |
+| `TOOLHOME_MASTER_KEY`            | Root key for secret encryption/signing/digests                                | required                |
+| `TOOLHOME_BOOTSTRAP_CONTROL_KEY` | Control Key written on first database boot                                    | required on first boot  |
+| `TOOLHOME_ALLOWED_HOSTS`         | Allowed Hosts, comma-separated                                                | Public URL hostname     |
+| `TOOLHOME_LOG_LEVEL`             | `debug`, `info`, `warn`, `error`                                              | `info`                  |
+| `TOOLHOME_WEB_DIR`               | Web console static files directory                                            | disabled                |
+| `TOOLHOME_MARKET_DIR`            | Market npm install directory                                                  | `<dataDir>/market`      |
+| `TOOLHOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata                                              | `true`                  |
 
 ## Security Model
 
@@ -272,7 +274,7 @@ Backups contain plaintext secrets and deserve the same protection as the master 
 - Downstream DCR Client IDs are signed with the master key, verifiable across restarts, and never stored in the database.
 - Diagnostic events keep the last ~10,000 entries; Home-hosted stderr is redacted against transport env and Environment Credential values before entering the event stream.
 
-Back up the database and `MCP_HOME_MASTER_KEY`, or keep a tightly protected `--include-secrets` config export. Losing the master key makes encrypted credentials in the original database unrecoverable.
+Back up the database and `TOOLHOME_MASTER_KEY`, or keep a tightly protected `--include-secrets` config export. Losing the master key makes encrypted credentials in the original database unrecoverable.
 
 ## Engineering Commands
 

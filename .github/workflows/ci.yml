@@ -93,7 +93,26 @@ jobs:
           key: ${{ secrets.DEPLOY_KEY }}
           command_timeout: 30m
           script: |
+            set -eu
             cd /opt/mcp-home
+            if [ -f .env ] && grep -q '^MCP_HOME_' .env; then
+              env_tmp="$(mktemp .env.tmp.XXXXXX)"
+              sed -E 's/^MCP_HOME_/TOOLHOME_/' .env > "$env_tmp"
+              chmod 600 "$env_tmp"
+              mv "$env_tmp" .env
+            fi
+            if [ -f docker-compose.yml ] && grep -q 'MCP_HOME_' docker-compose.yml; then
+              compose_tmp="$(mktemp docker-compose.yml.tmp.XXXXXX)"
+              sed -E 's/MCP_HOME_/TOOLHOME_/g' docker-compose.yml > "$compose_tmp"
+              chmod 644 "$compose_tmp"
+              mv "$compose_tmp" docker-compose.yml
+            fi
+            if grep -q '^MCP_HOME_' .env || grep -q 'MCP_HOME_' docker-compose.yml; then
+              echo 'legacy MCP_HOME environment variables remain' >&2
+              exit 1
+            fi
+            grep -q '^TOOLHOME_MASTER_KEY=' .env
+            grep -q 'TOOLHOME_MASTER_KEY' docker-compose.yml
             docker compose pull
             docker compose up -d
             docker image prune -f

@@ -69,7 +69,7 @@ The MCP side still owns OAuth provider discovery, refresh, and callback handling
 
 ### Install Location
 
-Home-stdio packages, Go binaries, and GitHub Release binaries install to `MCP_HOME_MARKET_DIR` (default `<dataDir>/market`), which is a persistent Docker volume. Packages survive container restarts. Uvx tools and caches install to `<dataDir>/.uv`, also persistent.
+Home-stdio packages, Go binaries, and GitHub Release binaries install to `TOOLHOME_MARKET_DIR` (default `<dataDir>/market`), which is a persistent Docker volume. Packages survive container restarts. Uvx tools and caches install to `<dataDir>/.uv`, also persistent.
 
 ### Installation Progress
 
@@ -88,4 +88,4 @@ echo '{"slug":"custom","name":"Custom","kind":"remote","transport":{"type":"stre
 
 ## Market Catalog Source
 
-The catalog is defined in `src/market/catalog.ts` (bundled). To add entries, edit this file and redeploy. A remote catalog URL (`MCP_HOME_MARKET_URL`) is planned for future updates without redeployment.
+The catalog is defined in `src/market/catalog.ts` (bundled). To add entries, edit this file and redeploy. A remote catalog URL (`TOOLHOME_MARKET_URL`) is planned for future updates without redeployment.

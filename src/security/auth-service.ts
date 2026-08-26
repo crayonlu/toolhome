@@ -32,7 +32,7 @@ export class AuthService {
     if (!secret) {
       throw new AppError(
         'bootstrap_key_required',
-        'MCP_HOME_BOOTSTRAP_CONTROL_KEY is required on first start',
+        'TOOLHOME_BOOTSTRAP_CONTROL_KEY is required on first start',
         500,
       );
     }

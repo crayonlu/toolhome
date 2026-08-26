@@ -11,10 +11,10 @@ RUN sed -i "s#dl-cdn.alpinelinux.org/alpine#${APK_MIRROR}#g" /etc/apk/repositori
     rm -rf /root/.local
 
 ENV NODE_ENV=production
-ENV MCP_HOME_HOST=0.0.0.0
-ENV MCP_HOME_PORT=3344
-ENV MCP_HOME_DATA_DIR=/data
-ENV MCP_HOME_WEB_DIR=/app/web-dist
+ENV TOOLHOME_HOST=0.0.0.0
+ENV TOOLHOME_PORT=3344
+ENV TOOLHOME_DATA_DIR=/data
+ENV TOOLHOME_WEB_DIR=/app/web-dist
 
 WORKDIR /app
 COPY package.json package-lock.json ./
