@@ -38,6 +38,39 @@ describe('security primitives', () => {
     expect(hasher.verify(access.secret, control.digest)).toBe(false);
   });
 
+  it('rejects legacy API key prefixes even when the keys are stored', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-prefix-cutover-'));
+    const store = new SqliteStore(
+      join(directory, 'prefix-cutover.sqlite'),
+      new SecretBox('unit-test-prefix-cutover-key-00000000000001'),
+    );
+    try {
+      const hasher = new ApiKeyHasher('unit-test-prefix-cutover-pepper');
+      const auth = new AuthService(store, hasher);
+      const legacyControl = 'mch_ctl_legacy-control-key-0000000000000000001';
+      const legacyAccess = 'mch_mcp_legacy-access-key-00000000000000000001';
+      store.createApiKey({
+        kind: 'control',
+        name: 'legacy control',
+        prefix: legacyControl.slice(0, 16),
+        digest: hasher.digest(legacyControl),
+        scope: 'admin',
+      });
+      store.createApiKey({
+        kind: 'access',
+        name: 'legacy access',
+        prefix: legacyAccess.slice(0, 16),
+        digest: hasher.digest(legacyAccess),
+        scope: null,
+      });
+      expect(() => auth.authenticate('control', legacyControl)).toThrow('Invalid or revoked');
+      expect(() => auth.authenticate('access', legacyAccess)).toThrow('Invalid or revoked');
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('never sends a Control API key outside the configured origin', async () => {
     const client = new ControlClient(
       new URL('https://mcp.example.test'),

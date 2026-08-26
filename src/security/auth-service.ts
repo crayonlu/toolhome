@@ -60,6 +60,9 @@ export class AuthService {
   }
 
   authenticate(kind: ApiKeyKind, secret: string): AuthPrincipal {
+    if (this.#hasher.kindFor(secret) !== kind) {
+      throw new AppError('unauthorized', 'Invalid or revoked credential', 401);
+    }
     const key = this.#store.getApiKeyByDigest(kind, this.#hasher.digest(secret));
     if (!key || !this.#hasher.verify(secret, key.digest)) {
       throw new AppError('unauthorized', 'Invalid or revoked credential', 401);
