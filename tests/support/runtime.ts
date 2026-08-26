@@ -18,7 +18,7 @@ export function createTestRuntime(options?: {
 }): TestRuntime {
   const directory = options?.directory ?? mkdtempSync(join(tmpdir(), 'toolhome-test-'));
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const controlKey = 'test-bootstrap-control-key-00000000000000000001';
+  const controlKey = 'tch_ctl_test-bootstrap-control-key-00000000000000000001';
   const runtime = createApplication({
     host: '127.0.0.1',
     port: 3344,

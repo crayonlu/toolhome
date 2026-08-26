@@ -3,7 +3,9 @@
 ## auth
 
 ```bash
-toolhome auth login --url https://tool.cyncyn.xyz --control-key "$KEY"
+export MCP_HOME_URL="https://tool.cyncyn.xyz"
+export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+toolhome auth login
 toolhome auth logout
 ```
 

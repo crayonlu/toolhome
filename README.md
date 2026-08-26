@@ -104,7 +104,7 @@ Vite proxies `/api` requests to `http://127.0.0.1:3344`.
 
 ```bash
 export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)"
+export MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
 export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
 export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
@@ -148,7 +148,7 @@ First create an MCP Access API Key from the console or CLI. The generic aggregat
 {
   "url": "https://tool.cyncyn.xyz/mcp",
   "headers": {
-    "Authorization": "Bearer mch_mcp_..."
+    "Authorization": "Bearer tch_mcp_..."
   }
 }
 ```
@@ -159,7 +159,7 @@ For a single GitHub server only:
 {
   "url": "https://tool.cyncyn.xyz/mcp/github",
   "headers": {
-    "Authorization": "Bearer mch_mcp_..."
+    "Authorization": "Bearer tch_mcp_..."
   }
 }
 ```
@@ -192,9 +192,9 @@ Put secrets in Credentials, not in Remote URL query strings or stdio arguments â
 After building, run `toolhome`; from source, use `npm run cli --`.
 
 ```bash
-npm run cli -- auth login \
-  --url https://tool.cyncyn.xyz \
-  --control-key "$MCP_HOME_CONTROL_KEY"
+export MCP_HOME_URL="https://tool.cyncyn.xyz"
+export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+npm run cli -- auth login
 
 npm run cli -- server list
 npm run cli -- server add ./server.json

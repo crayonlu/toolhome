@@ -35,7 +35,7 @@ docker run -d \
   -p 3344:3344 \
   -v toolhome-data:/data \
   -e MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)" \
-  -e MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)" \
+  -e MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" \
   -e MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz" \
   ghcr.io/crayonlu/toolhome:latest
 ```
@@ -150,7 +150,7 @@ Point an agent's management MCP at:
 ```json
 {
   "url": "https://tool.cyncyn.xyz/manage/mcp",
-  "headers": { "Authorization": "Bearer mch_ctl_agent..." }
+  "headers": { "Authorization": "Bearer tch_ctl_agent..." }
 }
 ```
 
@@ -162,7 +162,7 @@ Create an MCP Access Key:
 
 ```bash
 toolhome access-key create laptop
-# Returns: mch_mcp_xxx (shown once, copy it)
+# Returns: tch_mcp_xxx (shown once, copy it)
 ```
 
 Configure the harness (aggregate endpoint):
@@ -170,7 +170,7 @@ Configure the harness (aggregate endpoint):
 ```json
 {
   "url": "https://tool.cyncyn.xyz/mcp",
-  "headers": { "Authorization": "Bearer mch_mcp_xxx" }
+  "headers": { "Authorization": "Bearer tch_mcp_xxx" }
 }
 ```
 
@@ -179,7 +179,7 @@ Or per-server (independent endpoint, original tool names):
 ```json
 {
   "url": "https://tool.cyncyn.xyz/mcp/firecrawl",
-  "headers": { "Authorization": "Bearer mch_mcp_xxx" }
+  "headers": { "Authorization": "Bearer tch_mcp_xxx" }
 }
 ```
 

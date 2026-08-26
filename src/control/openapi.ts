@@ -349,7 +349,7 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
         controlApiKey: {
           type: 'http',
           scheme: 'bearer',
-          bearerFormat: 'mch_ctl_',
+          bearerFormat: 'tch_ctl_',
         },
         controlSession: {
           type: 'apiKey',

@@ -25,7 +25,7 @@ Lifecycle: install/upgrade jobs reuse the Market InstallJob machinery
 
 The CLI is a first-class entity: its own table, its own exec endpoint, its own status model,
 its own console page. An agent-facing bridge (one generic MCP server exposing `cli_list` /
-`cli_exec`) can be layered on top later as a *consumer* of this plane — but nothing about the
+`cli_exec`) can be layered on top later as a _consumer_ of this plane — but nothing about the
 plane depends on MCP semantics.
 
 - ✅ Preserves CLI-native semantics: exit codes, stdout/stderr separation, streaming NDJSON,
@@ -46,7 +46,7 @@ Every CLI gets a wrapper MCP server whose single tool takes free-text argv.
   config entry
 - ❌ Pollutes agent tool namespaces with one opaque "run arbitrary args" tool per CLI
 - Verdict: this is the "CLI depends on MCP" model explicitly rejected when scoping this work.
-  It remains viable only as the thin *consumer* bridge on top of Form A.
+  It remains viable only as the thin _consumer_ bridge on top of Form A.
 
 ### Form C — Browser/gateway terminal (Azure Cloud Shell style)
 
@@ -62,6 +62,7 @@ Expose a persistent PTY session over WebSocket (ttyd/gotty-style) behind Home au
   core product form. Keep out of scope for v1.
 
 ### Recommendation: **Form A**, with Form C as an optional future console feature and Form B
+
 demoted to a consumer-side bridge. Rationale: the user's stated goal is "托管，防止每台 client
 机器都装 CLI" — that goal is served by a programmatic exec API with central login state, which
 is precisely Form A. Forms B and C either distort CLI semantics into MCP or optimize for a
@@ -137,9 +138,13 @@ Each CLI record carries a declarative allow-list evaluated against `argv[0..n]`:
 
 ```jsonc
 {
-  "allow": [["vm","*"], ["account","show"], ["webapp","log","tail","*"]],
-  "deny":  [["login"], ["login","--service-principal"], ["account","clear"]],
-  "interactive": false        // enforced: CI=true, NO_COLOR=1, PAGER=cat injected into env
+  "allow": [
+    ["vm", "*"],
+    ["account", "show"],
+    ["webapp", "log", "tail", "*"],
+  ],
+  "deny": [["login"], ["login", "--service-principal"], ["account", "clear"]],
+  "interactive": false, // enforced: CI=true, NO_COLOR=1, PAGER=cat injected into env
 }
 ```
 
@@ -206,13 +211,13 @@ Token-cache durability note: a future device-code flow would need a persistent n
 
 ## 4. External prior art
 
-| Product / model | Link | What we take | What we reject |
-|---|---|---|---|
-| **Azure Cloud Shell** — authenticated browser shell pre-logged into Azure | https://azure.microsoft.com/en-us/get-started/azure-portal/cloud-shell | Central authenticated CLI, zero local setup; login state lives server-side — the exact UX end-state we want | Session/PTY-centric delivery and Azure-only scope; we want an API-first plane covering many CLIs |
-| **Teleport** (`tsh`) — identity-aware access proxy with certificate auth + session recording | https://goteleport.com/how-it-works/ | Declarative access rules per resource, audit/event recording of every execution, short-lived access concepts | Enterprise SSH/K8s proxy positioning, heavyweight CA infrastructure — far beyond a single-user self-hosted gateway |
-| **Desktop Commander MCP / shell-mcp family** — MCP servers exposing terminal exec | https://github.com/wonderwhy-er/desktopcommandermcp | Proof that agents want command execution; streaming output and timeout handling patterns | Local-machine orientation and raw shell-string execution with no registry/allow-list/central login — this is Form B's dead end at scale |
-| **Smithery** — hosted MCP registry + installer with cloud-hosted servers | https://smithery.ai/ | Registry + managed-runtime + one-command install UX; version pinning discipline | MCP-server-only scope; no CLI plane, and hosted-SaaS assumptions don't fit self-hosted |
-| **Azure MCP Server** — official stdio MCP over az credentials | https://github.com/microsoft/mcp/blob/main/servers/Azure.Mcp.Server/TROUBLESHOOTING.md | Confirms the auth reality we must solve: even official MCP needs `~/.azure` mounted into containers (their documented docker volume mount) or `AZURE_TOKEN_CREDENTIALS` env config | Per-tool MCP wrapping as the general strategy for every CLI (N-wrappers problem, Form B) |
+| Product / model                                                                              | Link                                                                                   | What we take                                                                                                                                                                       | What we reject                                                                                                                          |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Azure Cloud Shell** — authenticated browser shell pre-logged into Azure                    | https://azure.microsoft.com/en-us/get-started/azure-portal/cloud-shell                 | Central authenticated CLI, zero local setup; login state lives server-side — the exact UX end-state we want                                                                        | Session/PTY-centric delivery and Azure-only scope; we want an API-first plane covering many CLIs                                        |
+| **Teleport** (`tsh`) — identity-aware access proxy with certificate auth + session recording | https://goteleport.com/how-it-works/                                                   | Declarative access rules per resource, audit/event recording of every execution, short-lived access concepts                                                                       | Enterprise SSH/K8s proxy positioning, heavyweight CA infrastructure — far beyond a single-user self-hosted gateway                      |
+| **Desktop Commander MCP / shell-mcp family** — MCP servers exposing terminal exec            | https://github.com/wonderwhy-er/desktopcommandermcp                                    | Proof that agents want command execution; streaming output and timeout handling patterns                                                                                           | Local-machine orientation and raw shell-string execution with no registry/allow-list/central login — this is Form B's dead end at scale |
+| **Smithery** — hosted MCP registry + installer with cloud-hosted servers                     | https://smithery.ai/                                                                   | Registry + managed-runtime + one-command install UX; version pinning discipline                                                                                                    | MCP-server-only scope; no CLI plane, and hosted-SaaS assumptions don't fit self-hosted                                                  |
+| **Azure MCP Server** — official stdio MCP over az credentials                                | https://github.com/microsoft/mcp/blob/main/servers/Azure.Mcp.Server/TROUBLESHOOTING.md | Confirms the auth reality we must solve: even official MCP needs `~/.azure` mounted into containers (their documented docker volume mount) or `AZURE_TOKEN_CREDENTIALS` env config | Per-tool MCP wrapping as the general strategy for every CLI (N-wrappers problem, Form B)                                                |
 
 ---
 
@@ -261,12 +266,12 @@ multi-tenancy; changes to existing MCP data/control plane behavior.
 
 ## Appendix A — In-repo mechanism index (citation map)
 
-| Mechanism | Location |
-|---|---|
-| Sibling-container execution (docker.sock mount, group_add) | `docker-compose.yml` |
-| `uv`/`uvx`/`docker`/`curl` in image, `APK_MIRROR` build arg | `Dockerfile` |
-| Async install jobs table + guarded migration | `src/storage/sqlite-store.ts` (`install_jobs`, ~line 436/~474) |
-| Job execution via spawned `docker`/`uv`/`npm` | `src/market/market-service.ts` (~lines 540/594/632) |
-| Catalog entry kinds incl. `docker`, pinned versions | `src/market/catalog.ts` |
-| URL-collected secret/action records (`market_install` kind) | `src/domain/models.ts` (`secureActionRecordSchema`, ~line 473) |
-| Credential payload resolution to `{headers, env}` (env branch) | `src/upstream/credential-resolver.ts` (~line 48) |
+| Mechanism                                                      | Location                                                       |
+| -------------------------------------------------------------- | -------------------------------------------------------------- |
+| Sibling-container execution (docker.sock mount, group_add)     | `docker-compose.yml`                                           |
+| `uv`/`uvx`/`docker`/`curl` in image, `APK_MIRROR` build arg    | `Dockerfile`                                                   |
+| Async install jobs table + guarded migration                   | `src/storage/sqlite-store.ts` (`install_jobs`, ~line 436/~474) |
+| Job execution via spawned `docker`/`uv`/`npm`                  | `src/market/market-service.ts` (~lines 540/594/632)            |
+| Catalog entry kinds incl. `docker`, pinned versions            | `src/market/catalog.ts`                                        |
+| URL-collected secret/action records (`market_install` kind)    | `src/domain/models.ts` (`secureActionRecordSchema`, ~line 473) |
+| Credential payload resolution to `{headers, env}` (env branch) | `src/upstream/credential-resolver.ts` (~line 48)               |

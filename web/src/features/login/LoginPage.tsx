@@ -54,7 +54,7 @@ export function LoginPage() {
               autoFocus
               spellCheck={false}
               className="h-10 bg-surface-2 px-3 font-mono text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              placeholder="mch_ctl_…"
+              placeholder="tch_ctl_…"
             />
           </div>
 

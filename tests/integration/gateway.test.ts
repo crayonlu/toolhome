@@ -203,7 +203,7 @@ describe('MCP gateway', () => {
           ),
         ),
       );
-      expect(replacementControl.secret).toMatch(/^mch_ctl_/);
+      expect(replacementControl.secret).toMatch(/^tch_ctl_/);
 
       const accessOnControl = await controlRequest(
         testRuntime.runtime,

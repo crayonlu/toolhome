@@ -104,7 +104,7 @@ Vite 会把 `/api` 请求代理到 `http://127.0.0.1:3344`。
 
 ```bash
 export MCP_HOME_MASTER_KEY="$(openssl rand -base64 48)"
-export MCP_HOME_BOOTSTRAP_CONTROL_KEY="$(openssl rand -base64 48)"
+export MCP_HOME_BOOTSTRAP_CONTROL_KEY="tch_ctl_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
 export MCP_HOME_PUBLIC_URL="https://tool.cyncyn.xyz"
 export MCP_HOME_ALLOWED_HOSTS="tool.cyncyn.xyz"
 docker compose up -d --build
@@ -148,7 +148,7 @@ npm run cli -- market uninstall gh-cli
 {
   "url": "https://tool.cyncyn.xyz/mcp",
   "headers": {
-    "Authorization": "Bearer mch_mcp_..."
+    "Authorization": "Bearer tch_mcp_..."
   }
 }
 ```
@@ -159,7 +159,7 @@ npm run cli -- market uninstall gh-cli
 {
   "url": "https://tool.cyncyn.xyz/mcp/github",
   "headers": {
-    "Authorization": "Bearer mch_mcp_..."
+    "Authorization": "Bearer tch_mcp_..."
   }
 }
 ```
@@ -192,9 +192,9 @@ Secret 应放入 Credential，而不是 Remote URL query 或 stdio arguments；�
 构建后可以运行 `toolhome`；源码开发时使用 `npm run cli --`。
 
 ```bash
-npm run cli -- auth login \
-  --url https://tool.cyncyn.xyz \
-  --control-key "$MCP_HOME_CONTROL_KEY"
+export MCP_HOME_URL="https://tool.cyncyn.xyz"
+export MCP_HOME_CONTROL_KEY="tch_ctl_<your-control-key>"
+npm run cli -- auth login
 
 npm run cli -- server list
 npm run cli -- server add ./server.json

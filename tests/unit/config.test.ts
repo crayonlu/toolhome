@@ -11,7 +11,7 @@ describe('runtime configuration', () => {
       const base = {
         MCP_HOME_DATA_DIR: directory,
         MCP_HOME_MASTER_KEY: 'config-master-key-0000000000000000000000001',
-        MCP_HOME_BOOTSTRAP_CONTROL_KEY: 'config-control-key-000000000000000000000001',
+        MCP_HOME_BOOTSTRAP_CONTROL_KEY: 'tch_ctl_config-control-key-000000000000000000000001',
       };
       expect(() =>
         loadConfig({ ...base, MCP_HOME_PUBLIC_URL: 'https://mcp.example.test/base' }),

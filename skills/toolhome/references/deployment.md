@@ -19,7 +19,7 @@ services:
 ```bash
 # .env
 MCP_HOME_MASTER_KEY=<32+ char random>
-MCP_HOME_BOOTSTRAP_CONTROL_KEY=<32+ char random, different from master>
+MCP_HOME_BOOTSTRAP_CONTROL_KEY=tch_ctl_<random suffix, different from master>
 MCP_HOME_PUBLIC_URL=https://tool.cyncyn.xyz
 MCP_HOME_ALLOWED_HOSTS=tool.cyncyn.xyz
 ```
@@ -82,7 +82,7 @@ location / {
 | Path                                                | Content                                                                            | Persist?     |
 | --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------ |
 | `/data/toolhome.sqlite`                             | SQLite database (servers, credentials, keys, events)                               | Yes (volume) |
-| `/data/market/`                                     | Market-installed npm/Go/GitHub Release artifacts                                                  | Yes (volume) |
+| `/data/market/`                                     | Market-installed npm/Go/GitHub Release artifacts                                   | Yes (volume) |
 | `/data/.uv/`                                        | uv tool and cache state                                                            | Yes (volume) |
 | Docker named volumes declared by Hosted CLI entries | Platform CLI state, such as Azure `/root/.azure` or Tailscale `/var/lib/tailscale` | Yes (volume) |
 | `/app/dist/`                                        | Server code (baked in image)                                                       | No (image)   |

@@ -2,8 +2,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ApiKeyKind } from '../domain/models.js';
 
 const keyPrefixes = {
-  control: 'mch_ctl_',
-  access: 'mch_mcp_',
+  control: 'tch_ctl_',
+  access: 'tch_mcp_',
 } satisfies Record<ApiKeyKind, string>;
 
 export interface GeneratedApiKey {

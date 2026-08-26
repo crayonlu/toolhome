@@ -191,18 +191,14 @@ async function installGithubReleaseArtifact(
   }
   const extract =
     artifact.archive === 'zip'
-      ? await runInstallerCommand(
-          context,
-          'unzip',
-          ['-oq', archivePath, '-d', extractDir],
-          { timeoutMs: 300_000, step: `extracting ${artifact.asset}` },
-        )
-      : await runInstallerCommand(
-          context,
-          'tar',
-          ['-xzf', archivePath, '-C', extractDir],
-          { timeoutMs: 300_000, step: `extracting ${artifact.asset}` },
-        );
+      ? await runInstallerCommand(context, 'unzip', ['-oq', archivePath, '-d', extractDir], {
+          timeoutMs: 300_000,
+          step: `extracting ${artifact.asset}`,
+        })
+      : await runInstallerCommand(context, 'tar', ['-xzf', archivePath, '-C', extractDir], {
+          timeoutMs: 300_000,
+          step: `extracting ${artifact.asset}`,
+        });
   if (extract.code !== 0) {
     throw new AppError(
       'market_install_failed',
@@ -212,12 +208,10 @@ async function installGithubReleaseArtifact(
   }
   const source = join(extractDir, artifact.bin);
   const destination = join(binDir, artifact.bin);
-  const copy = await runInstallerCommand(
-    context,
-    'cp',
-    [source, destination],
-    { timeoutMs: 60_000, step: `installing ${artifact.bin}` },
-  );
+  const copy = await runInstallerCommand(context, 'cp', [source, destination], {
+    timeoutMs: 60_000,
+    step: `installing ${artifact.bin}`,
+  });
   if (copy.code !== 0) {
     throw new AppError(
       'market_install_failed',

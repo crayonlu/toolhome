@@ -30,12 +30,38 @@ describe('security primitives', () => {
     const hasher = new ApiKeyHasher('unit-test-pepper');
     const control = hasher.generate('control');
     const access = hasher.generate('access');
-    expect(control.secret).toMatch(/^mch_ctl_/);
-    expect(access.secret).toMatch(/^mch_mcp_/);
+    expect(control.secret).toMatch(/^tch_ctl_/);
+    expect(access.secret).toMatch(/^tch_mcp_/);
+    expect(hasher.kindFor('mch_ctl_legacy-control-key')).toBeNull();
+    expect(hasher.kindFor('mch_mcp_legacy-access-key')).toBeNull();
     expect(hasher.kindFor(control.secret)).toBe('control');
     expect(hasher.kindFor(access.secret)).toBe('access');
     expect(hasher.verify(control.secret, control.digest)).toBe(true);
     expect(hasher.verify(access.secret, control.digest)).toBe(false);
+  });
+
+  it('rejects legacy API key prefixes even when the key is stored', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-prefix-cutover-'));
+    const store = new SqliteStore(
+      join(directory, 'prefix-cutover.sqlite'),
+      new SecretBox('unit-test-prefix-cutover-key-00000000000001'),
+    );
+    try {
+      const hasher = new ApiKeyHasher('unit-test-prefix-cutover-pepper');
+      const auth = new AuthService(store, hasher);
+      const legacySecret = 'mch_ctl_legacy-control-key-0000000000000000001';
+      store.createApiKey({
+        kind: 'control',
+        name: 'legacy',
+        prefix: legacySecret.slice(0, 16),
+        digest: hasher.digest(legacySecret),
+        scope: 'admin',
+      });
+      expect(() => auth.authenticate('control', legacySecret)).toThrow('Invalid or revoked');
+    } finally {
+      store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('never sends a Control API key outside the configured origin', async () => {
@@ -145,7 +171,7 @@ describe('security primitives', () => {
       new SecretBox('unit-test-oauth-key-00000000000000000000001'),
     );
     try {
-      const controlKey = 'oauth-control-key-00000000000000000000000001';
+      const controlKey = 'tch_ctl_oauth-control-key-00000000000000000000000001';
       const hasher = new ApiKeyHasher('oauth-test-pepper');
       const auth = new AuthService(store, hasher);
       auth.ensureBootstrapControlKey(controlKey);
