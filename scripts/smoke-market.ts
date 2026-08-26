@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApplication, type ApplicationRuntime } from '../src/app.js';
 
-const controlKey = 'smoke-control-key-0000000000000000000000001';
+const controlKey = 'tch_ctl_smoke-control-key-0000000000000000000000001';
 const publicUrl = new URL('http://127.0.0.1:3344');
 
 interface InstallJob {
