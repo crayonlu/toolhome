@@ -37,4 +37,92 @@ describe('platform CLI Market catalog', () => {
       false,
     );
   });
+
+  it('pins the npm and GitHub Release hosted CLIs behind platform entries', () => {
+    expect(
+      marketCatalog
+        .filter((entry) =>
+          ['lark-cli', 'firecrawl-cli', 'wrangler-cli', 'vercel-cli', 'aliyun-cli'].includes(
+            entry.id,
+          ),
+        )
+        .map((entry) => ({
+          id: entry.id,
+          plane: entryPlane(entry),
+          kind: entry.kind,
+          platform: entry.platform,
+          installer: entry.installer?.type,
+          version: entry.version,
+        })),
+    ).toEqual([
+      {
+        id: 'lark-cli',
+        plane: 'cli',
+        kind: 'cli-binary',
+        platform: 'lark',
+        installer: 'npm',
+        version: '1.0.92',
+      },
+      {
+        id: 'firecrawl-cli',
+        plane: 'cli',
+        kind: 'cli-binary',
+        platform: 'firecrawl',
+        installer: 'npm',
+        version: '1.23.3',
+      },
+      {
+        id: 'wrangler-cli',
+        plane: 'cli',
+        kind: 'cli-binary',
+        platform: 'cloudflare',
+        installer: 'npm',
+        version: '4.127.0',
+      },
+      {
+        id: 'vercel-cli',
+        plane: 'cli',
+        kind: 'cli-binary',
+        platform: 'vercel',
+        installer: 'npm',
+        version: '59.9.1',
+      },
+      {
+        id: 'aliyun-cli',
+        plane: 'cli',
+        kind: 'cli-binary',
+        platform: 'aliyun',
+        installer: 'github-release',
+        version: '3.4.11',
+      },
+    ]);
+  });
+
+  it('binds credentials and declares allow-lists for every hosted CLI', () => {
+    expect(marketCatalog.find((entry) => entry.id === 'lark-cli')?.credentialBindings).toEqual({});
+    expect(marketCatalog.find((entry) => entry.id === 'firecrawl-cli')?.credentialBindings).toEqual(
+      { FIRECRAWL_API_KEY: 'token' },
+    );
+    expect(marketCatalog.find((entry) => entry.id === 'wrangler-cli')?.credentialBindings).toEqual({
+      CLOUDFLARE_API_TOKEN: 'token',
+    });
+    expect(marketCatalog.find((entry) => entry.id === 'vercel-cli')?.credentialBindings).toEqual({
+      VERCEL_TOKEN: 'token',
+    });
+    expect(marketCatalog.find((entry) => entry.id === 'aliyun-cli')?.credentialBindings).toEqual({
+      ALIBABA_CLOUD_ACCESS_KEY_ID: 'env:ALIBABA_CLOUD_ACCESS_KEY_ID',
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: 'env:ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+      ALIBABA_CLOUD_REGION_ID: 'env:ALIBABA_CLOUD_REGION_ID',
+    });
+    for (const entry of marketCatalog.filter((item) => entryPlane(item) === 'cli')) {
+      expect(entry.allowList?.allow.length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it('probes installed host binaries without relying on the gateway PATH', () => {
+    expect(marketCatalog.find((entry) => entry.id === 'aliyun-cli')?.probe).toEqual({
+      command: 'aliyun',
+      args: ['version'],
+    });
+  });
 });

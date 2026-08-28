@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -985,6 +985,44 @@ exit 0
       expect(status.lastCheckedAt).toBeTruthy();
     } finally {
       await runtime.close();
+    }
+  });
+
+  it('resolves bare probe command names next to the installed host binary', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-cli-probe-'));
+    const fakeDir = join(directory, 'bin');
+    mkdirSync(fakeDir, { recursive: true });
+    const binPath = join(fakeDir, 'platform-cli');
+    writeFileSync(binPath, `#!/bin/sh\nprintf 'version=%s\\nloggedIn=%s\\n' "$2" "$3"\nexit 0\n`);
+    chmodSync(binPath, 0o755);
+    const runtime = createTestRuntime();
+    try {
+      await jsonResponse(
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'POST',
+          '/api/v1/clis',
+          cliBody({
+            slug: 'resolved-probe',
+            command: binPath,
+            probe: { command: 'platform-cli', args: ['probe', '9.9.9', 'true'] },
+          }),
+        ),
+      );
+      const status = (await jsonResponse(
+        await controlRequest(
+          runtime.runtime,
+          runtime.controlKey,
+          'GET',
+          '/cli/resolved-probe/status',
+        ),
+      )) as { installed: boolean; version: string };
+      expect(status.installed).toBe(true);
+      expect(status.version).toBe('9.9.9');
+    } finally {
+      await runtime.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

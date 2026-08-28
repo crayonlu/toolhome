@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { AppError } from '../domain/errors.js';
 import type { ToolCallDraft } from '../domain/models.js';
 import {
@@ -14,6 +16,7 @@ import {
   createCliInputSchema,
   updateCliInputSchema,
   type CliExecInput,
+  type CliProbe,
   type CliRecord,
 } from './models.js';
 import { execCli, type ExecOutcome } from './runner.js';
@@ -255,7 +258,10 @@ export class CliService {
     const env = this.#buildEnv(record);
     const outcome = await execCli(
       {
-        command: record.executionMode === 'docker' ? record.command : record.probe.command,
+        command:
+          record.executionMode === 'docker'
+            ? record.command
+            : this.#resolveHostProbe(record, record.probe),
         argv: record.probe.args,
         env,
         stdin: null,
@@ -279,6 +285,16 @@ export class CliService {
       loggedIn: parsed.loggedIn,
       lastCheckedAt,
     };
+  }
+
+  /**
+   * Bare probe command names resolve next to the installed host binary; the
+   * market bin directory is not on the gateway process PATH.
+   */
+  #resolveHostProbe(record: CliRecord, probe: CliProbe): string {
+    if (probe.command.includes('/') || !record.command.includes('/')) return probe.command;
+    const candidate = join(dirname(record.command), probe.command);
+    return existsSync(candidate) ? candidate : probe.command;
   }
 
   #containerEnvKeys(record: CliRecord): string[] {

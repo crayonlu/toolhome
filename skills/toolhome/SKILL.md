@@ -17,7 +17,7 @@ ToolHome is a single-user, self-hosted control plane for MCP servers and Hosted 
 
 - User wants to deploy or manage the MCP or Hosted CLI plane
 - User wants to aggregate multiple MCP servers behind one URL
-- User wants to run platform CLIs such as Azure `az`, GitHub `gh`, or Tailscale remotely
+- User wants to run platform CLIs such as Azure `az`, GitHub `gh`, Tailscale, Cloudflare `wrangler`, Vercel, Lark `lark-cli`, Firecrawl, or Aliyun `aliyun` remotely
 - User needs to authorize OAuth for MCP upstreams or reuse access tokens in a CLI
 - User wants to install MCP servers or hosted CLIs from the Market catalog
 - User wants to connect Claude Code, Cursor, Codex, or Grok to a self-hosted MCP gateway
@@ -196,18 +196,18 @@ toolhome events              # recent events with level filter
 
 ## Configuration
 
-| Env                              | Description                                        | Default                        |
-| -------------------------------- | -------------------------------------------------- | ------------------------------ |
-| `TOOLHOME_PUBLIC_URL`            | External HTTPS origin                              | required                       |
-| `TOOLHOME_MASTER_KEY`            | Secret encryption key (32+ chars)                  | required                       |
-| `TOOLHOME_BOOTSTRAP_CONTROL_KEY` | First-boot Control Key                             | required on first boot         |
+| Env                               | Description                                        | Default                        |
+| --------------------------------- | -------------------------------------------------- | ------------------------------ |
+| `TOOLHOME_PUBLIC_URL`             | External HTTPS origin                              | required                       |
+| `TOOLHOME_MASTER_KEY`             | Secret encryption key (32+ chars)                  | required                       |
+| `TOOLHOME_BOOTSTRAP_CONTROL_KEY`  | First-boot Control Key                             | required on first boot         |
 | `TOOLHOME_HOST` / `TOOLHOME_PORT` | Listen address                                     | `127.0.0.1:3344`               |
-| `TOOLHOME_DATA_DIR`              | SQLite + market data                               | `/data`                        |
-| `TOOLHOME_MARKET_DIR`            | Market npm install dir                             | `<dataDir>/market`             |
-| `TOOLHOME_WEB_DIR`               | Web console static files                           | disabled (set in Docker image) |
-| `TOOLHOME_OAUTH_URL_CLIENT_ID`   | Global OAuth client registration                   | `true` (URL-based)             |
-| `TOOLHOME_UV_INDEX_URL`          | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
-| `TOOLHOME_CALLS_RETENTION_DAYS`  | Tool call record retention in days (metadata only) | `30`                           |
+| `TOOLHOME_DATA_DIR`               | SQLite + market data                               | `/data`                        |
+| `TOOLHOME_MARKET_DIR`             | Market npm install dir                             | `<dataDir>/market`             |
+| `TOOLHOME_WEB_DIR`                | Web console static files                           | disabled (set in Docker image) |
+| `TOOLHOME_OAUTH_URL_CLIENT_ID`    | Global OAuth client registration                   | `true` (URL-based)             |
+| `TOOLHOME_UV_INDEX_URL`           | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
+| `TOOLHOME_CALLS_RETENTION_DAYS`   | Tool call record retention in days (metadata only) | `30`                           |
 
 ## Deep Dives
 

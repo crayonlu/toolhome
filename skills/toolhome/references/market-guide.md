@@ -4,7 +4,7 @@
 
 The Market is a curated catalog of MCP servers and hosted platform CLIs. One command installs the target, creates the credential, and configures the runtime. A Market entry represents the capability itself; installer technologies such as npm, Go, GitHub Release, uv, and Docker remain implementation details.
 
-## Catalog Entries (30)
+## Catalog Entries (35)
 
 ### Remote (OAuth)
 
@@ -24,9 +24,11 @@ fetch
 
 ### Hosted platform CLIs
 
-azure-cli (`az`), gh-cli (`gh`), tailscale-cli
+azure-cli (`az`), gh-cli (`gh`), tailscale-cli, lark-cli, firecrawl-cli (`firecrawl`), wrangler-cli (`wrangler`), vercel-cli, aliyun-cli (`aliyun`)
 
 Hosted CLI entries are parallel to MCP entries. The catalog describes the platform command, pinned artifact, credential requirements, and allowed argv; it does not expose npm, Go, uv, or Docker as products.
+
+npm-backed CLI entries (`lark-cli`, `firecrawl-cli`, `wrangler-cli`, `vercel-cli`) install into the persistent market volume and run in host mode. Credentials are injected as environment variables (`FIRECRAWL_API_KEY`, `CLOUDFLARE_API_TOKEN`, `VERCEL_TOKEN`); `lark-cli` ships no token env var — run `lark-cli auth login --no-wait --json` through exec, complete the device flow in a browser, then finish with `lark-cli auth login --device-code <code>`. Its npm package downloads the platform binary on first execution, so the first command needs a generous exec timeout. `aliyun-cli` installs a pinned GitHub Release tarball (linux-amd64) and authenticates through `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, and `ALIBABA_CLOUD_REGION_ID`; bare probe commands (its `aliyun version` probe) resolve next to the installed binary.
 
 > ⚠️ The npm package name `mcp-server-fetch` is **squatted** by a canary (npx-confusion) package that runs code on install. The official Fetch server is Python — the catalog installs it via `uvx`, never via npm.
 
