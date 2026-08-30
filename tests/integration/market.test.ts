@@ -85,6 +85,23 @@ exit 0
   };
 }
 
+function createFakeNpm(): { argsLog: string; close(): void } {
+  const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-market-npm-stub-'));
+  const npmPath = join(fakeBin, 'npm');
+  const argsLog = join(fakeBin, 'npm-args.log');
+  writeFileSync(npmPath, `#!/bin/sh\necho "$@" >> "${argsLog}"\nexit 0\n`);
+  chmodSync(npmPath, 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  return {
+    argsLog,
+    close() {
+      process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true });
+    },
+  };
+}
+
 describe('market', () => {
   it('lists the curated catalog with install status and hosting planes', async () => {
     const { runtime, controlKey, close } = createTestRuntime();
@@ -210,9 +227,7 @@ exit 0
     process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
     const { runtime, controlKey, close } = createTestRuntime();
     try {
-      const result = (await installEntry(runtime, controlKey, 'gh-cli', {
-        GH_TOKEN: 'gh-test-token',
-      })) as { cliId: string };
+      const result = (await installEntry(runtime, controlKey, 'gh-cli', {})) as { cliId: string };
       expect(result.cliId).toBeTruthy();
       expect(readFileSync(argsLog, 'utf8')).toContain('pull ghcr.io/cli/cli:2.97.0');
     } finally {
@@ -456,7 +471,7 @@ exit 0
         runtime,
         controlKey,
         'POST',
-        '/api/v1/market/gh-cli/install',
+        '/api/v1/market/vercel-cli/install',
         { values: {} },
       );
       expect(first.status).toBe(200);
@@ -464,7 +479,7 @@ exit 0
         runtime,
         controlKey,
         'POST',
-        '/api/v1/market/gh-cli/install',
+        '/api/v1/market/vercel-cli/install',
         { values: {} },
       );
       expect(second.status).toBe(409);
@@ -480,7 +495,7 @@ exit 0
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { jobId: string; actionId: string };
@@ -490,7 +505,7 @@ exit 0
         runtime,
         controlKey,
         'POST',
-        '/api/v1/market/gh-cli/install',
+        '/api/v1/market/vercel-cli/install',
         { values: {} },
       );
       expect(retry.status).toBe(200);
@@ -503,11 +518,11 @@ exit 0
   });
 
   it('allows only one concurrent completion for a hosted CLI secret action', async () => {
-    const fakeDocker = createFakeDocker();
+    const fakeNpm = createFakeNpm();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { jobId: string; actionId: string; actionUrl: string };
@@ -525,7 +540,7 @@ exit 0
               'content-type': 'application/json',
               host: runtime.config.publicUrl.host,
             },
-            body: JSON.stringify({ token, values: { GH_TOKEN: 'gh-test-token' } }),
+            body: JSON.stringify({ token, values: { VERCEL_TOKEN: 'vercel-test-token' } }),
           },
         ),
       );
@@ -535,16 +550,16 @@ exit 0
       expect(job.status).toBe('completed');
     } finally {
       await close();
-      fakeDocker.close();
+      fakeNpm.close();
     }
   });
 
   it('allows a secure action URL to be completed without a control key', async () => {
-    const fakeDocker = createFakeDocker();
+    const fakeNpm = createFakeNpm();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { actionId: string; actionUrl: string };
@@ -559,7 +574,7 @@ exit 0
         ),
       );
       expect(info.status).toBe(200);
-      expect((await info.json()) as { entryId: string }).toMatchObject({ entryId: 'gh-cli' });
+      expect((await info.json()) as { entryId: string }).toMatchObject({ entryId: 'vercel-cli' });
       const completed = await applicationFetch(
         runtime,
         new URL(`/api/v1/secure-actions/${started.actionId}/complete`, runtime.config.publicUrl),
@@ -568,7 +583,7 @@ exit 0
           headers: { 'content-type': 'application/json', host: runtime.config.publicUrl.host },
           body: JSON.stringify({
             token: actionUrl.searchParams.get('token'),
-            values: { GH_TOKEN: 'gh-test-token' },
+            values: { VERCEL_TOKEN: 'vercel-test-token' },
           }),
         },
       );
@@ -578,7 +593,7 @@ exit 0
       expect(job.status).toBe('completed');
     } finally {
       await close();
-      fakeDocker.close();
+      fakeNpm.close();
     }
   });
 
@@ -586,7 +601,7 @@ exit 0
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { jobId: string; actionId: string; actionUrl: string };
@@ -599,7 +614,7 @@ exit 0
         controlKey,
         'POST',
         `/api/v1/secure-actions/${started.actionId}/complete`,
-        { token, values: { GH_TOKEN: 'gh-test-token' } },
+        { token, values: { VERCEL_TOKEN: 'vercel-test-token' } },
       );
       expect(completed.status).toBe(404);
 
@@ -621,7 +636,7 @@ exit 0
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { jobId: string; actionId: string };
@@ -649,7 +664,7 @@ exit 0
 
       // The expired wait must not wedge the entry: a fresh install starts cleanly.
       const retried = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { status: string };
@@ -667,7 +682,7 @@ exit 0
     try {
       const started = (await jsonResponse(
         await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
-          values: { GH_TOKEN: 'gh-test-token' },
+          values: {},
         }),
       )) as { status: string; jobId: string };
       expect(started.status).toBe('installing');
@@ -680,11 +695,11 @@ exit 0
   });
 
   it('completes a hosted CLI secret action and resumes the CLI install path', async () => {
-    const fakeDocker = createFakeDocker();
+    const fakeNpm = createFakeNpm();
     const { runtime, controlKey, close } = createTestRuntime();
     try {
       const started = (await jsonResponse(
-        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/install', {
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/vercel-cli/install', {
           values: {},
         }),
       )) as { jobId: string; status: string; actionId: string; actionUrl: string };
@@ -700,7 +715,7 @@ exit 0
           `/api/v1/secure-actions/${started.actionId}/complete`,
           {
             token: actionUrl.searchParams.get('token'),
-            values: { GH_TOKEN: 'gh-test-token' },
+            values: { VERCEL_TOKEN: 'vercel-test-token' },
           },
         ),
       )) as { status: string };
@@ -719,7 +734,7 @@ exit 0
       expect(credentials.some((credential) => credential.type === 'bearer')).toBe(true);
     } finally {
       await close();
-      fakeDocker.close();
+      fakeNpm.close();
     }
   });
 

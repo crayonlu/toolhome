@@ -496,7 +496,7 @@ export class MarketService {
           platform: entry.platform ?? null,
           probe: entry.probe ?? { command: projection.command, args: ['--version'] },
           enabled: true,
-          timeoutMs: 120_000,
+          timeoutMs: entry.execTimeoutMs ?? 120_000,
           maxOutputBytes: 64 * 1024,
         });
         const createdInstallation = this.#store.createInstallation({

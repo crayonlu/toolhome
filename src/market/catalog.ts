@@ -65,6 +65,8 @@ export interface MarketEntry {
   entrypoint?: string;
   /** Status probe argv for the installed CLI (runs with this entry's command/entrypoint). */
   probe?: { command: string; args: string[] };
+  /** Per-exec timeout ceiling applied to the installed CLI record (default 120s). */
+  execTimeoutMs?: number;
   docs?: string;
 }
 
@@ -529,23 +531,28 @@ ENTRYPOINT ["markitdown-mcp"]`,
     },
     image: 'ghcr.io/cli/cli:2.97.0',
     entrypoint: 'gh',
-    credential: { type: 'bearer', tokenKey: 'GH_TOKEN' },
-    credentialBindings: { GH_TOKEN: 'token' },
-    requires: [
-      {
-        name: 'GH_TOKEN',
-        description: 'GitHub token with the scopes required by the selected commands',
-        secret: true,
-        required: true,
-      },
-    ],
-    allowList: {
-      allow: [['--version'], ['repo', 'view', '*'], ['issue', 'list'], ['pr', 'list']],
-      deny: [
-        ['auth', 'login'],
-        ['auth', 'token'],
-      ],
+    // Installs without credentials; authenticate afterwards via the device-flow
+    // login persisted in the toolhome-gh-cli-state volume.
+    credential: { type: 'env' },
+    credentialBindings: {},
+    requires: [],
+    cliRuntime: {
+      containerVolumes: [{ source: 'toolhome-gh-cli-state', target: '/root/.config/gh' }],
     },
+    allowList: {
+      allow: [
+        ['--version'],
+        ['auth', 'login'],
+        ['auth', 'login', '*'],
+        ['auth', 'status'],
+        ['auth', 'status', '*'],
+        ['repo', 'view', '*'],
+        ['issue', 'list'],
+        ['pr', 'list'],
+      ],
+      deny: [['auth', 'token']],
+    },
+    execTimeoutMs: 600_000,
     probe: { command: 'gh', args: ['--version'] },
     docs: 'https://cli.github.com/',
   },

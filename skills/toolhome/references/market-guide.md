@@ -30,6 +30,16 @@ Hosted CLI entries are parallel to MCP entries. The catalog describes the platfo
 
 npm-backed CLI entries (`lark-cli`, `firecrawl-cli`, `wrangler-cli`, `vercel-cli`) install into the persistent market volume and run in host mode. Credentials are injected as environment variables (`FIRECRAWL_API_KEY`, `CLOUDFLARE_API_TOKEN`, `VERCEL_TOKEN`); `lark-cli` ships no token env var — run `lark-cli auth login --no-wait --json` through exec, complete the device flow in a browser, then finish with `lark-cli auth login --device-code <code>`. Its npm package downloads the platform binary on first execution, so the first command needs a generous exec timeout. `aliyun-cli` installs a pinned GitHub Release tarball (linux-amd64) and authenticates through `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, and `ALIBABA_CLOUD_REGION_ID`; bare probe commands (its `aliyun version` probe) resolve next to the installed binary.
 
+`gh-cli` installs without any credential and authenticates afterwards through the GitHub device flow. Log in once and the state persists in the `toolhome-gh-cli-state` named volume:
+
+```bash
+toolhome cli exec gh-cli --stdin $'\n' -- auth login --hostname github.com --git-protocol https --web
+# copy the one-time code, open https://github.com/login/device, then wait for the exec to finish
+toolhome cli exec gh-cli -- auth status
+```
+
+`gh auth token` stays denied so stored tokens can never reach argv logs; a token alternative is still possible via `gh auth login --with-token` with the token fed through exec stdin.
+
 > ⚠️ The npm package name `mcp-server-fetch` is **squatted** by a canary (npx-confusion) package that runs code on install. The official Fetch server is Python — the catalog installs it via `uvx`, never via npm.
 
 ## Installation

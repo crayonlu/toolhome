@@ -29,7 +29,19 @@ describe('platform CLI Market catalog', () => {
       AZURE_CLIENT_SECRET: 'env:AZURE_CLIENT_SECRET',
       AZURE_TENANT_ID: 'env:AZURE_TENANT_ID',
     });
-    expect(github?.credentialBindings).toEqual({ GH_TOKEN: 'token' });
+    expect(github?.credentialBindings).toEqual({});
+  });
+
+  it('lets gh install without a token and authenticate afterwards via device flow', () => {
+    const github = marketCatalog.find((entry) => entry.id === 'gh-cli');
+    expect(github?.requires).toEqual([]);
+    expect(github?.cliRuntime).toEqual({
+      containerVolumes: [{ source: 'toolhome-gh-cli-state', target: '/root/.config/gh' }],
+    });
+    expect(github?.allowList?.allow).toContainEqual(['auth', 'login']);
+    expect(github?.allowList?.allow).toContainEqual(['auth', 'status']);
+    expect(github?.allowList?.deny).toEqual([['auth', 'token']]);
+    expect(github?.execTimeoutMs).toBe(600_000);
   });
 
   it('does not expose installer technologies as separate hosted CLI products', () => {

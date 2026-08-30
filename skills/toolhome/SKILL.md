@@ -127,7 +127,7 @@ toolhome market install context7 --set CONTEXT7_API_KEY=xxx  # remote (bearer)
 toolhome market install deepwiki                        # remote (no auth)
 toolhome market install fetch                           # uvx (Python, no config)
 toolhome market install markitdown                       # Docker-backed MCP
-toolhome market install gh-cli --set GH_TOKEN=ghp_xxx     # Hosted GitHub CLI
+toolhome market install gh-cli                             # Hosted GitHub CLI (no token; device-flow login after)
 toolhome market uninstall resend                        # remove
 ```
 
