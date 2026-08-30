@@ -68,7 +68,7 @@ function createFakeDocker(options: { pullDelaySeconds?: number } = {}): {
 echo "$@" >> "${argsLog}"
 case "$1 $2" in
   "image inspect") exit 1 ;;
-  "pull ghcr.io/cli/cli:2.97.0") ${pullDelay}exit 0 ;;
+  "pull toolhome/gh-cli:2.97.0") ${pullDelay}exit 0 ;;
 esac
 exit 0
 `,
@@ -217,7 +217,7 @@ describe('market', () => {
 echo "$@" >> "${argsLog}"
 case "$1 $2" in
   "image inspect") exit 1 ;;
-  "pull ghcr.io/cli/cli:2.97.0") exit 0 ;;
+  "pull toolhome/gh-cli:2.97.0") exit 0 ;;
 esac
 exit 0
 `,
@@ -229,7 +229,7 @@ exit 0
     try {
       const result = (await installEntry(runtime, controlKey, 'gh-cli', {})) as { cliId: string };
       expect(result.cliId).toBeTruthy();
-      expect(readFileSync(argsLog, 'utf8')).toContain('pull ghcr.io/cli/cli:2.97.0');
+      expect(readFileSync(argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.97.0');
     } finally {
       await close();
       process.env.PATH = previousPath;
@@ -688,7 +688,7 @@ exit 0
       expect(started.status).toBe('installing');
       await close();
       expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
-      expect(readFileSync(fakeDocker.argsLog, 'utf8')).toContain('pull ghcr.io/cli/cli:2.97.0');
+      expect(readFileSync(fakeDocker.argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.97.0');
     } finally {
       fakeDocker.close();
     }

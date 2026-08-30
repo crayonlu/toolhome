@@ -85,6 +85,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Build GitHub CLI image
+        run: |
+          cat > /tmp/gh.Dockerfile <<'EOF'
+          FROM alpine:3.20
+          ARG GH_VERSION=2.97.0
+          RUN apk add --no-cache ca-certificates curl git \
+           && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tgz \
+           && tar -xzf /tmp/gh.tgz -C /tmp \
+           && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
+           && rm -rf /tmp/gh.tgz "/tmp/gh_${GH_VERSION}_linux_amd64"
+          EOF
+          docker build -f /tmp/gh.Dockerfile -t toolhome/gh-cli:2.97.0 /tmp
+          docker save toolhome/gh-cli:2.97.0 | gzip > gh-cli-image.tar.gz
+      - name: Ship gh image to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          source: 'gh-cli-image.tar.gz'
+          target: '/tmp/'
       - name: Deploy to Aliyun
         uses: appleboy/ssh-action@v1
         with:
@@ -113,6 +134,10 @@ jobs:
             fi
             grep -q '^TOOLHOME_MASTER_KEY=' .env
             grep -q 'TOOLHOME_MASTER_KEY' docker-compose.yml
+            if [ -f /tmp/gh-cli-image.tar.gz ]; then
+              docker load -i /tmp/gh-cli-image.tar.gz
+              rm -f /tmp/gh-cli-image.tar.gz
+            fi
             docker compose pull
             docker compose up -d
             docker image prune -f

@@ -526,10 +526,13 @@ ENTRYPOINT ["markitdown-mcp"]`,
     version: '2.97.0',
     installer: {
       type: 'docker',
-      image: 'ghcr.io/cli/cli:2.97.0',
+      // gh ships no official image; CI builds toolhome/gh-cli from the release
+      // tarball and preloads it onto the server (ghcr/docker Hub are blocked
+      // from the deployment network).
+      image: 'toolhome/gh-cli:2.97.0',
       entrypoint: 'gh',
     },
-    image: 'ghcr.io/cli/cli:2.97.0',
+    image: 'toolhome/gh-cli:2.97.0',
     entrypoint: 'gh',
     // Installs without credentials; authenticate afterwards via the device-flow
     // login persisted in the toolhome-gh-cli-state volume.

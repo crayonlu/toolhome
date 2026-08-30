@@ -23,7 +23,7 @@ describe('platform CLI Market catalog', () => {
     const azure = marketCatalog.find((entry) => entry.id === 'azure-cli');
     const github = marketCatalog.find((entry) => entry.id === 'gh-cli');
     expect(azure?.image).toBe('mcr.microsoft.com/azure-cli:2.89.0');
-    expect(github?.image).toBe('ghcr.io/cli/cli:2.97.0');
+    expect(github?.image).toBe('toolhome/gh-cli:2.97.0');
     expect(azure?.credentialBindings).toEqual({
       AZURE_CLIENT_ID: 'env:AZURE_CLIENT_ID',
       AZURE_CLIENT_SECRET: 'env:AZURE_CLIENT_SECRET',
