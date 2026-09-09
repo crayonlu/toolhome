@@ -78,6 +78,16 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.repository }}
+      - name: Export app image for offline load
+        run: |
+          docker pull ghcr.io/crayonlu/toolhome:latest
+          docker save ghcr.io/crayonlu/toolhome:latest | gzip > toolhome-app-image.tar.gz
+      - name: Upload app image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolhome-app-image
+          path: toolhome-app-image.tar.gz
+          retention-days: 1
 
   deploy:
     if: github.ref == 'refs/heads/main'
@@ -85,6 +95,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Download app image
+        uses: actions/download-artifact@v4
+        with:
+          name: toolhome-app-image
       - name: Build GitHub CLI image
         run: |
           cat > /tmp/gh.Dockerfile <<'EOF'
@@ -104,7 +118,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
-          source: 'gh-cli-image.tar.gz'
+          source: 'gh-cli-image.tar.gz,toolhome-app-image.tar.gz'
           target: '/tmp/'
       - name: Deploy to Aliyun
         uses: appleboy/ssh-action@v1
@@ -138,6 +152,10 @@ jobs:
               docker load -i /tmp/gh-cli-image.tar.gz
               rm -f /tmp/gh-cli-image.tar.gz
             fi
-            docker compose pull
+            if [ -f /tmp/toolhome-app-image.tar.gz ]; then
+              docker load -i /tmp/toolhome-app-image.tar.gz
+              rm -f /tmp/toolhome-app-image.tar.gz
+            fi
+            docker image inspect ghcr.io/crayonlu/toolhome:latest >/dev/null
             docker compose up -d
             docker image prune -f
