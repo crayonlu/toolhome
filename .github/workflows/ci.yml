@@ -104,6 +104,9 @@ jobs:
           cat > /tmp/gh.Dockerfile <<'EOF'
           FROM alpine:3.20
           ARG GH_VERSION=2.97.0
+          # Route gh through the Cloudflare Worker relay (github.com is
+          # unreachable from the deployment network).
+          ENV GH_HOST=toolhome-gh-relay.crayon-6eb.workers.dev
           RUN apk add --no-cache ca-certificates curl git \
            && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tgz \
            && tar -xzf /tmp/gh.tgz -C /tmp \
