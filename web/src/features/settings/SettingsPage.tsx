@@ -16,6 +16,7 @@ import { Dialog } from '../../components/ui/Dialog'
 import { TextField, TextareaField } from '../../components/ui/Field'
 import { CopyButton } from '../../components/ui/CopyButton'
 import { SelectField } from '../../components/ui/SelectField'
+import { AccessKeysSection } from '../access-keys/AccessKeysSection'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -254,6 +255,7 @@ export function SettingsPage() {
       </Section>
 
       <Section title={t('settings.controlKeys')}>
+        <p className="text-xs text-ink-3">{t('settings.controlKeyHint')}</p>
         <div className="flex flex-col divide-y divide-ink-3/10">
           {(controlKeys ?? []).map((key) => (
             <div key={key.id} className="flex items-center gap-3 px-1 py-2">
@@ -297,6 +299,8 @@ export function SettingsPage() {
           </Button>
         </div>
       </Section>
+
+      <AccessKeysSection />
 
       <Section title={t('settings.management')}>
         <div className="flex items-center justify-between bg-surface px-4 py-3">

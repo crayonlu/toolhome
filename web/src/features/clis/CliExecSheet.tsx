@@ -3,6 +3,7 @@ import { streamNdjson } from '../../api/client';
 import { useI18n } from '../../i18n';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
+import { CopyButton } from '../../components/ui/CopyButton';
 import { FieldGroup, TextareaField } from '../../components/ui/Field';
 import type { CliRecord } from '../../api/types';
 import { parseArgvText } from './argv';
@@ -80,10 +81,20 @@ export function CliExecSheet({
   };
 
   const exit = frames.find((frame) => frame.type === 'exit');
+  const execEndpoint = `${window.location.origin}/cli/${cli.slug}/exec`;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={`${cli.name} · exec`}>
       <FieldGroup>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[13px] font-medium text-ink-2">{t('endpoints.exec')}</span>
+          <div className="flex items-center gap-2 bg-surface-2 px-3 py-2">
+            <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+              POST {execEndpoint}
+            </code>
+            <CopyButton text={execEndpoint} />
+          </div>
+        </div>
         <TextareaField
           label={t('cli.argv')}
           value={argvText}

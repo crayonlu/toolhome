@@ -1,4 +1,4 @@
-import { Activity, KeyRound, Link2, Server, SquareTerminal } from 'lucide-react';
+import { KeyRound, Link2, Server, SquareTerminal } from 'lucide-react';
 import { Link } from 'react-router';
 import { useOverview } from '../../app/queries';
 import { useI18n } from '../../i18n';
@@ -56,7 +56,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {plane === 'mcp' ? (
           <>
             <StatCard
@@ -100,14 +100,7 @@ export function DashboardPage() {
           label={t('nav.accessKeys')}
           value={overview.accessKeys}
           icon={Link2}
-          to="/access-keys"
-        />
-        <StatCard
-          label={t('nav.diagnostics')}
-          value={overview.ok ? t('common.operational') : t('common.degraded')}
-          icon={Activity}
-          to="/diagnostics"
-          tone={overview.ok ? 'success' : 'danger'}
+          to="/settings"
         />
       </div>
 

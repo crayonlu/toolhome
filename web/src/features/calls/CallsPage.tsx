@@ -6,6 +6,8 @@ import { usePlane } from '../../app/plane';
 import { Badge, EmptyState } from '../../components/ui/Badge';
 import { SelectField, type SelectOption } from '../../components/ui/SelectField';
 import { CallChart } from '../../components/ui/CallChart';
+import { TabsView, type TabItem } from '../../components/ui/Tabs';
+import { EventsPanel } from '../events/EventsPanel';
 import type { ToolCallStatus } from '../../api/types';
 
 const statusOptions: SelectOption[] = [
@@ -44,7 +46,33 @@ function summaryCard(label: string, value: string, sub?: string) {
   );
 }
 
+/**
+ * One observability surface, two views: the call ledger and the event stream.
+ * Events used to be a separate sidebar tab that showed the same traffic.
+ */
 export function CallsPage() {
+  const { t } = useI18n();
+  const [tab, setTab] = useState('calls');
+
+  const tabs: TabItem[] = [
+    { value: 'calls', label: t('calls.tab') },
+    { value: 'events', label: t('nav.events') },
+  ];
+
+  return (
+    <div className="flex flex-col gap-5">
+      <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('nav.calls')}</h1>
+      <TabsView
+        tabs={tabs}
+        value={tab}
+        onChange={setTab}
+        render={(value) => (value === 'calls' ? <CallsPanel /> : <EventsPanel />)}
+      />
+    </div>
+  );
+}
+
+function CallsPanel() {
   const { t, locale } = useI18n();
   const { plane } = usePlane();
   const { data: servers } = useServers();
@@ -84,10 +112,6 @@ export function CallsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('nav.calls')}</h1>
-      </div>
-
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
         {summaryCard(t('calls.total'), String(s?.total ?? '—'))}
         {summaryCard(

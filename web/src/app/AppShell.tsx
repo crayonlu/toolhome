@@ -1,14 +1,10 @@
 import {
-  Activity,
   Boxes,
-  Globe,
   KeyRound,
   LayoutDashboard,
-  Link2,
   LogOut,
   Moon,
   PhoneCall,
-  ScrollText,
   Server,
   Settings,
   SquareTerminal,
@@ -37,6 +33,10 @@ interface NavItem {
  * Sidebar sections. The "plane" section holds per-plane resources (Servers vs
  * CLIs) and is the only one that changes when the switch flips; "shared" and
  * "system" stay put on both planes.
+ *
+ * Deliberately small: endpoints live on Overview / server detail / the CLI run
+ * sheet, diagnostics live on Servers, events are a tab inside Calls, and both
+ * key families live in Settings. Six destinations, no duplicate surfaces.
  */
 const navGroups: { titleKey: string; items: NavItem[] }[] = [
   {
@@ -50,22 +50,13 @@ const navGroups: { titleKey: string; items: NavItem[] }[] = [
     titleKey: 'nav.section.shared',
     items: [
       { to: '/calls', key: 'nav.calls', icon: PhoneCall },
-      { to: '/endpoints', key: 'nav.endpoints', icon: Globe },
       { to: '/market', key: 'nav.market', icon: Boxes },
       { to: '/credentials', key: 'nav.credentials', icon: KeyRound },
     ],
   },
   {
-    titleKey: 'nav.section.mcp',
-    items: [{ to: '/access-keys', key: 'nav.accessKeys', icon: Link2, planes: ['mcp'] }],
-  },
-  {
     titleKey: 'nav.section.system',
-    items: [
-      { to: '/diagnostics', key: 'nav.diagnostics', icon: Activity },
-      { to: '/events', key: 'nav.events', icon: ScrollText },
-      { to: '/settings', key: 'nav.settings', icon: Settings },
-    ],
+    items: [{ to: '/settings', key: 'nav.settings', icon: Settings }],
   },
 ];
 
@@ -235,13 +226,14 @@ function pageKeyFor(path: string): string {
   if (path.startsWith('/servers')) return 'nav.servers';
   if (path.startsWith('/clis')) return 'nav.clis';
   if (path.startsWith('/credentials')) return 'nav.credentials';
-  if (path.startsWith('/access-keys')) return 'nav.accessKeys';
   if (path.startsWith('/market')) return 'nav.market';
-  if (path.startsWith('/endpoints')) return 'nav.endpoints';
-  if (path.startsWith('/diagnostics')) return 'nav.diagnostics';
-  if (path.startsWith('/events')) return 'nav.events';
   if (path.startsWith('/calls')) return 'nav.calls';
   if (path.startsWith('/settings')) return 'nav.settings';
+  // Folded pages: title the destination while the redirect resolves.
+  if (path.startsWith('/diagnostics')) return 'nav.servers';
+  if (path.startsWith('/events')) return 'nav.calls';
+  if (path.startsWith('/access-keys')) return 'nav.settings';
+  if (path.startsWith('/endpoints')) return 'nav.overview';
   return 'nav.overview';
 }
 

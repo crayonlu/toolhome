@@ -15,7 +15,11 @@ const levelTone: Record<EventLevel, Tone> = {
 
 type EventPlane = Plane | 'all';
 
-export function EventsPage() {
+/**
+ * The audit/event stream. Rendered as a tab inside Calls so the console keeps a
+ * single observability surface instead of two near-identical ones.
+ */
+export function EventsPanel() {
   const { t } = useI18n();
   const { plane: globalPlane } = usePlane();
   const [level, setLevel] = useState<string>('');
@@ -33,31 +37,28 @@ export function EventsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('nav.events')}</h1>
-        <div className="grid grid-cols-2 gap-2 sm:w-72">
-          <SelectField
-            label={t('common.type')}
-            value={plane}
-            onChange={(value) => setPlane(value as EventPlane)}
-            options={[
-              { value: 'all', label: t('common.all') },
-              { value: 'mcp', label: 'MCP' },
-              { value: 'cli', label: 'CLI' },
-            ]}
-          />
-          <SelectField
-            label={t('common.level')}
-            value={level}
-            onChange={setLevel}
-            options={[
-              { value: '', label: t('common.all') },
-              { value: 'info', label: 'info' },
-              { value: 'warn', label: 'warn' },
-              { value: 'error', label: 'error' },
-            ]}
-          />
-        </div>
+      <div className="grid grid-cols-2 gap-2 sm:w-72">
+        <SelectField
+          label={t('common.type')}
+          value={plane}
+          onChange={(value) => setPlane(value as EventPlane)}
+          options={[
+            { value: 'all', label: t('common.all') },
+            { value: 'mcp', label: 'MCP' },
+            { value: 'cli', label: 'CLI' },
+          ]}
+        />
+        <SelectField
+          label={t('common.level')}
+          value={level}
+          onChange={setLevel}
+          options={[
+            { value: '', label: t('common.all') },
+            { value: 'info', label: 'info' },
+            { value: 'warn', label: 'warn' },
+            { value: 'error', label: 'error' },
+          ]}
+        />
       </div>
 
       {isLoading ? (

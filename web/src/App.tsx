@@ -12,10 +12,6 @@ import { ServersPage } from './features/servers/ServersPage';
 import { ServerDetailPage } from './features/servers/ServerDetailPage';
 import { ClisPage } from './features/clis/ClisPage';
 import { CredentialsPage } from './features/credentials/CredentialsPage';
-import { AccessKeysPage } from './features/access-keys/AccessKeysPage';
-import { EndpointsPage } from './features/endpoints/EndpointsPage';
-import { DiagnosticsPage } from './features/diagnostics/DiagnosticsPage';
-import { EventsPage } from './features/events/EventsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { MarketPage } from './features/market/MarketPage';
 import { SecureActionPage } from './features/market/SecureActionPage';
@@ -75,13 +71,17 @@ export function App() {
                   <Route path="/servers/:id" element={<ServerDetailPage />} />
                   <Route path="/clis" element={<ClisPage />} />
                   <Route path="/credentials" element={<CredentialsPage />} />
-                  <Route path="/access-keys" element={<AccessKeysPage />} />
                   <Route path="/market" element={<MarketPage />} />
-                  <Route path="/endpoints" element={<EndpointsPage />} />
-                  <Route path="/diagnostics" element={<DiagnosticsPage />} />
-                  <Route path="/events" element={<EventsPage />} />
                   <Route path="/calls" element={<CallsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  {/*
+                   * Folded destinations. Kept as redirects so old bookmarks,
+                   * docs and agent instructions keep resolving.
+                   */}
+                  <Route path="/access-keys" element={<Navigate to="/settings" replace />} />
+                  <Route path="/endpoints" element={<Navigate to="/" replace />} />
+                  <Route path="/diagnostics" element={<Navigate to="/servers" replace />} />
+                  <Route path="/events" element={<Navigate to="/calls" replace />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

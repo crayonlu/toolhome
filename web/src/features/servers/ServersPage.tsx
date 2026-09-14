@@ -1,9 +1,10 @@
 import { Plus, Server as ServerIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import {
   useCreateServer,
   useDeleteServer,
+  useDiagnostics,
   useServerAction,
   useServers,
   useUpdateServer,
@@ -24,12 +25,21 @@ export function ServersPage() {
   const { toast } = useToast()
   const confirm = useConfirm()
   const { data: servers, isLoading } = useServers()
+  const { data: diagnostics } = useDiagnostics()
   const createServer = useCreateServer()
   const updateServer = useUpdateServer()
   const deleteServer = useDeleteServer()
   const serverAction = useServerAction()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<ServerRecord | undefined>(undefined)
+
+  // Capability-snapshot availability comes from the diagnostics feed; the rest
+  // of what that page showed (status, errors) is already on this list.
+  const snapshotBySlug = useMemo(() => {
+    const map = new Map<string, boolean>()
+    for (const item of diagnostics?.servers ?? []) map.set(item.slug, item.hasSnapshot)
+    return map
+  }, [diagnostics])
 
   const actionPending = (id: string) =>
     serverAction.isPending && serverAction.variables?.id === id
@@ -93,8 +103,18 @@ export function ServersPage() {
                 <Link to={`/servers/${server.id}`} className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium text-ink">{server.name}</span>
                   <span className="truncate font-mono text-xs text-ink-3">{server.slug}</span>
+                  {server.runtime?.lastError && (
+                    <span className="truncate text-xs text-danger" title={server.runtime.lastError}>
+                      {server.runtime.lastError}
+                    </span>
+                  )}
                 </Link>
                 <Badge tone={server.kind === 'remote' ? 'accent' : 'neutral'}>{server.kind}</Badge>
+                {snapshotBySlug.get(server.slug) === true && (
+                  <span className="hidden shrink-0 text-xs text-ink-3 lg:block">
+                    {t('diagnostics.snapshot')}
+                  </span>
+                )}
                 <span className="hidden w-24 text-right text-xs text-ink-2 sm:block">
                   {busy ? (
                     <span className="inline-flex items-center justify-end gap-1.5">
