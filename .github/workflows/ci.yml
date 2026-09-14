@@ -59,6 +59,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Curated install smoke test
         run: npm run smoke:market
+      - name: Verify self-hosted GitHub CLI image recipe
+        run: |
+          node --input-type=module -e 'import { marketCatalog } from "./dist/server/market/catalog.js"; process.stdout.write(marketCatalog.find(entry => entry.id === "gh-cli").installer.dockerfile)' | docker build -t toolhome-gh-cli-smoke -
+          docker run --rm toolhome-gh-cli-smoke --version
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR

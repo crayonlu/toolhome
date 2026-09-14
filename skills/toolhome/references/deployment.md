@@ -13,6 +13,9 @@ services:
       - '127.0.0.1:3344:3344'
     volumes:
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - '${DOCKER_GROUP_ID:-999}'
     env_file: .env
 ```
 
@@ -34,7 +37,7 @@ The repo includes `.github/workflows/ci.yml` with three jobs:
 
 1. **test**: server check + test, web typecheck + test
 2. **docker**: build dists -> docker build -> push `ghcr.io/crayonlu/toolhome:latest`
-3. **deploy**: SSH to server -> `docker compose pull && up -d`
+3. **deploy**: download the app image artifact, build the pinned GitHub CLI image, transfer both over SSH, load them with Docker, and run `docker compose up -d`
 
 ### Required GitHub Secrets
 
@@ -55,6 +58,8 @@ After first CI push, set the package to Public:
 git push main -> test -> docker build + push GHCR -> SSH deploy -> done
 git tag v* -> test -> docker build + push :v* tag (no deploy)
 ```
+
+The current image job also updates `:latest` on tag pushes. Tags alone do not publish npm packages or create GitHub Releases. For a release, verify both independently: `npm view toolhome version` and `gh release list`. Build/check/test both planes, include `skills/toolhome` in the npm archive, publish npm with the user's 2FA confirmation when requested, and create a GitHub Release for the matching version tag. Never overwrite an already published npm version.
 
 ## Reverse Proxy
 

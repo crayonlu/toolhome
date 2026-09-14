@@ -64,6 +64,51 @@ async function main(): Promise<void> {
     oauthRefreshIntervalSeconds: 3600,
   });
   try {
+    // Exercise the CLI plane through the same Market API before the MCP check.
+    const cliStarted = (await call(runtime, 'POST', '/api/v1/market/host-shell/install', {
+      values: {},
+    })) as { jobId: string };
+    const cliDeadline = Date.now() + 30_000;
+    for (;;) {
+      const job = (await call(
+        runtime,
+        'GET',
+        `/api/v1/market/install/${cliStarted.jobId}`,
+      )) as InstallJob;
+      if (job.status === 'failed') throw new Error(`CLI install failed: ${job.error}`);
+      if (job.status === 'completed') break;
+      if (Date.now() > cliDeadline) throw new Error('CLI install timed out');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const cliResponse = await runtime.app.fetch(
+      new Request(new URL('/cli/host-shell/exec', publicUrl), {
+        method: 'POST',
+        headers: {
+          host: publicUrl.host,
+          authorization: `Bearer ${controlKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ argv: ['-c', 'printf TOOLHOME_CLI_SMOKE_OK'] }),
+      }),
+    );
+    const cliOutput = await cliResponse.text();
+    if (!cliResponse.ok) throw new Error(`CLI exec failed: ${cliOutput}`);
+    const frames = cliOutput
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; data?: string; result?: string });
+    if (
+      !frames.some(
+        (frame) => frame.type === 'stdout' && frame.data?.includes('TOOLHOME_CLI_SMOKE_OK'),
+      ) ||
+      !frames.some((frame) => frame.type === 'exit' && frame.result === 'ok')
+    ) {
+      throw new Error(`CLI exec did not complete successfully: ${cliOutput}`);
+    }
+    console.log(
+      'SMOKE PASS: hosted CLI installed through Market and streamed successful execution',
+    );
+
     const started = (await call(runtime, 'POST', '/api/v1/market/fetch/install', {
       values: {},
     })) as { jobId: string; status: string };

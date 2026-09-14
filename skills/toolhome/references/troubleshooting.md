@@ -5,9 +5,11 @@
 **Cause**: The `/api/v1/servers` endpoint wasn't returning runtime state (fixed in recent versions).
 
 **Fix**: Update to the latest image. Verify:
+
 ```bash
 toolhome server list --output json | jq '.[0].runtime.status'
 ```
+
 If `runtime` is missing, the server is running an old version. Pull the latest image.
 
 ## OAuth "Invalid client"
@@ -15,8 +17,9 @@ If `runtime` is missing, the server is running an old version. Pull the latest i
 **Cause**: The upstream rejected the URL-based client metadata.
 
 **Fix**: Switch to DCR for that server:
+
 ```bash
-toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":false}}'
+echo '{"settings":{"urlClientId":false}}' | toolhome server update <id> -
 toolhome credential authorize <name> --force
 ```
 
@@ -27,8 +30,9 @@ See `oauth-guide.md` for per-provider compatibility.
 **Cause**: The upstream has no `registration_endpoint` and DCR was forced.
 
 **Fix**: Switch to URL-based (the default):
+
 ```bash
-toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":true}}'
+echo '{"settings":{"urlClientId":true}}' | toolhome server update <id> -
 toolhome credential authorize <name> --force
 ```
 
@@ -44,9 +48,10 @@ toolhome credential authorize <name> --force
 
 **Cause**: npm cache corruption on the server. The tarball was partially extracted.
 
-**Fix**: Wipe the market directory and reinstall:
+**Fix**: Inspect the failed entry and reinstall that entry. The npm directory is shared with other MCP servers and CLIs; do not clear the entire directory:
+
 ```bash
-docker exec toolhome rm -rf /data/market/node_modules /data/market/package-lock.json
+toolhome market uninstall <id>
 toolhome market install <id> --set KEY=value
 ```
 
@@ -56,7 +61,8 @@ toolhome market install <id> --set KEY=value
 
 **Cause**: The npm name `mcp-server-fetch` is **squatted** — the official Fetch server is Python (PyPI `mcp-server-fetch`). The npm package is a canary that runs code in a `postinstall` script.
 
-**Fix**: Ensure the catalog entry uses `kind: "uvx"` (installs via `uv tool install`, runs via `uvx`). Remove any npm-installed copy:
+**Fix**: Ensure the catalog entry uses `kind: "uvx"` (installs via `uv tool install`, runs the installed binary). Remove any npm-installed copy:
+
 ```bash
 docker exec toolhome rm -rf /data/market/node_modules/mcp-server-fetch /data/market/node_modules/.bin/mcp-server-fetch
 toolhome server delete <fetch-server-id>
@@ -70,11 +76,14 @@ toolhome market install fetch
 **Cause**: `mcp-server-fetch` (2026.7.10) still imports the pre-2.0 `McpError` name; uv resolves the latest `mcp==2.0` which renamed it to `MCPError`. This is an upstream compatibility break.
 
 **Fix**: Reinstall with the pinned dependency (the catalog already ships `uvWith: ['mcp<2']`):
+
 ```bash
 toolhome market uninstall fetch
 toolhome market install fetch
 ```
+
 If upgrading an existing broken install without the pin, fix the tool env directly:
+
 ```bash
 docker exec toolhome sh -c 'uv tool install mcp-server-fetch --with "mcp<2"'
 toolhome server restart fetch
@@ -93,6 +102,7 @@ toolhome server restart fetch
 **Cause**: OAuth access tokens expire (typically 1 hour). ToolHome refreshes lazily.
 
 **Fix**: The web console auto-refreshes expired OAuth credentials on page load. Manually:
+
 ```bash
 toolhome credential test <id>
 toolhome server refresh <server-id>

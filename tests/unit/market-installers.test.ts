@@ -9,7 +9,7 @@ import {
   installArtifact,
   type InstallerContext,
 } from '../../src/market/installers.js';
-import type { MarketEntry } from '../../src/market/catalog.js';
+import { marketCatalog, type MarketEntry } from '../../src/market/catalog.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +31,32 @@ function createContext(results: number[] = [0]): { context: InstallerContext; ca
 }
 
 describe('Market installer backends', () => {
+  it('builds the curated GitHub CLI on a fresh host when no image can be pulled', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-gh-fallback-'));
+    try {
+      const entry = marketCatalog.find((item) => item.id === 'gh-cli')!;
+      const artifact = installerForEntry(entry)!;
+      const { context, calls } = createContext([1, 1, 0]);
+      const runtime = await installArtifact(artifact, { ...context, marketDir: directory });
+      expect(calls).toEqual([
+        ['docker', 'image', 'inspect', 'toolhome/gh-cli:2.97.0'],
+        ['docker', 'pull', 'toolhome/gh-cli:2.97.0'],
+        ['docker', 'build', '-t', 'toolhome/gh-cli:2.97.0', join(directory, 'dockerfiles/gh-cli')],
+      ]);
+      expect(runtime).toEqual({
+        command: 'toolhome/gh-cli:2.97.0',
+        executionMode: 'docker',
+        entrypoint: 'gh',
+      });
+      const dockerfile = readFileSync(join(directory, 'dockerfiles/gh-cli/Dockerfile'), 'utf8');
+      expect(dockerfile).toContain('releases/download/v2.97.0/');
+      expect(dockerfile).toContain('${arch}');
+      expect(dockerfile).not.toContain('GH_HOST=');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('uses the Go installer backend without exposing Go as a product kind', async () => {
     const { context, calls } = createContext();
     const runtime = await installArtifact(

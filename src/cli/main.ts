@@ -406,7 +406,7 @@ endpoint
 
 const market = program
   .command('market')
-  .description('Browse and install MCP servers from the catalog');
+  .description('Browse and install MCP servers and hosted CLIs from the catalog');
 market
   .command('list')
   .description('List catalog entries with install status')
@@ -447,7 +447,7 @@ market
   );
 market
   .command('uninstall <id>')
-  .description('Remove an installed catalog entry (server + credential)')
+  .description('Remove an installed catalog entry (MCP server or hosted CLI, and credential)')
   .action(run((client, id: string) => client.request('POST', `/api/v1/market/${id}/uninstall`)));
 market
   .command('updates')

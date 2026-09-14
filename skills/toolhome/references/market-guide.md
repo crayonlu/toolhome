@@ -8,29 +8,54 @@ The Market is a curated catalog of MCP servers and hosted platform CLIs. One com
 
 ### Remote (OAuth)
 
-github (PAT), linear, slack, stripe, figma, sentry, supabase, notion, cloudflare, deepwiki
+linear, slack, stripe, figma, sentry, supabase, notion, cloudflare
 
 ### Remote (API Key)
 
-context7, exa, tavily, firecrawl, openrouter, apifox
+github (PAT), context7, exa, tavily, firecrawl, openrouter, apifox
+
+### Remote (no auth)
+
+deepwiki
 
 ### Home-stdio MCP servers
 
-resend, tailscale, playwright, postgres, sqlite, memory, sequential-thinking
+resend, tailscale, playwright, postgres, sqlite, memory, sequential-thinking, mosaic
 
 ### Uvx-backed MCP server
 
 fetch
 
+### Docker-backed MCP server
+
+markitdown
+
 ### Hosted platform CLIs
 
 azure-cli (`az`), gh-cli (`gh`), tailscale-cli, lark-cli, firecrawl-cli (`firecrawl`), wrangler-cli (`wrangler`), vercel-cli, aliyun-cli (`aliyun`)
+
+### Existing host binary
+
+host-shell (`/bin/sh`), explicit opt-in for trusted shell execution. This is the ninth CLI entry; there are 26 MCP entries.
+
+### Deployment coverage
+
+| Installer / source                | CLI execution | Curated CLI examples                        |
+| --------------------------------- | ------------- | ------------------------------------------- |
+| npm                               | host          | Lark, Firecrawl, Wrangler, Vercel           |
+| GitHub Release archive            | host          | Aliyun (linux-amd64 only)                   |
+| Docker image or inline Dockerfile | docker        | Azure, GitHub, Tailscale                    |
+| Existing host binary              | host          | host-shell                                  |
+| Go module                         | host          | Backend supported; no curated CLI entry yet |
+| uv / Python                       | host          | Backend supported; no curated CLI entry yet |
+
+There is no Cargo, apt, Homebrew, arbitrary installer-script, or remote-SSH installer backend. To use other binaries, provision them on the ToolHome host and register them with `toolhome cli add`. The catalog is curated, not an exhaustive list of platform CLIs. All five artifact installers are shared by MCP and CLI; the two execution modes are `host` and `docker`. Docker deployment includes npm, Go, uv, curl, tar, unzip, and the Docker client. Sibling containers additionally require the host socket and its group permissions.
 
 Hosted CLI entries are parallel to MCP entries. The catalog describes the platform command, pinned artifact, credential requirements, and allowed argv; it does not expose npm, Go, uv, or Docker as products.
 
 npm-backed CLI entries (`lark-cli`, `firecrawl-cli`, `wrangler-cli`, `vercel-cli`) install into the persistent market volume and run in host mode. Credentials are injected as environment variables (`FIRECRAWL_API_KEY`, `CLOUDFLARE_API_TOKEN`, `VERCEL_TOKEN`); `lark-cli` ships no token env var — run `lark-cli auth login --no-wait --json` through exec, complete the device flow in a browser, then finish with `lark-cli auth login --device-code <code>`. Its npm package downloads the platform binary on first execution, so the first command needs a generous exec timeout. `aliyun-cli` installs a pinned GitHub Release tarball (linux-amd64) and authenticates through `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, and `ALIBABA_CLOUD_REGION_ID`; bare probe commands (its `aliyun version` probe) resolve next to the installed binary.
 
-`gh-cli` installs without any credential and authenticates afterwards through the GitHub device flow. The GitHub CLI project ships no official container image, so CI builds `toolhome/gh-cli:2.97.0` from the release tarball and preloads it onto the server — installing needs no registry access. The login state persists in the `toolhome-gh-cli-state` named volume:
+`gh-cli` installs without any credential and authenticates afterwards through the GitHub device flow. CI preloads `toolhome/gh-cli:2.97.0` for the managed deployment. Fresh self-hosted instances build it from the pinned upstream release when the image is unavailable; this requires access to Alpine and GitHub and supports amd64/arm64. The managed CI image sets a deployment-specific `GH_HOST` relay; the catalog fallback uses GitHub directly. Match the login hostname to the installed image's configuration. Login state persists in the `toolhome-gh-cli-state` named volume:
 
 ```bash
 toolhome cli exec gh-cli --stdin $'\n' -- auth login --hostname github.com --git-protocol https --web
@@ -46,8 +71,8 @@ toolhome cli exec gh-cli -- auth status
 
 ```bash
 toolhome market list                                    # browse with install status
-toolhome market install resend --set RESEND_API_KEY=re_xxx
-toolhome market install context7 --set CONTEXT7_API_KEY=xxx
+toolhome market install resend                          # enter missing secret at browser URL
+toolhome market install context7                        # enter missing secret at browser URL
 toolhome market install deepwiki                        # no config needed
 toolhome market install fetch                           # uvx (Python), no config
 toolhome market uninstall resend

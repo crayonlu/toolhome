@@ -49,7 +49,7 @@ npm install -g toolhome
 toolhome auth login --url https://tool.cyncyn.xyz --control-key "$TOOLHOME_CONTROL_KEY"
 ```
 
-The CLI manages servers, credentials, OAuth, Market, and diagnostics from any terminal.
+The CLI manages MCP servers and hosted CLIs as equal planes, plus shared credentials, OAuth, Market, and diagnostics. It requires Node.js 24 or later. The npm package also includes this skill under `skills/toolhome`.
 
 ### 3. Install this skill (for AI agents)
 
@@ -66,12 +66,16 @@ toolhome status                         # overview
 toolhome doctor                         # health check
 toolhome server list                    # list servers
 toolhome server add ./server.json       # add a server
+toolhome cli list                      # list hosted CLIs
+toolhome cli add ./cli.json             # register a hosted CLI
+toolhome cli status gh-cli              # probe a hosted CLI
+toolhome cli exec gh-cli -- --version   # run remotely, stream output
 toolhome credential list                # list credentials
 toolhome credential authorize <name>    # OAuth authorization (opens browser, waits)
 toolhome access-key create laptop       # create an MCP Access Key for harnesses
 toolhome endpoint aggregate             # show the aggregate endpoint URL
 toolhome market list                    # browse the Market catalog
-toolhome market install resend --set RESEND_API_KEY=re_xxx  # install from Market
+toolhome market install resend         # supply the secret at the one-time browser URL
 toolhome calls list --limit 10                              # recent tool calls
 toolhome calls stats                                        # call statistics
 ```
@@ -99,6 +103,19 @@ toolhome calls stats                                        # call statistics
    ```
 4. Verify: `toolhome doctor`
 
+### Install and Run a Hosted CLI
+
+```bash
+toolhome market install gh-cli
+toolhome cli status gh-cli
+toolhome cli exec gh-cli -- --version
+toolhome cli exec gh-cli --stdin $'\n' -- auth login --hostname github.com --git-protocol https --web
+toolhome cli exec gh-cli -- auth status
+toolhome cli exec gh-cli -- repo view crayonlu/toolhome
+```
+
+Give the user the device code and authorization URL for browser confirmation. Run the platform CLI only on the ToolHome server; the client needs only `toolhome`. Put platform arguments after `--`. Registry commands take the record ID; `exec` and `status` take its slug. Use `toolhome cli get <id>` to inspect allowed commands before execution. `host` runs installed binaries and `docker` runs sibling containers with explicit state volumes. Read `references/market-guide.md` for supported products and deployment prerequisites, and `references/cli-reference.md` for registry, stdin, timeout, and streaming options.
+
 ### Authorize OAuth Upstream
 
 ```bash
@@ -121,9 +138,9 @@ See `references/oauth-guide.md` for per-provider compatibility.
 ### Install from Market
 
 ```bash
-toolhome market list                                    # browse 30 curated entries
-toolhome market install resend --set RESEND_API_KEY=re_xxx   # home-stdio (npm)
-toolhome market install context7 --set CONTEXT7_API_KEY=xxx  # remote (bearer)
+toolhome market list                                    # browse MCP and CLI entries
+toolhome market install resend                          # home-stdio (npm); browser secret
+toolhome market install context7                        # remote (bearer); browser secret
 toolhome market install deepwiki                        # remote (no auth)
 toolhome market install fetch                           # uvx (Python, no config)
 toolhome market install markitdown                       # Docker-backed MCP
@@ -131,16 +148,16 @@ toolhome market install gh-cli                             # Hosted GitHub CLI (
 toolhome market uninstall resend                        # remove
 ```
 
-Market installs are async with progress: the CLI shows installer steps, the web console shows a live log. Every curated entry is pinned to an exact artifact version (package, Go module, GitHub Release tag, or `package==x.y.z`); installs never drift with `latest`, and each install writes a persistent record (source, version, recipe revision). If an install needs a secret, the CLI/console prints a one-time action URL instead of accepting the secret on the command line.
+Market installs are async with progress: the CLI shows installer steps, the web console shows a live log. Packaged artifacts have version pins and installs write a persistent record (source, version, recipe revision). Remote services and the existing `/bin/sh` host-shell entry have no downloadable version pin. If required secrets are omitted, the CLI prints a one-time browser action URL. Use that flow for secrets; `--set` also accepts values, so reserve it for non-secret configuration.
 
 **Docker entries** (e.g. `markitdown`) run the image as a sibling container via `docker run --rm -i <image>`: the install pulls the image, or builds it from the entry's inline Dockerfile when not pullable. The gateway container must mount the host docker socket and its runtime user must be in the host docker group (compose `group_add`, default GID 999, override with `DOCKER_GROUP_ID`). Only needed when a package cannot run inside the Alpine gateway image (e.g. `markitdown` — its `onnxruntime` dependency ships no musl wheels).
 
 ### Give an AI Agent Safe Management Access
 
-Create an **agent-scoped control key** (web console → Settings → Control Keys, or CLI):
+Create an **agent-scoped control key** (web console → Settings → Control Keys, or API):
 
 ```bash
-toolhome control-key create agent-key --scope agent
+echo '{"name":"agent-key","scope":"agent"}' | toolhome api POST /api/v1/control-keys --body -
 ```
 
 Agent keys can read state and run safe operations (enable/disable/refresh/restart, market install, tool visibility) but are denied credentials, control/access keys, secret exports, and server deletion (HTTP 403). Existing keys keep full admin scope.
@@ -191,7 +208,8 @@ Aggregate tool names are `{server_slug}.{tool_name}`. Per-server preserves origi
 toolhome doctor              # check all servers
 toolhome server status <id>  # detailed runtime state + last error
 toolhome server logs <id>    # recent log entries
-toolhome events              # recent events with level filter
+toolhome cli status <slug>  # hosted CLI probe
+toolhome events --limit 100 # recent events, including cli.exec
 ```
 
 ## Configuration

@@ -9,6 +9,7 @@ ToolHome supports two OAuth client registration methods for upstream MCP servers
 2. **Dynamic Client Registration (DCR)**: ToolHome POSTs client metadata to the upstream's `registration_endpoint`. The server returns a client ID.
 
 The method is controlled by `settings.urlClientId` per server:
+
 - `true` (default) = URL-based
 - `false` = DCR
 - `undefined` = inherit global `TOOLHOME_OAUTH_URL_CLIENT_ID` (default `true`)
@@ -16,26 +17,27 @@ The method is controlled by `settings.urlClientId` per server:
 ## Per-Server Configuration
 
 Set via CLI:
+
 ```bash
-toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":false}}'
+echo '{"settings":{"urlClientId":false}}' | toolhome server update <id> -
 ```
 
 Or via the web console: Server edit form -> "OAuth client registration" dropdown.
 
 ## Provider Compatibility
 
-| Provider | Recommended Method | Notes |
-|---|---|---|
-| **Cloudflare** | DCR (`urlClientId: false`) | URL-based fails: 503 fetching from proxied origin |
-| **Notion** | DCR (`urlClientId: false`) | URL-based fails: "Invalid client" |
-| **Linear** | DCR (`urlClientId: false`) | URL-based fails: "Invalid client" |
-| **GitHub** | PAT (not OAuth) | OAuth server doesn't support DCR; metadata discovery requires auth. Use a Personal Access Token as a bearer credential |
-| **Slack** | URL-based (default) | No DCR endpoint; URL-based should work |
-| **Stripe** | URL-based (default) | No DCR endpoint |
-| **Figma** | URL-based (default) | No DCR endpoint |
-| **Sentry** | URL-based (default) | No DCR endpoint |
-| **Supabase** | URL-based (default) | No DCR endpoint |
-| **Vercel** | Not compatible | Only approves localhost callbacks; incompatible with remote gateway |
+| Provider       | Recommended Method         | Notes                                                                                                                  |
+| -------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Cloudflare** | DCR (`urlClientId: false`) | URL-based fails: 503 fetching from proxied origin                                                                      |
+| **Notion**     | DCR (`urlClientId: false`) | URL-based fails: "Invalid client"                                                                                      |
+| **Linear**     | DCR (`urlClientId: false`) | URL-based fails: "Invalid client"                                                                                      |
+| **GitHub**     | PAT (not OAuth)            | OAuth server doesn't support DCR; metadata discovery requires auth. Use a Personal Access Token as a bearer credential |
+| **Slack**      | URL-based (default)        | No DCR endpoint; URL-based should work                                                                                 |
+| **Stripe**     | URL-based (default)        | No DCR endpoint                                                                                                        |
+| **Figma**      | URL-based (default)        | No DCR endpoint                                                                                                        |
+| **Sentry**     | URL-based (default)        | No DCR endpoint                                                                                                        |
+| **Supabase**   | URL-based (default)        | No DCR endpoint                                                                                                        |
+| **Vercel**     | Not compatible             | Only approves localhost callbacks; incompatible with remote gateway                                                    |
 
 ## Authorization Flow
 
@@ -62,15 +64,17 @@ Clears the stored client information and re-registers. Use when switching regist
 ### "Incompatible auth server: does not support dynamic client registration"
 
 The upstream doesn't have a `registration_endpoint`. Switch to URL-based:
+
 ```bash
-toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":true}}'
+echo '{"settings":{"urlClientId":true}}' | toolhome server update <id> -
 ```
 
 ### "Invalid client. The clientId provided does not match."
 
 URL-based metadata was rejected by the upstream. Switch to DCR:
+
 ```bash
-toolhome api PATCH /api/v1/servers/<id> -d '{"settings":{"urlClientId":false}}'
+echo '{"settings":{"urlClientId":false}}' | toolhome server update <id> -
 ```
 
 ### "invalid_redirect_uri"
@@ -84,6 +88,7 @@ If the ToolHome domain is behind a CDN/proxy (e.g., Cloudflare), the upstream's 
 ### Credential shows "Expired"
 
 OAuth access tokens expire (typically 1 hour). ToolHome refreshes them lazily on connection. The web console auto-refreshes expired OAuth credentials on page load. Manual refresh:
+
 ```bash
 toolhome credential test <id>
 # or

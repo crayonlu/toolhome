@@ -531,6 +531,17 @@ ENTRYPOINT ["markitdown-mcp"]`,
       // from the deployment network).
       image: 'toolhome/gh-cli:2.97.0',
       entrypoint: 'gh',
+      // Fresh self-hosted instances can build the same pinned CLI without
+      // depending on the deployment-specific image preload or GitHub relay.
+      dockerfile: `FROM alpine:3.20
+RUN apk add --no-cache ca-certificates curl git \\
+ && case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) exit 1 ;; esac \\
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_linux_\${arch}.tar.gz" -o /tmp/gh.tgz \\
+ && tar -xzf /tmp/gh.tgz -C /tmp \\
+ && install -m 0755 "/tmp/gh_2.97.0_linux_\${arch}/bin/gh" /usr/local/bin/gh \\
+ && rm -rf /tmp/gh.tgz "/tmp/gh_2.97.0_linux_\${arch}"
+ENTRYPOINT ["gh"]
+`,
     },
     image: 'toolhome/gh-cli:2.97.0',
     entrypoint: 'gh',

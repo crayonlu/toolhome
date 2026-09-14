@@ -5,7 +5,7 @@
 ```bash
 export TOOLHOME_URL="https://tool.cyncyn.xyz"
 export TOOLHOME_CONTROL_KEY="tch_ctl_<your-control-key>"
-toolhome auth login
+toolhome auth login --url "$TOOLHOME_URL" --control-key "$TOOLHOME_CONTROL_KEY"
 toolhome auth logout
 ```
 
@@ -16,7 +16,7 @@ Credentials saved to `~/.config/toolhome/config.json` (0600). Supports env vars 
 ```bash
 toolhome server list                          # list all servers
 toolhome server get <id>                      # get a server by id
-toolhome server add <file|-                   # add from JSON file or stdin
+toolhome server add <file|->                  # add from JSON file or stdin
 toolhome server update <id> <file|->          # update fields (partial)
 toolhome server delete <id>                   # delete a server
 toolhome server enable <id>                   # enable
@@ -113,8 +113,9 @@ toolhome control-key revoke <id>
 
 ```bash
 toolhome market list                          # browse catalog with install status
-toolhome market install <id> --set KEY=value  # install (repeatable --set)
-toolhome market uninstall <id>                # remove server + credential
+toolhome market install <id>                  # install MCP or CLI; browser URL for missing secrets
+toolhome market install <id> --set KEY=value  # non-secret config (repeatable --set)
+toolhome market uninstall <id>                # remove MCP server or CLI and credential
 toolhome market updates                       # installed vs catalog pin (+ upstream latest)
 toolhome market update <id>                   # update to the catalog pin (keeps credential, restarts)
 ```
@@ -149,14 +150,14 @@ toolhome endpoint server <id>                 # per-server /mcp/{slug} URL
 toolhome status                               # overview (servers, credentials, keys, endpoints)
 toolhome doctor                               # health check per server
 toolhome events                               # recent events
-toolhome events --level error                 # filter by level
+toolhome events --limit 100                   # includes hosted cli.exec audit events
 ```
 
 ## api (raw)
 
 ```bash
 toolhome api GET /api/v1/openapi.json
-toolhome api POST /api/v1/servers -d '{"slug":"test",...}'
+toolhome api POST /api/v1/servers --body ./server.json
 ```
 
 ## cli (hosted CLI plane)
@@ -167,17 +168,28 @@ audited in the events stream. The web console has a parallel **CLIs** page
 (register/edit/delete, enable toggle, and a Run sheet that streams exec output).
 
 ```bash
+toolhome cli list
+toolhome cli get <id>
+toolhome cli add ./cli.json
+toolhome cli update <id> ./cli-patch.json
+toolhome cli enable <id>
+toolhome cli disable <id>
+toolhome cli delete <id>
+toolhome cli status <slug>
+toolhome cli exec <slug> -- --version
+toolhome cli exec <slug> --timeout 60000 --max-output-bytes 65536 -- <args...>
+toolhome cli exec <slug> --stdin-file ./input.txt -- <args...>
+toolhome cli exec <slug> --stdin-file - -- <args...>
+```
+
+`--stdin <text>` and `--stdin-file <path|->` are mutually exclusive. Put platform arguments after `--`; timeout is in milliseconds and cannot exceed the record's limit. Human output streams stdout/stderr; `--output json` emits NDJSON frames and an outcome. A failed or timed-out remote execution exits locally with code 1. Ctrl-C cancels the stream.
+
+```bash
 # registry (Control API, admin key)
 toolhome api GET  /api/v1/clis                       # list registered CLIs
-toolhome api POST /api/v1/clis -d '{ "slug":"az", "name":"Azure CLI", "command":"az",
-  "executionMode":"host", "allowList":{"allow":[["account","show"],["vm","*"]],"deny":[["login"]]},
-  "probe":{"command":"az","args":["version"]}, "credentialId":"<credential-uuid>",
-  "credentialBindings":{"AZURE_CLIENT_ID":"env:CLIENT_ID"}, "platform":"azure",
-  "authStrategy":"azure-service-principal",
-  "containerVolumes":[{"source":"toolhome-azure-cli-state","target":"/root/.azure","readOnly":false}],
-  "timeoutMs":60000, "maxOutputBytes":65536 }'       # register (201)
+toolhome api POST /api/v1/clis --body ./cli.json      # register (201); prefer Market for Azure bootstrap
 toolhome api GET  /api/v1/clis/<id>                  # fetch
-toolhome api PATCH /api/v1/clis/<id> -d '{"enabled":false}'   # update (partial)
+echo '{"enabled":false}' | toolhome api PATCH /api/v1/clis/<id> --body -
 toolhome api DELETE /api/v1/clis/<id>                # delete
 ```
 
@@ -185,13 +197,13 @@ Exec and status live on the data plane (`POST /cli/{slug}/exec`, `GET /cli/{slug
 
 ```bash
 # exec: argv array only — never a shell string; body must be JSON
-toolhome api POST /cli/az/exec -d '{ "argv":["account","show","-o","table"], "timeoutMs":30000 }'
+toolhome cli exec azure-cli --timeout 30000 -- account show -o table
 # → 200 NDJSON stream: {"type":"stdout","data":...} {"type":"stderr","data":...}
 #   {"type":"exit","code":0,"durationMs":4211,"result":"ok"}
 # timeout → {"type":"exit","code":null,"durationMs":...,"result":"timeout"}
 # truncated output → exit frame carries "truncated":true
 
-toolhome api GET /cli/az/status
+toolhome api GET /cli/azure-cli/status
 # → { "installed":true, "version":"azure-cli 2.x", "loggedIn":true, "lastCheckedAt":"..." }
 ```
 
@@ -225,6 +237,6 @@ Semantics:
 
 ```
 --url <url>           control API URL (or TOOLHOME_URL env)
---control-key <key>   control key (or TOOLHOME_CONTROL_KEY env)
+--key <key>           control key (or TOOLHOME_CONTROL_KEY env)
 --output <human|json> output format (default human)
 ```
