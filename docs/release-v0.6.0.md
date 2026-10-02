@@ -10,11 +10,17 @@ ToolHome can now hold MCP servers that must run on the machine using them, not o
 
 ## Upgrade
 
-Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.0`.
+Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.1`.
+
+Use 0.6.1 or later from npm. The 0.6.0 tarball was published from a partial tree and still carries the CLI option-parsing bug described below; 0.6.1 is the first complete build of this release.
 
 Server image: `ghcr.io/crayonlu/toolhome:v0.6.0`. Existing `servers` rows migrate in place: the table is rebuilt to admit the new kind and carry `node_id`, with foreign keys disabled during the rebuild so runtime state, capability snapshots and tool projections survive.
 
 No environment or key changes. The runtime endpoint requires an admin control key; agent-scoped keys are rejected with 403.
+
+### Fixed
+
+- `toolhome events`, `calls list`, `calls stats`, `api`, `config export` and `config import-harness` failed with "command.opts is not a function". Commander passes the parsed options object before the Command, so the parameter those actions treated as the Command was the options object. This affected every release before 0.6.1.
 
 ## Validation
 
