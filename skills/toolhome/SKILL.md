@@ -75,6 +75,7 @@ toolhome cli exec gh-cli -- --version   # run remotely, stream output
 toolhome credential list                # list credentials
 toolhome credential authorize <name>    # OAuth authorization (opens browser, waits)
 toolhome access-key create laptop       # create an MCP Access Key for harnesses
+toolhome mcp stdio                      # serve every server placed on this machine
 toolhome mcp launch <slug>              # run a server placed on this machine (stdio)
 toolhome endpoint aggregate             # show the aggregate endpoint URL
 toolhome market list                    # browse the Market catalog
@@ -233,6 +234,14 @@ Some capabilities only exist on the machine running the agent: a local Chrome, a
    ```
 
 3. Verify with `toolhome mcp launch chrome-devtools`: it must speak MCP on stdio and write nothing else to stdout.
+
+**One entry for every server on the machine**: `toolhome mcp stdio` fronts all of them at once, so the harness config shrinks to a single command and a server added later needs no config edit at all. Tool names are namespaced `slug.tool`; children spawn lazily on first use and are disconnected again when the client goes away.
+
+```json
+{ "command": "toolhome", "args": ["mcp", "stdio"] }
+```
+
+The machine's node label comes from `nodeId` in the local config (`~/.config/toolhome/config.json`), the `--node <id>` flag, or the hostname. `toolhome mcp launch <slug>` remains the per-server form when a client needs original names.
 
 How it works: the launcher reads the server's transport and its credential values from `GET /api/v1/servers/{id}/runtime` (admin control key, audited, values never logged), merges them into the environment, then spawns the real process with this process's stdio so the client talks to the child directly. `TOOLHOME_*` variables are withheld from the child, so a server cannot read the control key that launched it.
 

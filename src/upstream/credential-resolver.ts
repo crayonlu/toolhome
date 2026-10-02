@@ -11,7 +11,16 @@ export interface ResolvedCredential {
   authProvider?: AuthProvider | OAuthClientProvider;
 }
 
-export class CredentialResolver {
+/**
+ * Where a server's credential values come from. The ToolHome host resolves them
+ * from its encrypted store; a node-side runtime resolves them from what the
+ * control API materialized for the servers assigned to that machine.
+ */
+export interface CredentialSource {
+  resolve(server: ServerRecord): ResolvedCredential;
+}
+
+export class CredentialResolver implements CredentialSource {
   readonly #store: Store;
   readonly #publicUrl: URL;
   readonly #urlClientId: boolean;

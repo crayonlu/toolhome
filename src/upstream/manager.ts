@@ -19,7 +19,7 @@ import {
   type UpstreamEvent,
   type UpstreamRequest,
 } from './adapter.js';
-import type { CredentialResolver } from './credential-resolver.js';
+import type { CredentialSource } from './credential-resolver.js';
 
 type UpstreamEventListener = (event: UpstreamEvent) => void;
 
@@ -34,14 +34,14 @@ export class UpstreamManager {
   readonly #listeners = new Set<UpstreamEventListener>();
   readonly #recovering = new Map<string, Promise<void>>();
   readonly #store: Store;
-  readonly #credentials: CredentialResolver;
+  readonly #credentials: CredentialSource;
   readonly #logger: Logger;
   readonly #canHost: (server: ServerRecord) => boolean;
   #closed = false;
 
   constructor(
     store: Store,
-    credentials: CredentialResolver,
+    credentials: CredentialSource,
     logger: Logger,
     options: { canHost?: (server: ServerRecord) => boolean } = {},
   ) {

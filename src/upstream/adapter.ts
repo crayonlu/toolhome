@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { AppError, errorMessage, toError } from '../domain/errors.js';
 import type { CapabilitySnapshot, ServerRecord } from '../domain/models.js';
 import type { Logger } from '../observability/logger.js';
-import type { CredentialResolver } from './credential-resolver.js';
+import type { CredentialSource } from './credential-resolver.js';
 import {
   ExtensionTransportBridge,
   extensionFetch,
@@ -138,7 +138,7 @@ export class UpstreamAdapter {
   readonly #resourceSubscriptions = new Map<string, ResourceSubscription>();
   readonly #subscriptionCreates = new Map<string, Promise<void>>();
   readonly #legacyRounds = new Map<string, LegacyRound>();
-  readonly #credentials: CredentialResolver;
+  readonly #credentials: CredentialSource;
   readonly #logger: Logger;
   readonly #events: EventSink;
   #closed = false;
@@ -147,7 +147,7 @@ export class UpstreamAdapter {
 
   constructor(
     server: ServerRecord,
-    credentials: CredentialResolver,
+    credentials: CredentialSource,
     logger: Logger,
     events: EventSink,
   ) {
@@ -442,20 +442,41 @@ export class UpstreamAdapter {
     const slot = await this.#acquire(discoveryCapabilities);
     try {
       const capabilities = slot.client.getServerCapabilities() ?? {};
+      // Some servers declare a capability and then answer its list method with
+      // "Method not found". Those are optional surfaces, so an empty result beats
+      // failing the whole snapshot; `tools/list` stays strict because a server
+      // without tools has nothing to offer.
+      const optional = async <T>(call: Promise<T>, empty: T): Promise<T> => {
+        try {
+          return await call;
+        } catch (error) {
+          if ((error as { code?: number }).code === -32601) return empty;
+          throw error;
+        }
+      };
       const [toolsResult, resourcesResult, resourceTemplatesResult, promptsResult] =
         await Promise.all([
           capabilities.tools
             ? slot.client.listTools(undefined, { cacheMode: 'refresh' })
             : Promise.resolve({ tools: [] }),
-          capabilities.resources
-            ? slot.client.listResources(undefined, { cacheMode: 'refresh' })
-            : Promise.resolve({ resources: [] }),
-          capabilities.resources
-            ? slot.client.listResourceTemplates(undefined, { cacheMode: 'refresh' })
-            : Promise.resolve({ resourceTemplates: [] }),
-          capabilities.prompts
-            ? slot.client.listPrompts(undefined, { cacheMode: 'refresh' })
-            : Promise.resolve({ prompts: [] }),
+          optional(
+            capabilities.resources
+              ? slot.client.listResources(undefined, { cacheMode: 'refresh' })
+              : Promise.resolve({ resources: [] }),
+            { resources: [] },
+          ),
+          optional(
+            capabilities.resources
+              ? slot.client.listResourceTemplates(undefined, { cacheMode: 'refresh' })
+              : Promise.resolve({ resourceTemplates: [] }),
+            { resourceTemplates: [] },
+          ),
+          optional(
+            capabilities.prompts
+              ? slot.client.listPrompts(undefined, { cacheMode: 'refresh' })
+              : Promise.resolve({ prompts: [] }),
+            { prompts: [] },
+          ),
         ]);
       const protocolEra = slot.client.getProtocolEra();
       if (!protocolEra) throw new Error('Upstream protocol era is unavailable');

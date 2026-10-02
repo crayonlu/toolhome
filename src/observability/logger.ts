@@ -9,7 +9,21 @@ export interface Logger {
   error(message: string, detail?: Record<string, unknown>): void;
 }
 
-export function createLogger(minimum: LogLevel): Logger {
+export function createLogger(
+  minimum: LogLevel,
+  /**
+   * Where lines go. The default sends info/debug to stdout and warn/error to
+   * stderr, which suits HTTP servers. Anything that speaks a line-based protocol
+   * on stdout — the local stdio gateway — must pass a sink that always writes to
+   * stderr, or log lines would corrupt the protocol.
+   */
+  sink?: (line: string, level: LogLevel) => void,
+): Logger {
+  const write =
+    sink ??
+    ((line: string, level: LogLevel) => {
+      (level === 'error' || level === 'warn' ? process.stderr : process.stdout).write(`${line}\n`);
+    });
   const emit = (level: LogLevel, message: string, detail?: Record<string, unknown>): void => {
     if (severity[level] < severity[minimum]) return;
     const entry = {
@@ -18,9 +32,7 @@ export function createLogger(minimum: LogLevel): Logger {
       message,
       ...(detail === undefined ? {} : { detail }),
     };
-    const line = JSON.stringify(entry);
-    if (level === 'error' || level === 'warn') process.stderr.write(`${line}\n`);
-    else process.stdout.write(`${line}\n`);
+    write(JSON.stringify(entry), level);
   };
 
   return {

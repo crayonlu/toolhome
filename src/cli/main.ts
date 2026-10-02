@@ -2,13 +2,15 @@
 import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { ControlClient } from '../control/client.js';
 import { stdioTransportSchema } from '../domain/models.js';
 import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
+import { startLocalGateway } from '../node/local-gateway.js';
 
 function packageVersion(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +45,8 @@ const localConfigSchema = z.object({
     }
   }),
   controlKey: z.string().min(1),
+  /** Node label whose servers this machine launches with `toolhome mcp stdio`. */
+  nodeId: z.string().min(1).max(64).optional(),
 });
 
 interface GlobalOptions {
@@ -247,6 +251,45 @@ mcp
         ...(runtime.transport.cwd === undefined ? {} : { cwd: runtime.transport.cwd }),
         env: launchEnvironment(runtime.transport.env, runtime.credentialEnv),
       });
+      return undefined;
+    }),
+  );
+mcp
+  .command('stdio')
+  .description('Serve every node-placed server for this machine over one stdio connection')
+  .option(
+    '--node <id>',
+    'node label whose servers this machine runs (default: nodeId in the local config, else the hostname)',
+  )
+  .action(
+    run(async (client, options: { node?: string }) => {
+      const nodeId = options.node ?? loadLocalConfig()?.nodeId ?? (hostname().split('.')[0] || '');
+      if (nodeId === '') {
+        throw new Error('Could not determine a node label; pass --node <id>');
+      }
+      const gateway = await startLocalGateway({
+        client,
+        nodeId,
+        storePath: resolve(dirname(configPath()), 'node.sqlite'),
+      });
+      process.stderr.write(
+        `toolhome: serving node "${nodeId}" over stdio — end the stream to stop\n`,
+      );
+      // Children are killed when the client closes its side, and on signals, so a
+      // session ending never orphans the servers it launched.
+      const handle = serveStdio(() => gateway.serverFactory(), { legacy: 'serve' });
+      let stopped = false;
+      const stop = async (): Promise<void> => {
+        if (stopped) return;
+        stopped = true;
+        await handle.close().catch(() => undefined);
+        await gateway.close().catch(() => undefined);
+        process.exit(0);
+      };
+      process.stdin.on('end', () => void stop());
+      process.stdin.on('close', () => void stop());
+      process.once('SIGINT', () => void stop());
+      process.once('SIGTERM', () => void stop());
       return undefined;
     }),
   );
