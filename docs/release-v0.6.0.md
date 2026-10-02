@@ -3,6 +3,7 @@
 ToolHome can now hold MCP servers that must run on the machine using them, not on the ToolHome host. A local Chrome, a local Ghidra bridge or a local Python tool is defined once in ToolHome and reaches every MCP client through one command line.
 
 - New `node` placement: a server runs as a stdio process on a client machine, identified by a `nodeId` label (`remote` and `home` placements are unchanged).
+- `toolhome mcp stdio` fronts every server placed on the machine over one stdio connection: tools are namespaced `slug.tool`, children spawn lazily per call, capability discovery happens once per server, and children are disconnected when the client goes away. `toolhome mcp launch <slug>` remains the per-server form with original names.
 - `toolhome mcp launch <slug>` spawns such a server with its stored credential and hands over this process's stdio, so the client talks to the real process with its original tool names and extension semantics. `TOOLHOME_*` variables are withheld from the child.
 - New admin-only read endpoint `GET /api/v1/servers/{id}/runtime` returns a stdio server's transport plus its credential values projected into environment variables. Every read is audited with the variable names and never the values.
 - Restart now applies to every stdio server rather than home-hosted ones only, so a process that dies on a client machine is restarted.
@@ -10,9 +11,9 @@ ToolHome can now hold MCP servers that must run on the machine using them, not o
 
 ## Upgrade
 
-Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.1`.
+Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.2`.
 
-Use 0.6.1 or later from npm. The 0.6.0 tarball was published from a partial tree and still carries the CLI option-parsing bug described below; 0.6.1 is the first complete build of this release.
+Use 0.6.2 or later from npm: the 0.6.0 tarball was published from a partial tree (no CLI fixes), and 0.6.1 was published before `toolhome mcp stdio` and the child-process reap landed.
 
 Server image: `ghcr.io/crayonlu/toolhome:v0.6.0`. Existing `servers` rows migrate in place: the table is rebuilt to admit the new kind and carry `node_id`, with foreign keys disabled during the rebuild so runtime state, capability snapshots and tool projections survive.
 
