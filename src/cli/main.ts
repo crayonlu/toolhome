@@ -282,8 +282,9 @@ mcp
       const stop = async (): Promise<void> => {
         if (stopped) return;
         stopped = true;
-        await handle.close().catch(() => undefined);
+        // Children first: they leak if the process exits before they are reaped.
         await gateway.close().catch(() => undefined);
+        await handle.close().catch(() => undefined);
         process.exit(0);
       };
       process.stdin.on('end', () => void stop());

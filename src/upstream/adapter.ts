@@ -547,8 +547,52 @@ export class UpstreamAdapter {
   }
 
   async close(): Promise<void> {
+    // stdio children do not die when their transport closes: `npm exec` and `uvx`
+    // wrappers in particular drop their grandchildren when they are terminated.
+    // Remember the child pids and reap them after the teardown, escalating to
+    // SIGKILL so a closed server never leaves processes behind.
+    const pids = this.#stdioChildPids();
     this.#closed = true;
     await this.restart();
+    await this.#reapProcesses(pids);
+  }
+
+  #stdioChildPids(): number[] {
+    return this.#slots
+      .map((slot) => (slot.transport instanceof StdioClientTransport ? slot.transport.pid : null))
+      .filter((pid): pid is number => typeof pid === 'number');
+  }
+
+  async #reapProcesses(pids: number[]): Promise<void> {
+    if (pids.length === 0) return;
+    const alive = (): number[] =>
+      pids.filter((pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    for (const pid of alive()) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // already gone
+      }
+    }
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      if (alive().length === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    for (const pid of alive()) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
   }
 
   async #acquire(capabilities: ClientCapabilities): Promise<ConnectionSlot> {
