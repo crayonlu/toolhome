@@ -45,10 +45,10 @@ npx skills add crayonlu/toolhome -g -y
 
 ToolHome 有两个一等平面：
 
-- **MCP**：Remote-native 使用 Streamable HTTP；Home-hosted 使用 ToolHome 宿主机上的 stdio。
+- **MCP**：Remote-native 使用 Streamable HTTP；Home-hosted 使用 ToolHome 宿主机上的 stdio；Node-hosted 使用客户端机器上的 stdio，用于只有本机才有的能力，例如本机 Chrome 或本机 Ghidra bridge。`toolhome mcp launch <slug>` 负责运行，任何 MCP 客户端用一行命令即可接入。
 - **Hosted CLI**：CLI 必须代表外部平台或 SaaS 控制面，例如 Azure `az`、GitHub `gh`、Tailscale。它支持完整 argv、stdin、timeout、输出限制、allow/deny 规则和 NDJSON 输出。`npm`、`go`、`cargo`、`uv`、`pipx`、`docker`、`cursor` 等安装器或开发工具只是实现细节，不是 Hosted CLI 产品。
 
-必须运行在 Harness 所在本机、依赖该机器浏览器或桌面状态的 MCP/CLI 仍属于 Harness 本地配置。首版明确不包含多租户、Profile、Workspace 或 Project 管理。
+服务器放置位置记录在 ToolHome 而不是各 Harness 配置里，因此一台机器的本地服务器只需定义一次，所有客户端共用。Node-hosted 服务器仍以用户自己的权限在该机器上运行，并且在 ToolHome 服务端不可达时不可用。首版明确不包含多租户、Profile、Workspace 或 Project 管理。
 
 ## 协议能力
 

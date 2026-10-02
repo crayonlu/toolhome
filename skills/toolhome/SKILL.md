@@ -4,9 +4,10 @@ description: >
   Deploy and manage a self-hosted ToolHome instance: an MCP and Hosted CLI
   control plane that aggregates upstream capabilities and platform CLIs. Use
   when the user wants to set up ToolHome, manage MCP servers or hosted CLIs,
-  reuse encrypted credentials, authorize OAuth upstreams, install from the
-  Market catalog, configure harnesses (Claude Code, Cursor, Codex, Grok), or
-  troubleshoot ToolHome. Covers CLI, web console, Docker deployment, and CI/CD.
+  place MCP servers on a client machine, reuse encrypted credentials, authorize
+  OAuth upstreams, install from the Market catalog, configure harnesses (Claude
+  Code, Cursor, Codex, Grok), or troubleshoot ToolHome. Covers CLI, web console,
+  Docker deployment, and CI/CD.
 ---
 
 # ToolHome
@@ -17,6 +18,7 @@ ToolHome is a single-user, self-hosted control plane for MCP servers and Hosted 
 
 - User wants to deploy or manage the MCP or Hosted CLI plane
 - User wants to aggregate multiple MCP servers behind one URL
+- User needs an MCP server that must run on the machine using it (a local Chrome, a local Ghidra bridge, a local Python tool) instead of on the ToolHome host
 - User wants to run platform CLIs such as Azure `az`, GitHub `gh`, Tailscale, Cloudflare `wrangler`, Vercel, Lark `lark-cli`, Firecrawl, or Aliyun `aliyun` remotely
 - User needs to authorize OAuth for MCP upstreams or reuse access tokens in a CLI
 - User wants to install MCP servers or hosted CLIs from the Market catalog
@@ -73,6 +75,7 @@ toolhome cli exec gh-cli -- --version   # run remotely, stream output
 toolhome credential list                # list credentials
 toolhome credential authorize <name>    # OAuth authorization (opens browser, waits)
 toolhome access-key create laptop       # create an MCP Access Key for harnesses
+toolhome mcp launch <slug>              # run a server placed on this machine (stdio)
 toolhome endpoint aggregate             # show the aggregate endpoint URL
 toolhome market list                    # browse the Market catalog
 toolhome market install resend         # supply the secret at the one-time browser URL
@@ -201,6 +204,39 @@ Or per-server (independent endpoint, original tool names):
 ```
 
 Aggregate tool names are `{server_slug}.{tool_name}`. Per-server preserves original names.
+
+### Run a Server on a Client Machine
+
+Some capabilities only exist on the machine running the agent: a local Chrome, a local Ghidra bridge, a local Python tool. Place those servers on a **node** (a label for the machine) and let the CLI launch them locally.
+
+1. Register the server with `kind: "node"` and a `nodeId` label:
+
+   ```bash
+   echo '{"slug":"chrome-devtools","name":"Local Chrome","kind":"node","nodeId":"crayons-air","transport":{"type":"stdio","command":"npx","args":["chrome-devtools-mcp@1.6.0"],"env":{}},"enabled":true}' | toolhome server add -
+   ```
+
+   `nodeId` is a label such as `laptop`, not a credential. It records which machines should run the server, and the console groups servers by it. A `node` server requires one; other placements reject one.
+
+2. Point the harness at the launcher. Any MCP client with stdio support can use this, and tool names stay exactly as the server defines them:
+
+   ```json
+   { "command": "toolhome", "args": ["mcp", "launch", "chrome-devtools"] }
+   ```
+
+   In Codex or Grok TOML:
+
+   ```toml
+   [mcp_servers.chrome-devtools]
+   command = "/absolute/path/to/toolhome"
+   args = ["mcp", "launch", "chrome-devtools"]
+   enabled = true
+   ```
+
+3. Verify with `toolhome mcp launch chrome-devtools`: it must speak MCP on stdio and write nothing else to stdout.
+
+How it works: the launcher reads the server's transport and its credential values from `GET /api/v1/servers/{id}/runtime` (admin control key, audited, values never logged), merges them into the environment, then spawns the real process with this process's stdio so the client talks to the child directly. `TOOLHOME_*` variables are withheld from the child, so a server cannot read the control key that launched it.
+
+Deployment note: because the launcher resolves its config through ToolHome, a client-machine server is unavailable while the ToolHome server or the network path to it is down. Placement also does not create a private channel — a `node` server still runs with the user's own privileges on that machine.
 
 ### Diagnose Issues
 

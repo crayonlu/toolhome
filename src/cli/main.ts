@@ -394,8 +394,8 @@ config
   .command('export [file]')
   .option('--include-secrets', 'include plaintext credential secrets for a restorable backup')
   .action(
-    run(async (client, file: string | undefined, command: Command) => {
-      const includeSecrets = command.opts<{ includeSecrets?: boolean }>().includeSecrets ?? false;
+    run(async (client, file: string | undefined, options: { includeSecrets?: boolean }) => {
+      const includeSecrets = options.includeSecrets ?? false;
       if (includeSecrets && !file) {
         throw new Error('--include-secrets requires a destination file');
       }
@@ -425,14 +425,13 @@ config
   .option('--preview', 'show what would be imported without writing anything')
   .option('--upsert', 'update existing servers (transport/env) instead of reporting conflicts')
   .action(
-    run((client, file: string, command: Command) => {
-      const options = command.opts<{ preview?: boolean; upsert?: boolean }>();
-      return client.request('POST', '/api/v1/config/import-harness', {
+    run((client, file: string, options: { preview?: boolean; upsert?: boolean }) =>
+      client.request('POST', '/api/v1/config/import-harness', {
         config: readJson(file),
         preview: options.preview ?? false,
         ...(options.upsert ? { mode: 'upsert' } : {}),
-      });
-    }),
+      }),
+    ),
   );
 
 const endpoint = program.command('endpoint').description('Print standard MCP endpoints');
@@ -525,8 +524,8 @@ program
   .command('events')
   .option('--limit <count>', 'maximum records', '100')
   .action(
-    run((client, command: Command) =>
-      client.request('GET', `/api/v1/events?limit=${encodeURIComponent(command.opts().limit)}`),
+    run((client, options: { limit: string }) =>
+      client.request('GET', `/api/v1/events?limit=${encodeURIComponent(options.limit)}`),
     ),
   );
 
@@ -540,9 +539,8 @@ calls
   .option('--endpoint <type>', 'filter by endpoint (aggregate|individual)')
   .option('--status <status>', 'filter by status')
   .action(
-    run((client, command: Command) => {
+    run((client, options: Record<string, string | undefined>) => {
       const query = new URLSearchParams();
-      const options = command.opts();
       query.set('limit', String(options.limit));
       if (options.server) query.set('server_id', options.server);
       if (options.tool) query.set('tool', options.tool);
@@ -559,9 +557,8 @@ calls
   .option('--from <iso>', 'start time (ISO-8601)')
   .option('--to <iso>', 'end time (ISO-8601)')
   .action(
-    run((client, command: Command) => {
+    run((client, options: Record<string, string | undefined>) => {
       const query = new URLSearchParams();
-      const options = command.opts();
       if (options.server) query.set('server_id', options.server);
       if (options.tool) query.set('tool', options.tool);
       if (options.from) query.set('from', options.from);
@@ -575,11 +572,11 @@ program
   .description('Call any Control API operation')
   .option('--body <file>', 'JSON body file or - for stdin')
   .action(
-    run((client, method: string, path: string, command: Command) =>
+    run((client, method: string, path: string, options: { body?: string }) =>
       client.request(
         method.toUpperCase(),
         path,
-        command.opts().body ? readJson(command.opts().body) : undefined,
+        options.body === undefined ? undefined : readJson(options.body),
       ),
     ),
   );

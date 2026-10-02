@@ -45,10 +45,10 @@ Mobile:
 
 ToolHome has two first-class planes:
 
-- **MCP**: Remote-native servers use Streamable HTTP; Home-hosted servers use stdio on the ToolHome host.
+- **MCP**: Remote-native servers use Streamable HTTP; Home-hosted servers use stdio on the ToolHome host; Node-hosted servers use stdio on a client machine, for capabilities that only exist there such as a local Chrome or a local Ghidra bridge. `toolhome mcp launch <slug>` runs one, and any MCP client reaches it with a single command line.
 - **Hosted CLI**: platform CLIs represent an external service or control plane, for example Azure `az`, GitHub `gh`, and Tailscale. They are invoked with complete argv, stdin, timeout and output limits, allow/deny rules, and NDJSON output frames. Package managers and developer tools such as `npm`, `go`, `cargo`, `uv`, `pipx`, `docker`, and `cursor` are installer/runtime details, not Hosted CLI products.
 
-MCPs or CLIs that must run on the harness machine and depend on its browser or desktop state remain local to that harness. The first release explicitly excludes multi-tenancy, profiles, workspaces, and project management.
+Server placement is recorded in ToolHome rather than in each harness config, so a machine's local servers are defined once and reused by every client. A node-hosted server still runs with the user's own privileges on its machine, and it is unavailable while the ToolHome server is unreachable. The first release explicitly excludes multi-tenancy, profiles, workspaces, and project management.
 
 ## Protocol Capabilities
 
