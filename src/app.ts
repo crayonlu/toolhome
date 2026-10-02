@@ -181,6 +181,27 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
   }
 
   for (const server of store.listServers().filter((item) => item.enabled)) {
+    // Node-hosted servers run on their own machine. This process cannot reach
+    // them, so it must not connect, and any state an earlier run recorded has to
+    // be cleared — otherwise readiness would be judged by a server this host
+    // cannot host.
+    if (!upstreams.hosts(server)) {
+      const state = store.getRuntimeState(server.id);
+      if (state && (state.status !== 'unknown' || state.lastError !== null)) {
+        store.saveRuntimeState({
+          serverId: server.id,
+          status: 'unknown',
+          protocolVersion: null,
+          protocolEra: null,
+          processId: null,
+          restartCount: 0,
+          lastSuccessAt: null,
+          lastError: null,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
     if (store.getSnapshot(server.id)) continue;
     void upstreams.refresh(server.id).catch((error) => {
       logger.warn('Initial server refresh failed', {

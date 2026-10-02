@@ -5,7 +5,12 @@ import {
   type ServerContext,
 } from '@modelcontextprotocol/client';
 import { AppError, errorMessage } from '../domain/errors.js';
-import type { CapabilitySnapshot, RuntimeState, ServerRecord } from '../domain/models.js';
+import {
+  isHostHosted,
+  type CapabilitySnapshot,
+  type RuntimeState,
+  type ServerRecord,
+} from '../domain/models.js';
 import type { Logger } from '../observability/logger.js';
 import type { Store } from '../storage/store.js';
 import {
@@ -31,12 +36,30 @@ export class UpstreamManager {
   readonly #store: Store;
   readonly #credentials: CredentialResolver;
   readonly #logger: Logger;
+  readonly #canHost: (server: ServerRecord) => boolean;
   #closed = false;
 
-  constructor(store: Store, credentials: CredentialResolver, logger: Logger) {
+  constructor(
+    store: Store,
+    credentials: CredentialResolver,
+    logger: Logger,
+    options: { canHost?: (server: ServerRecord) => boolean } = {},
+  ) {
     this.#store = store;
     this.#credentials = credentials;
     this.#logger = logger;
+    // A ToolHome host only owns remote and home-hosted processes. Node-hosted
+    // servers belong to the client machine that runs them, so this process must
+    // never spawn them; the node-side runtime passes its own predicate instead.
+    this.#canHost = options.canHost ?? ((server) => isHostHosted(server.kind));
+  }
+
+  /**
+   * Whether this process is responsible for a server's process. Callers that
+   * would otherwise connect, spawn or report on a server check this first.
+   */
+  hosts(server: ServerRecord): boolean {
+    return server.enabled && this.#canHost(server);
   }
 
   subscribe(listener: UpstreamEventListener): () => void {
@@ -294,6 +317,15 @@ export class UpstreamManager {
     if (!server) throw new AppError('server_not_found', 'Server not found', 404);
     if (requireEnabled && !server.enabled) {
       throw new AppError('server_disabled', `Server ${server.slug} is disabled`, 503);
+    }
+    if (!this.#canHost(server)) {
+      throw new AppError(
+        'server_not_hosted_here',
+        `Server ${server.slug} runs on its own machine${
+          server.nodeId === null ? '' : ` (${server.nodeId})`
+        } and is not hosted here`,
+        409,
+      );
     }
     return server;
   }

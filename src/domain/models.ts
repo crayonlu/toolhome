@@ -84,6 +84,15 @@ export function transportMatchesKind(kind: ServerKind, transport: TransportConfi
 }
 
 /**
+ * Whether a ToolHome host process owns this server's process. Node-hosted
+ * servers belong to the client machine that runs them, so a host must never
+ * connect, spawn or report on them.
+ */
+export function isHostHosted(kind: ServerKind): boolean {
+  return kind !== 'node';
+}
+
+/**
  * Placement rules shared by every write path (direct create, import, record
  * validation). Returning issues instead of taking a refinement context keeps the
  * logic in one place without depending on zod's callback typing.

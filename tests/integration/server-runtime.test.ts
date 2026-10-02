@@ -145,6 +145,73 @@ describe('server launch runtime', () => {
     }
   });
 
+  it('does not host a node server, and readiness ignores it', async () => {
+    const testRuntime = createTestRuntime();
+    try {
+      // Enabled, with a command that cannot possibly run here. If the host tried
+      // to spawn it, this test would see a failed upstream and a 503.
+      const serverId = await create(testRuntime, '/api/v1/servers', {
+        slug: 'laptop-ghidra',
+        name: 'Local Ghidra',
+        kind: 'node',
+        nodeId: 'laptop',
+        transport: { type: 'stdio', command: '/nonexistent/bridge-mcp-ghidra', args: [] },
+        enabled: true,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const diagnostics = z
+        .object({
+          ok: z.boolean(),
+          database: z.string(),
+          servers: z.array(z.object({ slug: z.string(), status: z.string() })),
+        })
+        .parse(
+          await jsonResponse(
+            await controlRequest(
+              testRuntime.runtime,
+              testRuntime.controlKey,
+              'GET',
+              '/api/v1/diagnostics',
+            ),
+          ),
+        );
+      expect(diagnostics).toMatchObject({ ok: true, database: 'ok' });
+      const entry = diagnostics.servers.find((candidate) => candidate.slug === 'laptop-ghidra');
+      expect(entry?.status).toBe('unknown');
+
+      const ready = await controlRequest(
+        testRuntime.runtime,
+        testRuntime.controlKey,
+        'GET',
+        '/readyz',
+      );
+      expect(ready.status).toBe(200);
+
+      // Operations that would connect on this host refuse instead.
+      const refresh = await controlRequest(
+        testRuntime.runtime,
+        testRuntime.controlKey,
+        'POST',
+        `/api/v1/servers/${serverId}/refresh`,
+      );
+      expect(refresh.status).toBe(409);
+      expect(await refresh.json()).toMatchObject({ error: { code: 'server_not_hosted_here' } });
+
+      // The launcher still resolves its runtime, which is the whole point.
+      const runtime = await controlRequest(
+        testRuntime.runtime,
+        testRuntime.controlKey,
+        'GET',
+        `/api/v1/servers/${serverId}/runtime`,
+      );
+      expect(runtime.status).toBe(200);
+    } finally {
+      await testRuntime.close();
+    }
+  });
+
   it('keeps the node placement across an unrelated update and refuses a misplaced nodeId', async () => {
     const testRuntime = createTestRuntime();
     try {

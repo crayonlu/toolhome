@@ -4,6 +4,7 @@ import {
   createCredentialInputSchema,
   createServerInputObjectSchema,
   createServerInputSchema,
+  isHostHosted,
   parseBucketSeconds,
   placementIssues,
   setProjectionInputSchema,
@@ -183,7 +184,9 @@ export class ControlService {
 
   async enableServer(id: string) {
     const server = this.#store.updateServer(id, { enabled: true });
-    const snapshot = await this.#upstreams.refresh(id);
+    // A node-hosted server has no process on this host; the client that runs it
+    // launches it through the runtime endpoint.
+    const snapshot = this.#upstreams.hosts(server) ? await this.#upstreams.refresh(id) : null;
     this.#onRegistryChanged();
     return { server, snapshot };
   }
@@ -422,9 +425,12 @@ export class ControlService {
     const servers = this.#store.listServers();
     const clis = this.#store.listClis();
     return {
+      // Readiness only covers servers this host can host. A node-hosted server
+      // runs on a client machine and never reports ready here, and clients reach
+      // it through the runtime endpoint, which does not depend on this state.
       ok: servers.every((server) => {
-        const status = this.#store.getRuntimeState(server.id)?.status;
-        return !server.enabled || status === 'ready';
+        if (!server.enabled || !isHostHosted(server.kind)) return true;
+        return this.#store.getRuntimeState(server.id)?.status === 'ready';
       }),
       database: 'ok',
       servers: servers.map((server) => ({
@@ -715,7 +721,7 @@ export class ControlService {
 
   #refreshInBackground(serverId: string): void {
     const server = this.#store.getServer(serverId);
-    if (!server?.enabled) return;
+    if (!server || !this.#upstreams.hosts(server)) return;
     void this.#upstreams.refresh(serverId).catch(() => undefined);
   }
 

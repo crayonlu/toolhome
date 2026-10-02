@@ -20,6 +20,7 @@ No environment or key changes. The runtime endpoint requires an admin control ke
 
 ### Fixed
 
+- A ToolHome host no longer treats node-hosted servers as its own: it does not connect or spawn them, and readiness (`/readyz`, `toolhome doctor`) no longer goes degraded because of a server that is meant to run on a client machine. `refresh` and `test` on such a server answer `409 server_not_hosted_here` instead. Without this, a node-hosted server placed on a Mac made the server report `unreachable` from its Linux host and turned `/readyz` red.
 - `toolhome events`, `calls list`, `calls stats`, `api`, `config export` and `config import-harness` failed with "command.opts is not a function". Commander passes the parsed options object before the Command, so the parameter those actions treated as the Command was the options object. This affected every release before 0.6.1.
 
 ## Validation
