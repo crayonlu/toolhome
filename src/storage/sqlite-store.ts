@@ -32,6 +32,7 @@ import {
   credentialRecordSchema,
   installJobRecordSchema,
   marketInstallationSchema,
+  placementIssues,
   runtimeStateSchema,
   secureActionRecordSchema,
   serverProjectionSchema,
@@ -73,6 +74,7 @@ const serverRowSchema = z.object({
   slug: z.string(),
   name: z.string(),
   kind: z.string(),
+  node_id: z.string().nullable(),
   transport_json: z.string(),
   credential_id: z.string().nullable(),
   enabled: z.number(),
@@ -334,7 +336,8 @@ export class SqliteStore implements Store {
         id TEXT PRIMARY KEY,
         slug TEXT NOT NULL UNIQUE,
         name TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('remote', 'home')),
+        kind TEXT NOT NULL CHECK (kind IN ('remote', 'home', 'node')),
+        node_id TEXT,
         transport_json TEXT NOT NULL,
         credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
         enabled INTEGER NOT NULL,
@@ -566,6 +569,46 @@ export class SqliteStore implements Store {
         "ALTER TABLE clis ADD COLUMN credential_bindings_json TEXT NOT NULL DEFAULT '{}'",
       );
     }
+    // Guarded migration: servers created before the `node` placement have a CHECK
+    // constraint without it and no node_id column. SQLite cannot alter a CHECK
+    // constraint, so rebuild the table. Six tables reference servers(id), four of
+    // them with ON DELETE CASCADE, so the rebuild runs with foreign keys disabled —
+    // otherwise DROP TABLE servers would cascade away runtime state, capability
+    // snapshots and tool projections. PRAGMA foreign_keys is a no-op inside a
+    // transaction, which is why it is toggled outside the BEGIN/COMMIT block.
+    const serversSql = this.#db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'servers'")
+      .get() as { sql: string } | undefined;
+    if (serversSql !== undefined && !serversSql.sql.includes("'node'")) {
+      this.#db.exec('PRAGMA foreign_keys = OFF');
+      try {
+        this.#db.exec(`
+          BEGIN;
+          CREATE TABLE servers_next (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('remote', 'home', 'node')),
+            node_id TEXT,
+            transport_json TEXT NOT NULL,
+            credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
+            enabled INTEGER NOT NULL,
+            settings_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          INSERT INTO servers_next
+            SELECT id, slug, name, kind, NULL, transport_json, credential_id,
+                   enabled, settings_json, created_at, updated_at
+            FROM servers;
+          DROP TABLE servers;
+          ALTER TABLE servers_next RENAME TO servers;
+          COMMIT;
+        `);
+      } finally {
+        this.#db.exec('PRAGMA foreign_keys = ON');
+      }
+    }
     // Guarded migration: install_jobs created before the 'updating' status have a
     // CHECK constraint without it. SQLite cannot alter CHECK constraints, so
     // rebuild the table (rows are preserved).
@@ -740,14 +783,15 @@ export class SqliteStore implements Store {
     this.#db
       .prepare(
         `INSERT INTO servers
-        (id, slug, name, kind, transport_json, credential_id, enabled, settings_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, slug, name, kind, node_id, transport_json, credential_id, enabled, settings_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
         record.slug,
         record.name,
         record.kind,
+        record.nodeId,
         JSON.stringify(record.transport),
         record.credentialId,
         record.enabled ? 1 : 0,
@@ -779,17 +823,18 @@ export class SqliteStore implements Store {
       settings: { ...current.settings, ...patch.settings },
       updatedAt: now(),
     });
-    const expectedTransport = record.kind === 'remote' ? 'streamable-http' : 'stdio';
-    if (record.transport.type !== expectedTransport) {
-      throw new AppError('invalid_transport', 'Transport does not match server kind');
+    const issues = placementIssues(record);
+    if (issues.length > 0) {
+      throw new AppError('invalid_transport', issues[0]!.message);
     }
     this.#db
       .prepare(
-        `UPDATE servers SET name = ?, transport_json = ?, credential_id = ?, enabled = ?,
+        `UPDATE servers SET name = ?, node_id = ?, transport_json = ?, credential_id = ?, enabled = ?,
          settings_json = ?, updated_at = ? WHERE id = ?`,
       )
       .run(
         record.name,
+        record.nodeId,
         JSON.stringify(record.transport),
         record.credentialId,
         record.enabled ? 1 : 0,
@@ -1812,6 +1857,7 @@ export class SqliteStore implements Store {
       slug: parsed.slug,
       name: parsed.name,
       kind: parsed.kind,
+      nodeId: parsed.node_id,
       transport: parseJson(parsed.transport_json),
       credentialId: parsed.credential_id,
       enabled: parsed.enabled === 1,

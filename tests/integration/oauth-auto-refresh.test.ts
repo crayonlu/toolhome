@@ -64,6 +64,7 @@ describe('OAuth credential auto-refresh sweep', () => {
         slug: 'oauth-expired',
         name: 'OAuth remote fixture',
         kind: 'remote',
+        nodeId: null,
         transport: {
           type: 'streamable-http',
           url: fixture.url.toString(),
@@ -129,6 +130,7 @@ describe('OAuth credential auto-refresh sweep', () => {
         slug: 'oauth-unrefreshable',
         name: 'OAuth remote fixture',
         kind: 'remote',
+        nodeId: null,
         transport: {
           type: 'streamable-http',
           url: fixture.url.toString(),
@@ -196,6 +198,7 @@ describe('OAuth credential auto-refresh sweep', () => {
         slug: 'oauth-rejected',
         name: 'OAuth remote fixture',
         kind: 'remote',
+        nodeId: null,
         transport: {
           type: 'streamable-http',
           url: fixture.url.toString(),
@@ -271,6 +274,7 @@ describe('OAuth credential auto-refresh sweep', () => {
         slug: 'oauth-healthy',
         name: 'OAuth remote fixture',
         kind: 'remote',
+        nodeId: null,
         transport: {
           type: 'streamable-http',
           url: fixture.url.toString(),

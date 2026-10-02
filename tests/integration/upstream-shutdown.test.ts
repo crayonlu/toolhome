@@ -8,6 +8,7 @@ describe('upstream shutdown', () => {
       slug: 'blocked',
       name: 'Blocked upstream',
       kind: 'home',
+      nodeId: null,
       transport: {
         type: 'stdio',
         command: process.execPath,

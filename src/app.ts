@@ -101,6 +101,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     (slug) => dataPlane.remove(slug),
     () => dataPlane.registryChanged(),
     upstreamOAuth,
+    credentials,
   );
   const secureActions = new SecureActionService(store, config.masterKey, config.publicUrl);
   const cli = new CliService(store, callRecorder);

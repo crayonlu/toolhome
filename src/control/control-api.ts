@@ -199,6 +199,10 @@ export function mountControlApi(
     route((context) => options.service.serverCapabilities(context.req.param('id'))),
   );
   app.get(
+    '/api/v1/servers/:id/runtime',
+    adminRoute((context) => options.service.serverRuntime(context.req.param('id'))),
+  );
+  app.get(
     '/api/v1/servers/:id/status',
     route((context) => options.service.serverStatus(context.req.param('id'))),
   );

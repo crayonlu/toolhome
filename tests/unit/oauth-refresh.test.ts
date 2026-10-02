@@ -37,6 +37,7 @@ function remoteServer(id: string, credentialId: string | null, enabled = true): 
     slug: `server-${id}`,
     name: `Server ${id}`,
     kind: 'remote',
+    nodeId: null,
     transport: {
       type: 'streamable-http',
       url: 'https://mcp.example.test/mcp',
@@ -64,6 +65,7 @@ function homeServer(id: string, credentialId: string | null): ServerRecord {
     slug: `home-${id}`,
     name: `Home ${id}`,
     kind: 'home',
+    nodeId: null,
     transport: {
       type: 'stdio',
       command: 'node',

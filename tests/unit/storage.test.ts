@@ -18,6 +18,7 @@ function createStore() {
     slug: 'server-a',
     name: 'Server A',
     kind: 'remote',
+    nodeId: null,
     transport: {
       type: 'streamable-http',
       url: 'https://example.test/mcp',
@@ -39,6 +40,7 @@ function createStore() {
     slug: 'server-b',
     name: 'Server B',
     kind: 'remote',
+    nodeId: null,
     transport: {
       type: 'streamable-http',
       url: 'https://example.test/mcp',
@@ -194,6 +196,155 @@ describe('CLI schema migrations', () => {
     } finally {
       migrated.close();
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('server placement migrations', () => {
+  it('rebuilds a servers table without node placement and keeps cascading child rows', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'toolhome-server-schema-migrate-'));
+    const path = join(directory, 'legacy.sqlite');
+    const secrets = new SecretBox('store-test-master-key-0000000000000000000000001');
+    const first = new SqliteStore(path, secrets);
+    const legacyId = '00000000-0000-4000-8000-0000000000aa';
+    first.close();
+
+    const db = new DatabaseSync(path);
+    // A raw connection has foreign keys off, so rebuilding the table here cannot
+    // cascade away the child row we are about to plant.
+    db.exec('DROP TABLE servers');
+    db.exec(`
+      CREATE TABLE servers (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('remote', 'home')),
+        transport_json TEXT NOT NULL,
+        credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL,
+        enabled INTEGER NOT NULL,
+        settings_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO servers (
+        id, slug, name, kind, transport_json, credential_id, enabled, settings_json,
+        created_at, updated_at
+      ) VALUES (
+        '${legacyId}', 'legacy-home', 'Legacy home', 'home',
+        '{"type":"stdio","command":"/bin/echo","args":[],"env":{},"protocolMode":"auto"}',
+        NULL, 1,
+        '{"connectTimeoutMs":15000,"requestTimeoutMs":60000,"maxTotalTimeoutMs":600000,"maxConcurrency":1,"restart":"on-failure"}',
+        '2026-08-26T00:00:00.000Z', '2026-08-26T00:00:00.000Z'
+      );
+      INSERT INTO runtime_states (
+        server_id, status, protocol_version, protocol_era, process_id,
+        restart_count, last_success_at, last_error, updated_at
+      ) VALUES (
+        '${legacyId}', 'ready', '2026-07-28', 'modern', 4242, 3,
+        '2026-08-26T00:00:00.000Z', NULL, '2026-08-26T00:00:00.000Z'
+      );
+    `);
+    db.close();
+
+    const migrated = new SqliteStore(path, secrets);
+    try {
+      expect(migrated.getServer(legacyId)).toMatchObject({
+        slug: 'legacy-home',
+        kind: 'home',
+        nodeId: null,
+      });
+      // The rebuild drops and recreates the parent table. Without foreign keys
+      // disabled around it, ON DELETE CASCADE would have taken this row with it.
+      expect(migrated.getRuntimeState(legacyId)).toMatchObject({
+        status: 'ready',
+        restartCount: 3,
+      });
+
+      const placed = migrated.createServer({
+        slug: 'laptop-chrome',
+        name: 'Local Chrome',
+        kind: 'node',
+        nodeId: 'laptop',
+        transport: {
+          type: 'stdio',
+          command: 'npx',
+          args: ['-y', 'chrome-devtools-mcp@1.6.0'],
+          env: {},
+          protocolMode: 'auto',
+        },
+        credentialId: null,
+        enabled: true,
+        settings: {
+          connectTimeoutMs: 15_000,
+          requestTimeoutMs: 60_000,
+          maxTotalTimeoutMs: 600_000,
+          maxConcurrency: 1,
+          restart: 'on-failure',
+        },
+      });
+      expect(placed).toMatchObject({ kind: 'node', nodeId: 'laptop' });
+      expect(
+        migrated
+          .listServers()
+          .map((server) => server.nodeId)
+          .sort(),
+      ).toEqual(['laptop', null]);
+    } finally {
+      migrated.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a node server without a nodeId and a nodeId on another placement', () => {
+    const { store, serverA, close } = createStore();
+    try {
+      const base = {
+        name: 'Local Chrome',
+        transport: {
+          type: 'stdio' as const,
+          command: 'npx',
+          args: ['-y', 'chrome-devtools-mcp@1.6.0'],
+          env: {},
+          protocolMode: 'auto' as const,
+        },
+        credentialId: null,
+        enabled: true,
+        settings: {
+          connectTimeoutMs: 15_000,
+          requestTimeoutMs: 60_000,
+          maxTotalTimeoutMs: 600_000,
+          maxConcurrency: 1,
+          restart: 'on-failure' as const,
+        },
+      };
+      expect(() =>
+        store.createServer({ ...base, slug: 'no-node', kind: 'node', nodeId: null }),
+      ).toThrow(/nodeId/);
+      expect(() =>
+        store.createServer({ ...base, slug: 'wrong-kind', kind: 'home', nodeId: 'laptop' }),
+      ).toThrow(/only allowed for node servers/);
+      expect(() =>
+        store.createServer({
+          ...base,
+          slug: 'node-remote-transport',
+          kind: 'node',
+          nodeId: 'laptop',
+          transport: {
+            type: 'streamable-http',
+            url: 'https://example.test/mcp',
+            protocolMode: 'modern',
+            allowSseFallback: false,
+            headers: {},
+          },
+        }),
+      ).toThrow(/does not match server kind/);
+
+      // Adding a nodeId to an existing home server is not a placement change.
+      expect(() => store.updateServer(serverA.id, { nodeId: 'laptop' })).toThrow(
+        /only allowed for node servers/,
+      );
+    } finally {
+      close();
     }
   });
 });

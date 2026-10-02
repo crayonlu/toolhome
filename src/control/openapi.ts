@@ -272,6 +272,10 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   add('/api/v1/diagnostics', 'get', 'getDiagnostics', {
     summary: 'Read system diagnostics',
   });
+  add('/api/v1/servers/{id}/runtime', 'get', 'serverRuntime', {
+    parameters: [idParameter('id')],
+    summary: 'Materialize the launch environment of a stdio server',
+  });
   add('/api/v1/config/export', 'get', 'exportConfig', {
     summary: 'Export configuration or a restorable secret backup',
     parameters: [

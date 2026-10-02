@@ -7,6 +7,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ControlClient } from '../control/client.js';
+import { stdioTransportSchema } from '../domain/models.js';
+import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
 
 function packageVersion(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
@@ -210,6 +212,43 @@ cli
         process.exitCode = outcome.result === 'ok' ? 0 : 1;
       },
     ),
+  );
+
+const runtimeSchema = z.object({
+  slug: z.string(),
+  kind: z.enum(['remote', 'home', 'node']),
+  nodeId: z.string().nullable(),
+  transport: stdioTransportSchema,
+  credentialEnv: z.record(z.string(), z.string()),
+});
+
+const serverListSchema = z.array(z.object({ id: z.uuid(), slug: z.string() }));
+
+/**
+ * `launch` is the thinnest way to reach a server that must run on this machine:
+ * any MCP client configures `command: toolhome, args: [mcp, launch, <slug>]` and
+ * gets the real process, its credentials, and its original tool names.
+ */
+const mcp = program.command('mcp').description('Run MCP servers that are placed on this machine');
+mcp
+  .command('launch <slug>')
+  .description('Spawn a stdio server with its stored credential, then hand over this process')
+  .action(
+    run(async (client, slug: string) => {
+      const servers = serverListSchema.parse(await client.request('GET', '/api/v1/servers'));
+      const server = servers.find((candidate) => candidate.slug === slug);
+      if (server === undefined) throw new Error(`Unknown server: ${slug}`);
+      const runtime = runtimeSchema.parse(
+        await client.request('GET', `/api/v1/servers/${server.id}/runtime`),
+      );
+      process.exitCode = await spawnStdioServer({
+        command: runtime.transport.command,
+        args: runtime.transport.args,
+        ...(runtime.transport.cwd === undefined ? {} : { cwd: runtime.transport.cwd }),
+        env: launchEnvironment(runtime.transport.env, runtime.credentialEnv),
+      });
+      return undefined;
+    }),
   );
 
 const credential = program

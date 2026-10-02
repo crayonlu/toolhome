@@ -245,7 +245,10 @@ export class UpstreamManager {
     await refreshing?.catch(() => undefined);
     if (this.#closed) return;
     const state = this.#store.getRuntimeState(serverId);
-    const restart = server.kind === 'home' && server.enabled && server.settings.restart !== 'never';
+    // Both home-hosted and node-hosted servers are stdio processes this manager
+    // owns, so a dropped connection is restartable for either placement.
+    const restart =
+      server.kind !== 'remote' && server.enabled && server.settings.restart !== 'never';
     this.#store.appendEvent({
       level: 'warn',
       type: 'server.connection_closed',

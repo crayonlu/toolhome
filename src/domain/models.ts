@@ -63,6 +63,48 @@ export const transportSchema = z.discriminatedUnion('type', [
   stdioTransportSchema,
 ]);
 
+/**
+ * Where a server's process runs. `remote` is an upstream URL, `home` is a stdio
+ * process on the ToolHome host, and `node` is a stdio process on a registered
+ * client machine — for capabilities that only exist there, such as the local
+ * Chrome that `chrome-devtools-mcp` drives.
+ */
+export const serverKindSchema = z.enum(['remote', 'home', 'node']);
+export type ServerKind = z.infer<typeof serverKindSchema>;
+
+/** Node labels are user-chosen and stable; they are placement metadata, not credentials. */
+export const nodeIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Node id must be a short label such as "laptop"');
+
+export function transportMatchesKind(kind: ServerKind, transport: TransportConfig): boolean {
+  return kind === 'remote' ? transport.type === 'streamable-http' : transport.type === 'stdio';
+}
+
+/**
+ * Placement rules shared by every write path (direct create, import, record
+ * validation). Returning issues instead of taking a refinement context keeps the
+ * logic in one place without depending on zod's callback typing.
+ */
+export function placementIssues(value: {
+  kind: ServerKind;
+  transport: TransportConfig;
+  nodeId: string | null;
+}): { path: (string | number)[]; message: string }[] {
+  if (!transportMatchesKind(value.kind, value.transport)) {
+    return [{ path: ['transport'], message: 'Transport does not match server kind' }];
+  }
+  if (value.kind === 'node' && value.nodeId === null) {
+    return [{ path: ['nodeId'], message: 'Node servers require a nodeId' }];
+  }
+  if (value.kind !== 'node' && value.nodeId !== null) {
+    return [{ path: ['nodeId'], message: 'nodeId is only allowed for node servers' }];
+  }
+  return [];
+}
+
 const serverSettingsObjectSchema = z.object({
   connectTimeoutMs: z.number().int().min(100).max(120_000).default(15_000),
   requestTimeoutMs: z.number().int().min(100).max(3_600_000).default(60_000),
@@ -86,7 +128,8 @@ export const serverRecordSchema = z.object({
   id: z.uuid(),
   slug: slugSchema,
   name: z.string().min(1).max(120),
-  kind: z.enum(['remote', 'home']),
+  kind: serverKindSchema,
+  nodeId: nodeIdSchema.nullable(),
   transport: transportSchema,
   credentialId: z.uuid().nullable(),
   enabled: z.boolean(),
@@ -98,7 +141,8 @@ export const serverRecordSchema = z.object({
 export const createServerInputObjectSchema = z.object({
   slug: slugSchema,
   name: z.string().min(1).max(120),
-  kind: z.enum(['remote', 'home']),
+  kind: serverKindSchema,
+  nodeId: nodeIdSchema.nullable().default(null),
   transport: transportSchema,
   credentialId: z.uuid().nullable().default(null),
   enabled: z.boolean().default(true),
@@ -113,21 +157,15 @@ export const createServerInputObjectSchema = z.object({
 
 export const createServerInputSchema = createServerInputObjectSchema.superRefine(
   (value, context) => {
-    const valid =
-      (value.kind === 'remote' && value.transport.type === 'streamable-http') ||
-      (value.kind === 'home' && value.transport.type === 'stdio');
-    if (!valid) {
-      context.addIssue({
-        code: 'custom',
-        path: ['transport'],
-        message: 'Transport does not match server kind',
-      });
+    for (const issue of placementIssues(value)) {
+      context.addIssue({ code: 'custom', ...issue });
     }
   },
 );
 
 export const updateServerInputSchema = z.object({
   name: z.string().min(1).max(120).optional(),
+  nodeId: nodeIdSchema.nullable().optional(),
   transport: transportSchema.optional(),
   credentialId: z.uuid().nullable().optional(),
   enabled: z.boolean().optional(),

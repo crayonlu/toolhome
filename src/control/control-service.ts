@@ -5,12 +5,14 @@ import {
   createServerInputObjectSchema,
   createServerInputSchema,
   parseBucketSeconds,
+  placementIssues,
   setProjectionInputSchema,
   toolCallFilterSchema,
   updateCredentialInputSchema,
   updateServerInputSchema,
   type ApiKeyKind,
   type CredentialPayload,
+  type ServerKind,
   type ServerRecord,
   type TransportConfig,
 } from '../domain/models.js';
@@ -21,6 +23,7 @@ import {
 } from '../config/harness-import.js';
 import type { AuthService } from '../security/auth-service.js';
 import type { Store } from '../storage/store.js';
+import type { CredentialResolver } from '../upstream/credential-resolver.js';
 import type { UpstreamManager } from '../upstream/manager.js';
 import type { UpstreamOAuthService } from '../upstream/oauth-service.js';
 
@@ -32,15 +35,8 @@ const importServerSchema = createServerInputObjectSchema
   .omit({ credentialId: true })
   .extend({ credentialRef: z.string().min(1).max(200).nullable().default(null) })
   .superRefine((value, context) => {
-    const valid =
-      (value.kind === 'remote' && value.transport.type === 'streamable-http') ||
-      (value.kind === 'home' && value.transport.type === 'stdio');
-    if (!valid) {
-      context.addIssue({
-        code: 'custom',
-        path: ['transport'],
-        message: 'Transport does not match server kind',
-      });
+    for (const issue of placementIssues(value)) {
+      context.addIssue({ code: 'custom', ...issue });
     }
   });
 
@@ -59,6 +55,7 @@ export class ControlService {
   readonly #onServerRemoved: (slug: string) => Promise<void>;
   readonly #onRegistryChanged: () => void;
   readonly #upstreamOAuth: UpstreamOAuthService;
+  readonly #credentials: CredentialResolver;
 
   constructor(
     store: Store,
@@ -68,6 +65,7 @@ export class ControlService {
     onServerRemoved: (slug: string) => Promise<void>,
     onRegistryChanged: () => void,
     upstreamOAuth: UpstreamOAuthService,
+    credentials: CredentialResolver,
   ) {
     this.#store = store;
     this.#upstreams = upstreams;
@@ -76,6 +74,7 @@ export class ControlService {
     this.#onServerRemoved = onServerRemoved;
     this.#onRegistryChanged = onRegistryChanged;
     this.#upstreamOAuth = upstreamOAuth;
+    this.#credentials = credentials;
   }
 
   listServers() {
@@ -104,6 +103,53 @@ export class ControlService {
     const server = this.#store.getServer(id);
     if (!server) throw new AppError('server_not_found', 'Server not found', 404);
     return { ...server, runtime: this.#store.getRuntimeState(id) };
+  }
+
+  /**
+   * Launch specification for a stdio server: its transport plus the credential
+   * values projected into environment variables. This is what `toolhome mcp` on a
+   * client machine spawns, so it returns exactly the fields the spawn needs and
+   * nothing else from the credential vault. HTTP servers have no local process and
+   * are rejected.
+   */
+  serverRuntime(id: string): {
+    serverId: string;
+    slug: string;
+    kind: ServerKind;
+    nodeId: string | null;
+    transport: TransportConfig;
+    credentialEnv: Record<string, string>;
+  } {
+    const server = this.#store.getServer(id);
+    if (!server) throw new AppError('server_not_found', 'Server not found', 404);
+    if (server.transport.type !== 'stdio') {
+      throw new AppError(
+        'server_has_no_local_runtime',
+        `Server ${server.slug} is remote and runs no local process`,
+        400,
+      );
+    }
+    const credentialEnv = server.credentialId === null ? {} : this.#credentials.resolve(server).env;
+    // Audited per read. Only the variable names are recorded, never the values.
+    this.#store.appendEvent({
+      level: 'info',
+      type: 'server.runtime_read',
+      serverId: server.id,
+      message: `Materialized launch environment for ${server.slug}`,
+      detail: {
+        kind: server.kind,
+        nodeId: server.nodeId,
+        credentialEnvKeys: Object.keys(credentialEnv),
+      },
+    });
+    return {
+      serverId: server.id,
+      slug: server.slug,
+      kind: server.kind,
+      nodeId: server.nodeId,
+      transport: server.transport,
+      credentialEnv,
+    };
   }
 
   async updateServer(id: string, value: unknown) {
@@ -348,6 +394,7 @@ export class ControlService {
         enabled: servers.filter((server) => server.enabled).length,
         remote: servers.filter((server) => server.kind === 'remote').length,
         home: servers.filter((server) => server.kind === 'home').length,
+        node: servers.filter((server) => server.kind === 'node').length,
         ready: states.filter((state) => state?.status === 'ready').length,
         unhealthy,
       },
@@ -463,6 +510,7 @@ export class ControlService {
           slug: server.slug,
           name: server.name,
           kind: server.kind,
+          nodeId: server.nodeId,
           transport: server.transport,
           credentialId,
           enabled: server.enabled,
@@ -628,7 +676,7 @@ export class ControlService {
 
   #assertCredentialAssignment(
     credentialId: string | null,
-    serverKind: 'remote' | 'home',
+    serverKind: ServerKind,
     serverId?: string,
   ): void {
     if (credentialId === null) return;
@@ -648,11 +696,11 @@ export class ControlService {
     }
   }
 
-  #assertCredentialPayload(payload: CredentialPayload, serverKind: 'remote' | 'home'): void {
-    if (serverKind === 'home' && payload.type !== 'env') {
+  #assertCredentialPayload(payload: CredentialPayload, serverKind: ServerKind): void {
+    if (serverKind !== 'remote' && payload.type !== 'env') {
       throw new AppError(
         'credential_kind_mismatch',
-        'Home-hosted servers only accept environment credentials',
+        'Stdio servers only accept environment credentials',
         400,
       );
     }

@@ -2,9 +2,7 @@ import type { FetchLike } from '@modelcontextprotocol/client';
 import { credentialRecordSchema, serverRecordSchema } from '../../src/domain/models.js';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import {
-  connectTestClient,
-} from '../support/mcp-client.js';
+import { connectTestClient } from '../support/mcp-client.js';
 import {
   applicationFetch,
   controlRequest,
@@ -100,7 +98,13 @@ describe('control key scopes', () => {
       expect((await withAgent('GET', `/api/v1/servers/${server.id}`)).status).toBe(200);
       expect((await withAgent('POST', `/api/v1/servers/${server.id}/restart`)).status).toBe(200);
       expect((await withAgent('POST', `/api/v1/servers/${server.id}/disable`)).status).toBe(200);
-      expect((await withAgent('PATCH', `/api/v1/servers/${server.id}/projection`, { overrides: [{ tool: 'echo', visibility: 'hidden' }] })).status).toBe(200);
+      expect(
+        (
+          await withAgent('PATCH', `/api/v1/servers/${server.id}/projection`, {
+            overrides: [{ tool: 'echo', visibility: 'hidden' }],
+          })
+        ).status,
+      ).toBe(200);
 
       // Agent DENIED admin routes (403).
       const denied: [string, string, unknown?][] = [
@@ -111,6 +115,7 @@ describe('control key scopes', () => {
         ['GET', '/api/v1/access-keys'],
         ['POST', '/api/v1/access-keys', { name: 'x' }],
         ['GET', '/api/v1/config/export?includeSecrets=true'],
+        ['GET', `/api/v1/servers/${server.id}/runtime`],
         ['DELETE', `/api/v1/servers/${server.id}`],
       ];
       for (const [method, path, body] of denied) {
@@ -125,7 +130,9 @@ describe('control key scopes', () => {
       expect((await withAdmin('GET', '/api/v1/credentials')).status).toBe(200);
       expect((await withAdmin('GET', '/api/v1/control-keys')).status).toBe(200);
       expect((await withAdmin('GET', '/api/v1/access-keys')).status).toBe(200);
-      expect((await withAdmin('GET', '/api/v1/config/export?includeSecrets=true')).status).toBe(200);
+      expect((await withAdmin('GET', '/api/v1/config/export?includeSecrets=true')).status).toBe(
+        200,
+      );
 
       // Agent control key can use the management MCP surface.
       const appFetch: FetchLike = (input, init) =>
