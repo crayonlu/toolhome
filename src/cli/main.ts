@@ -10,7 +10,8 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { ControlClient } from '../control/client.js';
 import { stdioTransportSchema } from '../domain/models.js';
 import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
-import { startLocalGateway } from '../node/local-gateway.js';
+import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js';
+import { readNodeStatus } from '../node/status.js';
 
 function packageVersion(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
@@ -292,6 +293,31 @@ mcp
       process.once('SIGINT', () => void stop());
       process.once('SIGTERM', () => void stop());
       return undefined;
+    }),
+  );
+
+const node = program.command('node').description('Inspect MCP servers placed on this machine');
+node
+  .command('status')
+  .description('Show the local health of the servers placed on this machine')
+  .option('--check', 'reconnect to each enabled server now and refresh its capabilities')
+  .option('--node <id>', 'node label (default: nodeId in the local config, else the hostname)')
+  .action(
+    run(async (client, options: { check?: boolean; node?: string }) => {
+      const nodeId = options.node ?? loadLocalConfig()?.nodeId ?? (hostname().split('.')[0] || '');
+      if (nodeId === '') {
+        throw new Error('Could not determine a node label; pass --node <id>');
+      }
+      const mirrorPath = resolve(dirname(configPath()), 'node.sqlite');
+      if (options.check !== true) {
+        // Mirror-only: no network, no spawned children.
+        return readNodeStatus({ nodeId, storePath: mirrorPath });
+      }
+      const runtime = await prepareLocalGateway({ client, nodeId, storePath: mirrorPath });
+      const check = await runtime.discoverSnapshots(true);
+      const report = readNodeStatus({ nodeId, storePath: mirrorPath });
+      await runtime.close();
+      return { ...report, check };
     }),
   );
 

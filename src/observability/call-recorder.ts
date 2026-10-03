@@ -32,8 +32,15 @@ export class CallRecorder {
     this.#logger = logger;
     this.#retentionDays = Math.max(0, Math.floor(retentionDays));
     this.#flushTimer = setInterval(() => void this.#flush(), FLUSH_INTERVAL_MS);
+    // Background maintenance must not hold a CLI process open: a command that
+    // finished its work should exit even though the recorder still has timers.
+    this.#flushTimer.unref();
     if (this.#retentionDays > 0) {
-      this.#retentionTimer = setInterval(() => void this.#runRetention(), RETENTION_CHECK_INTERVAL_MS);
+      this.#retentionTimer = setInterval(
+        () => void this.#runRetention(),
+        RETENTION_CHECK_INTERVAL_MS,
+      );
+      this.#retentionTimer.unref();
     }
   }
 

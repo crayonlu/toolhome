@@ -62,7 +62,25 @@ class NodeCredentialSource implements CredentialSource {
   }
 }
 
-export async function startLocalGateway(options: LocalGatewayOptions): Promise<LocalGateway> {
+export interface LocalGatewayRuntime {
+  nodeId: string;
+  store: SqliteStore;
+  upstreams: UpstreamManager;
+  servers: ServerRecord[];
+  serverFactory: () => Server;
+  /**
+   * Connect to servers to (re)discover their capabilities, then drop the
+   * children again. Without `force`, servers that already have a snapshot are
+   * skipped, so steady state stays lazy.
+   */
+  discoverSnapshots(force?: boolean): Promise<{ slug: string; ok: boolean; error?: string }[]>;
+  close(): Promise<void>;
+}
+
+/** Build the local runtime: mirror the node's servers and compose the gateway. */
+export async function prepareLocalGateway(
+  options: LocalGatewayOptions,
+): Promise<LocalGatewayRuntime> {
   const logger: Logger = createLogger('info', (line) => process.stderr.write(`${line}\n`));
   // Deterministic key: the mirror stores no credential payloads, only server
   // records and discovered capability snapshots.
@@ -91,38 +109,56 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     recorder,
   );
 
-  // Tools of the aggregate come from stored capability snapshots, so a server has
-  // to be connected once before it can be listed. Afterwards the child is dropped
-  // again and only respawns when a tool call needs it. Ids come from the mirror:
-  // the store mints its own, so ToolHome's ids are not usable here.
-  const discovered: string[] = [];
-  for (const server of store
-    .listServers()
-    .filter((item) => item.enabled && item.kind === 'node' && item.nodeId === options.nodeId)) {
-    if (store.getSnapshot(server.id) !== null) continue;
-    try {
-      await upstreams.refresh(server.id);
-      await upstreams.remove(server.id);
-      discovered.push(server.slug);
-    } catch (error) {
-      logger.warn('Capability discovery failed; its tools stay absent until it succeeds', {
-        slug: server.slug,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  logger.info('local gateway ready', {
-    nodeId: options.nodeId,
-    servers: servers.length,
-    discovered,
-  });
-
   return {
+    nodeId: options.nodeId,
+    store,
+    upstreams,
+    servers,
     serverFactory: () => gatewayFactory.aggregate(),
+    async discoverSnapshots(force = false) {
+      // Tools of the aggregate come from stored capability snapshots, so a server
+      // has to be connected once before it can be listed. Afterwards the child is
+      // dropped again and only respawns when a tool call needs it. Ids come from
+      // the mirror: the store mints its own, so ToolHome's ids are not usable.
+      // Servers are checked in parallel: one slow `npx` download would otherwise
+      // stretch a `--check` into minutes.
+      const targets = store
+        .listServers()
+        .filter(
+          (item) =>
+            item.enabled &&
+            item.kind === 'node' &&
+            item.nodeId === options.nodeId &&
+            (force || store.getSnapshot(item.id) === null),
+        );
+      const checked = await Promise.all(
+        targets.map(async (server) => {
+          try {
+            await upstreams.refresh(server.id);
+            await upstreams.remove(server.id);
+            return { slug: server.slug, ok: true, error: undefined as string | undefined };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn('Capability discovery failed; its tools stay absent until it succeeds', {
+              slug: server.slug,
+              error: message,
+            });
+            return { slug: server.slug, ok: false, error: message };
+          }
+        }),
+      );
+      return checked.sort((left, right) => left.slug.localeCompare(right.slug));
+    },
     async close(): Promise<void> {
       await upstreams.close();
     },
   };
+}
+
+/** Start the local gateway and keep it serving over the caller's stdio. */
+export async function startLocalGateway(options: LocalGatewayOptions): Promise<LocalGateway> {
+  const runtime = await prepareLocalGateway(options);
+  return { serverFactory: runtime.serverFactory, close: () => runtime.close() };
 }
 
 /**
