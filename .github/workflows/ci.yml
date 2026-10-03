@@ -6,6 +6,13 @@ on:
     tags: ['v*']
   pull_request:
 
+# Two runs deploying at once collide on the server (concurrent `docker system
+# prune` fails the deploy step) and on the registry push, so serialize them.
+# Newer commits still win: an in-flight run is cancelled rather than queued.
+concurrency:
+  group: toolhome-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
