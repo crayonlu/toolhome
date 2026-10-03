@@ -44,6 +44,7 @@ import { canonicalTaskMethod } from './task-extension.js';
 import { ToolProjectionService } from './projection.js';
 import {
   aggregateName,
+  aggregateToolName,
   aggregateExtensionMethod,
   expandVirtualResourceTemplate,
   parseVirtualResourceUri,
@@ -54,6 +55,7 @@ import {
   rewriteAggregateTool,
   restoreAggregateContent,
   splitAggregateName,
+  splitAggregateToolName,
   splitAggregateExtensionMethod,
   virtualResourceTemplate,
   virtualResourceUri,
@@ -139,7 +141,7 @@ export class GatewayServerFactory {
       {
         capabilities: aggregate.capabilities,
         instructions:
-          'ToolHome aggregates enabled servers. Tools and prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
+          'ToolHome aggregates enabled servers. Tools use server_slug_encodedToolName; prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
         requestState: { verify: this.#stateCodec.verify },
         inputRequired: { legacyShim: true },
       },
@@ -168,7 +170,10 @@ export class GatewayServerFactory {
           try {
             route = await this.#liveToolRoute(server, request.name, context);
             const params = this.#prepareParams(
-              this.#restoreParams({ ...request, name: route.originalName }, route.entry.server.slug),
+              this.#restoreParams(
+                { ...request, name: route.originalName },
+                route.entry.server.slug,
+              ),
               context,
               route.entry.server.id,
               route.entry.server.slug,
@@ -876,7 +881,7 @@ export class GatewayServerFactory {
           const visible = this.#projections.apply(entry.server.id, tools);
           return visible.map((tool) => ({
             ...rewriteAggregateTool(tool, entry.server.slug),
-            name: aggregateName(entry.server.slug, tool.name),
+            name: aggregateToolName(entry.server.slug, tool.name),
           }));
         }),
     );
@@ -1053,7 +1058,7 @@ export class GatewayServerFactory {
       const entry = this.#registry.entryBySlug(appRoute.slug);
       const tool = (await this.#listTools(server, entry, context, {})).find(
         (candidate) =>
-          candidate.name === name || aggregateName(entry.server.slug, candidate.name) === name,
+          candidate.name === name || aggregateToolName(entry.server.slug, candidate.name) === name,
       );
       if (tool && this.#projections.isVisible(entry.server.id, tool.name)) {
         return { entry, originalName: tool.name };
@@ -1061,11 +1066,11 @@ export class GatewayServerFactory {
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${name}`);
     }
 
-    const parsed = splitAggregateName(name);
-    if (parsed) {
-      const entry = this.#registry.entryBySlug(parsed.slug);
+    const slug = splitAggregateToolName(name);
+    if (slug) {
+      const entry = this.#registry.entryBySlug(slug);
       const tool = (await this.#listTools(server, entry, context, {})).find(
-        (candidate) => aggregateName(entry.server.slug, candidate.name) === name,
+        (candidate) => aggregateToolName(entry.server.slug, candidate.name) === name,
       );
       if (tool && this.#projections.isVisible(entry.server.id, tool.name)) {
         return { entry, originalName: tool.name };
@@ -1079,7 +1084,8 @@ export class GatewayServerFactory {
           entry,
           tool: (await this.#listTools(server, entry, context, {})).find(
             (candidate) =>
-              candidate.name === name && this.#projections.isVisible(entry.server.id, candidate.name),
+              candidate.name === name &&
+              this.#projections.isVisible(entry.server.id, candidate.name),
           ),
         })),
       )

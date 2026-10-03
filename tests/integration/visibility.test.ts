@@ -1,15 +1,8 @@
 import type { FetchLike } from '@modelcontextprotocol/client';
-import {
-  credentialRecordSchema,
-  serverRecordSchema,
-} from '../../src/domain/models.js';
+import { credentialRecordSchema, serverRecordSchema } from '../../src/domain/models.js';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import {
-  connectTestClient,
-  waitFor,
-  type TestMcpClient,
-} from '../support/mcp-client.js';
+import { connectTestClient, waitFor, type TestMcpClient } from '../support/mcp-client.js';
 import { startRemoteFixture } from '../support/remote-fixture.js';
 import {
   applicationFetch,
@@ -100,11 +93,11 @@ describe('tool visibility projection', () => {
 
       // Before hiding: echo is listed and callable at the aggregate.
       const before = await aggregate.client.listTools();
-      expect(before.tools.map((tool) => tool.name)).toContain('remote.echo');
-      await aggregate.client.callTool({ name: 'remote.echo', arguments: { value: 1 } });
+      expect(before.tools.map((tool) => tool.name)).toContain('remote_echo');
+      await aggregate.client.callTool({ name: 'remote_echo', arguments: { value: 1 } });
 
-      // Hide remote.echo through the control API.
-      const projection = await jsonResponse(
+      // Hide the upstream echo tool through the control API.
+      const projection = (await jsonResponse(
         await controlRequest(
           testRuntime.runtime,
           testRuntime.controlKey,
@@ -112,7 +105,7 @@ describe('tool visibility projection', () => {
           `/api/v1/servers/${server.id}/projection`,
           { overrides: [{ tool: 'echo', visibility: 'hidden' }] },
         ),
-      ) as { tools: { name: string; visible: boolean }[] };
+      )) as { tools: { name: string; visible: boolean }[] };
       expect(projection.tools.find((tool) => tool.name === 'echo')?.visible).toBe(false);
 
       // Connected clients get tools/list_changed.
@@ -121,12 +114,12 @@ describe('tool visibility projection', () => {
       // Aggregate list no longer exposes the hidden tool.
       const after = await aggregate.client.listTools();
       const names = after.tools.map((tool) => tool.name);
-      expect(names).not.toContain('remote.echo');
-      expect(names).toContain('remote.progress');
+      expect(names).not.toContain('remote_echo');
+      expect(names).toContain('remote_progress');
 
       // Aggregate call to a hidden tool is rejected (never forwarded).
       await expect(
-        aggregate.client.callTool({ name: 'remote.echo', arguments: {} }),
+        aggregate.client.callTool({ name: 'remote_echo', arguments: {} }),
       ).rejects.toThrow();
 
       // Individual endpoint stays lossless.
@@ -159,14 +152,25 @@ describe('tool visibility projection', () => {
           'GET',
           '/api/v1/calls?limit=50',
         ),
-      )) as { items: { endpointType: string; exposedToolName: string; status: string; principalKind: string }[] };
+      )) as {
+        items: {
+          endpointType: string;
+          exposedToolName: string;
+          status: string;
+          principalKind: string;
+        }[];
+      };
       const byEndpoint = Object.groupBy(calls.items, (call) => call.endpointType);
       const aggregateCalls = byEndpoint.aggregate ?? [];
       const individualCalls = byEndpoint.individual ?? [];
       expect(aggregateCalls.length).toBeGreaterThanOrEqual(2);
       expect(individualCalls.length).toBeGreaterThanOrEqual(1);
       expect(calls.items.every((call) => call.principalKind === 'access_key')).toBe(true);
-      expect(aggregateCalls.some((call) => call.exposedToolName === 'remote.echo' && call.status === 'protocol_error')).toBe(true);
+      expect(
+        aggregateCalls.some(
+          (call) => call.exposedToolName === 'remote_echo' && call.status === 'protocol_error',
+        ),
+      ).toBe(true);
 
       // Stats endpoint aggregates the same rows.
       const stats = (await jsonResponse(

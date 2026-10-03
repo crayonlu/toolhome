@@ -204,7 +204,7 @@ Or per-server (independent endpoint, original tool names):
 }
 ```
 
-Aggregate tool names are `{server_slug}.{tool_name}`. Per-server preserves original names.
+Aggregate tool names are `{server_slug}_{encoded_tool_name}`; non-alphanumeric UTF-8 bytes are encoded as `-hh` (for example, `github.search_code` becomes `github_search-5fcode`). Per-server preserves original names.
 
 ### Run a Server on a Client Machine
 
@@ -235,7 +235,7 @@ Some capabilities only exist on the machine running the agent: a local Chrome, a
 
 3. Verify with `toolhome mcp launch chrome-devtools`: it must speak MCP on stdio and write nothing else to stdout.
 
-**One entry for every server on the machine**: `toolhome mcp stdio` fronts all of them at once, so the harness config shrinks to a single command and a server added later needs no config edit at all. Tool names are namespaced `slug.tool`; children spawn lazily on first use and are disconnected again when the client goes away.
+**One entry for every server on the machine**: `toolhome mcp stdio` fronts all of them at once, so the harness config shrinks to a single command and a server added later needs no config edit at all. Tool names use the compatible `slug_encodedToolName` format; children spawn lazily on first use and are disconnected again when the client goes away.
 
 ```json
 { "command": "toolhome", "args": ["mcp", "stdio"] }

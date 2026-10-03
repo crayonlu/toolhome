@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   aggregateExtensionMethod,
   aggregateName,
+  aggregateToolName,
+  splitAggregateToolName,
   expandVirtualResourceTemplate,
   parseVirtualResourceTemplate,
   parseVirtualResourceUri,
@@ -18,7 +20,28 @@ import {
 describe('aggregate virtualization', () => {
   it('keeps names bounded and extension methods reversible', () => {
     expect(aggregateName('github', 'search')).toBe('github.search');
-    expect(aggregateName('server', 'x'.repeat(200))).toHaveLength(128);
+    expect(aggregateToolName('github', 'search')).toBe('github_search');
+    expect(aggregateToolName('chrome-devtools', 'take_screenshot')).toBe(
+      'chrome-devtools_take-5fscreenshot',
+    );
+    expect(aggregateToolName('remote', 'a.b/c-ü')).toBe('remote_a-2eb-2fc-2d-c3-bc');
+    expect(splitAggregateToolName('chrome-devtools_take-5fscreenshot')).toBe('chrome-devtools');
+    expect(splitAggregateToolName('missing-separator')).toBeNull();
+    expect(aggregateToolName('server', 'x'.repeat(200))).toHaveLength(128);
+    expect(aggregateToolName('server', 'x'.repeat(199) + 'y')).not.toBe(
+      aggregateToolName('server', 'x'.repeat(200)),
+    );
+    for (const name of [
+      'simple',
+      'a.b/c-ü',
+      'a-2eb',
+      'a.b',
+      'x'.repeat(200),
+      'x'.repeat(199) + 'y',
+    ]) {
+      expect(aggregateToolName('remote', name)).toMatch(/^[A-Za-z][A-Za-z0-9_-]*$/);
+    }
+    expect(aggregateToolName('remote', 'a.b')).not.toBe(aggregateToolName('remote', 'a-2eb'));
     const method = aggregateExtensionMethod('remote', 'vendor/deep/action');
     expect(splitAggregateExtensionMethod(method)).toEqual({
       slug: 'remote',

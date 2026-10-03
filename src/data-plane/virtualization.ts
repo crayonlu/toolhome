@@ -3,6 +3,27 @@ import { UriTemplate, type Tool, type Variables } from '@modelcontextprotocol/se
 
 const maxNameLength = 128;
 
+export function aggregateToolName(slug: string, original: string): string {
+  const encoded = [...Buffer.from(original, 'utf8')]
+    .map((byte) =>
+      (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        ? String.fromCharCode(byte)
+        : `-${byte.toString(16).padStart(2, '0')}`,
+    )
+    .join('');
+  const candidate = `${slug}_${encoded || '-00'}`;
+  if (candidate.length <= maxNameLength) return candidate;
+  const suffix = createHash('sha256').update(candidate).digest('hex').slice(0, 12);
+  return `${candidate.slice(0, maxNameLength - suffix.length - 1)}-${suffix}`;
+}
+
+export function splitAggregateToolName(value: string): string | null {
+  const separator = value.indexOf('_');
+  if (separator <= 0 || separator === value.length - 1) return null;
+  const slug = value.slice(0, separator);
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null;
+}
+
 export function aggregateName(slug: string, original: string): string {
   const candidate = `${slug}.${original}`;
   if (candidate.length <= maxNameLength) return candidate;

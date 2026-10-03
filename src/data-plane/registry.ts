@@ -11,6 +11,7 @@ import type { CapabilitySnapshot, ServerRecord } from '../domain/models.js';
 import type { Store } from '../storage/store.js';
 import {
   aggregateName,
+  aggregateToolName,
   rewriteAggregateTool,
   virtualResourceTemplate,
   virtualResourceUri,
@@ -70,7 +71,7 @@ export class CapabilityRegistry {
     const tools = entries.flatMap(({ server, snapshot }) =>
       snapshot.tools.map((tool) => ({
         ...rewriteAggregateTool(tool, server.slug),
-        name: aggregateName(server.slug, tool.name),
+        name: aggregateToolName(server.slug, tool.name),
       })),
     );
     const prompts = entries.flatMap(({ server, snapshot }) =>
@@ -147,7 +148,7 @@ export class CapabilityRegistry {
   findAggregateTool(name: string): { entry: RegistryEntry; originalName: string } {
     for (const entry of this.entries()) {
       const tool = entry.snapshot.tools.find(
-        (candidate) => aggregateName(entry.server.slug, candidate.name) === name,
+        (candidate) => aggregateToolName(entry.server.slug, candidate.name) === name,
       );
       if (tool) return { entry, originalName: tool.name };
     }

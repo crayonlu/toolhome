@@ -123,11 +123,11 @@ try {
   const aggregate = await connectTestClient(new URL('/mcp', baseUrl), access.secret);
   clients.push(aggregate);
   const tools = await aggregate.client.listTools();
-  assert(tools.tools.some((tool) => tool.name === 'remote.echo'));
-  assert(tools.tools.some((tool) => tool.name === 'home.confirm'));
+  assert(tools.tools.some((tool) => tool.name === 'remote_echo'));
+  assert(tools.tools.some((tool) => tool.name === 'home_confirm'));
   assert.deepEqual(
     structuredResult(
-      await aggregate.client.callTool({ name: 'remote.echo', arguments: { live: true } }),
+      await aggregate.client.callTool({ name: 'remote_echo', arguments: { live: true } }),
     ),
     {
       arguments: { live: true },
@@ -137,12 +137,12 @@ try {
     },
   );
   assert.equal(
-    structuredResult(await aggregate.client.callTool({ name: 'home.confirm', arguments: {} }))
+    structuredResult(await aggregate.client.callTool({ name: 'home_confirm', arguments: {} }))
       .source,
     'legacy-push',
   );
   assert.equal(
-    structuredResult(await aggregate.client.callTool({ name: 'home.echo', arguments: {} })).secret,
+    structuredResult(await aggregate.client.callTool({ name: 'home_echo', arguments: {} })).secret,
     'real-home-secret',
   );
 
@@ -150,7 +150,7 @@ try {
   assert.equal(
     structuredResult(
       await aggregate.client.callTool(
-        { name: 'remote.progress', arguments: {} },
+        { name: 'remote_progress', arguments: {} },
         {
           onprogress(update) {
             progress.push(update.progress);
@@ -165,7 +165,7 @@ try {
   const controller = new AbortController();
   const cancellation: Promise<{ kind: 'fulfilled' } | { error: unknown; kind: 'rejected' }> =
     aggregate.client
-      .callTool({ name: 'remote.slow', arguments: {} }, { signal: controller.signal })
+      .callTool({ name: 'remote_slow', arguments: {} }, { signal: controller.signal })
       .then(
         () => ({ kind: 'fulfilled' }),
         (error: unknown) => ({ error, kind: 'rejected' }),
@@ -181,11 +181,11 @@ try {
   const refreshedTools = await aggregate.client.listTools(undefined, {
     cacheMode: 'refresh',
   });
-  assert(refreshedTools.tools.some((tool) => tool.name === 'remote.dynamic'));
+  assert(refreshedTools.tools.some((tool) => tool.name === 'remote_dynamic'));
 
   const created = taskCreatedSchema.parse(
     aggregate.taskResult(
-      await aggregate.client.callTool({ name: 'remote.start-task', arguments: {} }),
+      await aggregate.client.callTool({ name: 'remote_start-2dtask', arguments: {} }),
     ),
   );
   assert.match(created.taskId, /^toolhome-task:remote:/);
@@ -236,8 +236,8 @@ try {
   );
   clients.push(legacyHarness);
   for (const interaction of [
-    { name: 'remote.confirm', source: 'modern-mrtr' },
-    { name: 'home.confirm', source: 'legacy-push' },
+    { name: 'remote_confirm', source: 'modern-mrtr' },
+    { name: 'home_confirm', source: 'legacy-push' },
   ]) {
     assert.equal(
       structuredResult(
@@ -252,7 +252,7 @@ try {
   assert.equal(
     structuredResult(
       await legacyHarness.client.callTool({
-        name: 'home.client-extension',
+        name: 'home_client-2dextension',
         arguments: {},
       }),
     ).source,

@@ -231,23 +231,31 @@ describe('MCP gateway', () => {
       const tools = await aggregate.client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
-          'remote.echo',
-          'home.echo',
-          'remote.confirm',
-          'home.confirm',
-          'remote.start-task',
+          'remote_echo',
+          'home_echo',
+          'remote_confirm',
+          'home_confirm',
+          'remote_start-2dtask',
         ]),
       );
-      const appTool = tools.tools.find((tool) => tool.name === 'remote.open-dashboard');
+      const appTool = tools.tools.find((tool) => tool.name === 'remote_open-2ddashboard');
+      expect(tools.tools.map((tool) => tool.name)).toContain('remote_app-2eaction');
+      expect(tools.tools.every((tool) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(tool.name))).toBe(true);
       const appUi = appTool?._meta?.ui;
       expect(appTool?._meta?.['ui/resourceUri']).toMatch(/^ui:\/\/toolhome\/remote\/resource\//);
       expect(isRecord(appUi) ? appUi.resourceUri : undefined).toMatch(
         /^ui:\/\/toolhome\/remote\/resource\//,
       );
 
+      expect(
+        structuredResult(
+          await aggregate.client.callTool({ name: 'remote_app-2eaction', arguments: {} }),
+        ),
+      ).toMatchObject({ appAction: true, server: 'remote' });
+
       const remoteEcho = structuredResult(
         await aggregate.client.callTool({
-          name: 'remote.echo',
+          name: 'remote_echo',
           arguments: { message: 'hello' },
         }),
       );
@@ -256,17 +264,17 @@ describe('MCP gateway', () => {
         server: 'remote',
       });
       const homeEcho = structuredResult(
-        await aggregate.client.callTool({ name: 'home.echo', arguments: {} }),
+        await aggregate.client.callTool({ name: 'home_echo', arguments: {} }),
       );
       expect(homeEcho).toMatchObject({ secret: 'home-fixture-secret', server: 'home' });
 
       for (const interaction of [
-        { name: 'remote.confirm', source: 'modern-mrtr' },
-        { name: 'home.confirm', source: 'legacy-push' },
-        { name: 'remote.roots', source: 'modern-mrtr' },
-        { name: 'home.roots', source: 'legacy-push' },
-        { name: 'remote.sample', source: 'modern-mrtr' },
-        { name: 'home.sample', source: 'legacy-push' },
+        { name: 'remote_confirm', source: 'modern-mrtr' },
+        { name: 'home_confirm', source: 'legacy-push' },
+        { name: 'remote_roots', source: 'modern-mrtr' },
+        { name: 'home_roots', source: 'legacy-push' },
+        { name: 'remote_sample', source: 'modern-mrtr' },
+        { name: 'home_sample', source: 'legacy-push' },
       ]) {
         const result = structuredResult(
           await aggregate.client.callTool({ name: interaction.name, arguments: {} }),
@@ -292,7 +300,7 @@ describe('MCP gateway', () => {
 
       const restoredArgument = structuredResult(
         await aggregate.client.callTool({
-          name: 'remote.echo',
+          name: 'remote_echo',
           arguments: { uri: remoteData.uri },
         }),
       );
@@ -358,7 +366,7 @@ describe('MCP gateway', () => {
       });
       expect(completion.completion.values).toEqual(['mcp-one', 'mcp-two']);
       const appCall = await aggregate.client.callTool({
-        name: 'remote.open-dashboard',
+        name: 'remote_open-2ddashboard',
         arguments: {},
       });
       const link = z
@@ -384,7 +392,7 @@ describe('MCP gateway', () => {
       const progress: number[] = [];
       const progressResult = structuredResult(
         await aggregate.client.callTool(
-          { name: 'remote.progress', arguments: {} },
+          { name: 'remote_progress', arguments: {} },
           {
             onprogress(update) {
               progress.push(update.progress);
@@ -398,7 +406,7 @@ describe('MCP gateway', () => {
       const controller = new AbortController();
       const cancellation: Promise<{ kind: 'fulfilled' } | { error: unknown; kind: 'rejected' }> =
         aggregate.client
-          .callTool({ name: 'remote.slow', arguments: {} }, { signal: controller.signal })
+          .callTool({ name: 'remote_slow', arguments: {} }, { signal: controller.signal })
           .then(
             () => ({ kind: 'fulfilled' }),
             (error: unknown) => ({ error, kind: 'rejected' }),
@@ -415,12 +423,12 @@ describe('MCP gateway', () => {
       const changedTools = await aggregate.client.listTools(undefined, {
         cacheMode: 'refresh',
       });
-      expect(changedTools.tools.map((tool) => tool.name)).toContain('remote.dynamic');
+      expect(changedTools.tools.map((tool) => tool.name)).toContain('remote_dynamic');
 
       const createdTask = createdTaskSchema.parse(
         aggregate.taskResult(
           await aggregate.client.callTool({
-            name: 'remote.start-task',
+            name: 'remote_start-2dtask',
             arguments: {},
           }),
         ),
@@ -474,12 +482,12 @@ describe('MCP gateway', () => {
       clients.push(legacyHarness);
       await legacyHarness.client.setLoggingLevel('debug');
       for (const interaction of [
-        { name: 'remote.confirm', source: 'modern-mrtr' },
-        { name: 'home.confirm', source: 'legacy-push' },
-        { name: 'remote.roots', source: 'modern-mrtr' },
-        { name: 'home.roots', source: 'legacy-push' },
-        { name: 'remote.sample', source: 'modern-mrtr' },
-        { name: 'home.sample', source: 'legacy-push' },
+        { name: 'remote_confirm', source: 'modern-mrtr' },
+        { name: 'home_confirm', source: 'legacy-push' },
+        { name: 'remote_roots', source: 'modern-mrtr' },
+        { name: 'home_roots', source: 'legacy-push' },
+        { name: 'remote_sample', source: 'modern-mrtr' },
+        { name: 'home_sample', source: 'legacy-push' },
       ]) {
         const result = structuredResult(
           await legacyHarness.client.callTool({
@@ -491,7 +499,7 @@ describe('MCP gateway', () => {
       }
       const clientExtension = structuredResult(
         await legacyHarness.client.callTool({
-          name: 'home.client-extension',
+          name: 'home_client-2dextension',
           arguments: {},
         }),
       );
