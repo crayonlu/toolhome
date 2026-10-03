@@ -11,7 +11,7 @@ ToolHome can now hold MCP servers that must run on the machine using them, not o
 
 ## Upgrade
 
-Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.2`.
+Requires Node.js 24+ for the management CLI: `npm install -g toolhome@0.6.3`. 0.6.3 adds `toolhome node status` — the local health report for node-hosted servers (runtime state, capability counts from the last discovery, call counts, launch-command probe), with `--check` reconnecting to each enabled server in parallel to refresh capabilities.
 
 Use 0.6.2 or later from npm: the 0.6.0 tarball was published from a partial tree (no CLI fixes), and 0.6.1 was published before `toolhome mcp stdio` and the child-process reap landed.
 
