@@ -1,6 +1,6 @@
 {
   "name": "toolhome",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Self-hosted home for remote-native and home-hosted MCP servers and CLIs.",
   "type": "module",
   "bin": {
