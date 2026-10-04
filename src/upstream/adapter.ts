@@ -143,12 +143,18 @@ interface PendingLegacyInput {
 
 type LegacyRoundOutcome = { kind: 'result'; value: unknown } | { kind: 'error'; error: Error };
 
+interface RequestDispatch {
+  options: RequestOptions;
+  flushProgress(): Promise<void>;
+}
+
 interface LegacyRound {
   id: string;
   method: string;
   slot: ConnectionSlot;
   controller: AbortController;
   completion: Promise<LegacyRoundOutcome>;
+  flushProgress(): Promise<void>;
   settle(outcome: LegacyRoundOutcome): void;
   inputs: Map<string, PendingLegacyInput>;
   inputSignal: Deferred<void>;
@@ -222,8 +228,16 @@ export class UpstreamAdapter {
       return this.#startLegacyRound(slot, request, bridge, execution);
     }
     try {
-      const options = this.#requestOptions(request, bridge.context);
-      return await this.#requestOnSlot(slot, request, options, execution);
+      const dispatch = this.#requestOptions(request, bridge.context);
+      let result: unknown;
+      try {
+        result = await this.#requestOnSlot(slot, request, dispatch.options, execution);
+      } catch (error) {
+        await dispatch.flushProgress().catch(() => undefined);
+        throw error;
+      }
+      await dispatch.flushProgress();
+      return result;
     } finally {
       slot.bridge.current = null;
       this.#release(slot);
@@ -312,6 +326,7 @@ export class UpstreamAdapter {
       slot,
       controller,
       completion: completion.promise,
+      flushProgress: async () => undefined,
       settle: completion.resolve,
       inputs: new Map(),
       inputSignal: deferred<void>(),
@@ -330,8 +345,9 @@ export class UpstreamAdapter {
     slot.bridge.legacyRound = round;
     this.#attachLegacyBridge(round, bridge);
     if (round.closed) return this.#awaitLegacyRound(round);
-    const options = this.#legacyRoundRequestOptions(request, slot.bridge, controller.signal);
-    void this.#requestOnSlot(slot, request, options, execution).then(
+    const dispatch = this.#legacyRoundRequestOptions(request, slot.bridge, controller.signal);
+    round.flushProgress = dispatch.flushProgress;
+    void this.#requestOnSlot(slot, request, dispatch.options, execution).then(
       (value) => round.settle({ kind: 'result', value }),
       (error) =>
         round.settle({
@@ -375,36 +391,47 @@ export class UpstreamAdapter {
   }
 
   async #awaitLegacyRound(round: LegacyRound): Promise<unknown> {
-    while (!round.closed) {
-      if (round.inputs.size === 0) {
-        const outcome = await Promise.race([
-          round.completion,
-          round.inputSignal.promise.then((): { kind: 'input' } => ({ kind: 'input' })),
-        ]);
-        if (outcome.kind === 'result') {
-          this.#finishLegacyRound(round);
-          return outcome.value;
+    try {
+      while (!round.closed) {
+        if (round.inputs.size === 0) {
+          const outcome = await Promise.race([
+            round.completion,
+            round.inputSignal.promise.then((): { kind: 'input' } => ({ kind: 'input' })),
+          ]);
+          if (outcome.kind === 'result') {
+            await round.flushProgress();
+            if (round.closed)
+              throw new AppError('request_cancelled', 'Legacy round was closed', 499);
+            this.#finishLegacyRound(round);
+            return outcome.value;
+          }
+          if (outcome.kind === 'error') {
+            await round.flushProgress().catch(() => undefined);
+            this.#finishLegacyRound(round, outcome.error);
+            throw outcome.error;
+          }
+          await Promise.resolve();
+          if (round.inputs.size === 0) continue;
         }
-        if (outcome.kind === 'error') {
-          this.#finishLegacyRound(round, outcome.error);
-          throw outcome.error;
-        }
-        await Promise.resolve();
-        if (round.inputs.size === 0) continue;
+        const inputRequests = Object.fromEntries(
+          [...round.inputs].map(([key, input]) => [key, input.request]),
+        );
+        round.inputSignal = deferred<void>();
+        await round.flushProgress();
+        if (round.closed) throw new AppError('request_cancelled', 'Legacy round was closed', 499);
+        round.detachSignal();
+        round.slot.bridge.current = null;
+        return {
+          resultType: 'input_required',
+          inputRequests,
+          requestState: `${legacyRoundStatePrefix}${round.id}`,
+        };
       }
-      const inputRequests = Object.fromEntries(
-        [...round.inputs].map(([key, input]) => [key, input.request]),
-      );
-      round.inputSignal = deferred<void>();
-      round.detachSignal();
-      round.slot.bridge.current = null;
-      return {
-        resultType: 'input_required',
-        inputRequests,
-        requestState: `${legacyRoundStatePrefix}${round.id}`,
-      };
+      throw new AppError('legacy_round_not_found', 'Legacy input round is closed', 409);
+    } catch (error) {
+      this.#cancelLegacyRound(round.id, toError(error));
+      throw error;
     }
-    throw new AppError('legacy_round_not_found', 'Legacy input round is closed', 409);
   }
 
   #attachLegacyBridge(round: LegacyRound, bridge: BridgeContext): void {
@@ -458,26 +485,13 @@ export class UpstreamAdapter {
     request: UpstreamRequest,
     bridge: BridgeRef,
     signal: AbortSignal,
-  ): RequestOptions {
-    const progressToken = this.#progressToken(request.params);
-    return {
+  ): RequestDispatch {
+    return this.#progressDispatch(request, () => bridge.current?.context, {
       signal,
       timeout: this.server.settings.maxTotalTimeoutMs,
       maxTotalTimeout: this.server.settings.maxTotalTimeoutMs,
       resetTimeoutOnProgress: true,
-      ...(progressToken === null
-        ? {}
-        : {
-            onprogress: async (progress) => {
-              const active = bridge.current;
-              if (!active) return;
-              await active.context.mcpReq.notify({
-                method: 'notifications/progress',
-                params: { progressToken, ...progress },
-              });
-            },
-          }),
-    };
+    });
   }
 
   async notify(
@@ -766,6 +780,21 @@ export class UpstreamAdapter {
         connected = true;
         const protocolVersion = client.getNegotiatedProtocolVersion();
         if (!protocolVersion) throw new Error('Upstream protocol version is unavailable');
+        const onmessage = transport.onmessage;
+        if (!onmessage) throw new Error('MCP transport message handler is unavailable');
+        let inbound = Promise.resolve();
+        transport.onmessage = (message, extra) => {
+          // Drain SDK notification microtasks before a same-chunk response removes its handler.
+          inbound = inbound
+            .then(() => onmessage(message, extra))
+            .catch((error: unknown) => {
+              try {
+                client.onerror?.(toError(error));
+              } catch {
+                // Keep later messages deliverable if error reporting fails.
+              }
+            });
+        };
         const extensions = new ExtensionTransportBridge(transport, protocolVersion, capabilities);
         slot = {
           client,
@@ -940,23 +969,89 @@ export class UpstreamAdapter {
     return redacted;
   }
 
-  #requestOptions(request: UpstreamRequest, context: ServerContext): RequestOptions {
-    const progressToken = this.#progressToken(request.params);
-    return {
+  #requestOptions(request: UpstreamRequest, context: ServerContext): RequestDispatch {
+    return this.#progressDispatch(request, () => context, {
       signal: context.mcpReq.signal,
       timeout: this.server.settings.requestTimeoutMs,
       maxTotalTimeout: this.server.settings.maxTotalTimeoutMs,
       resetTimeoutOnProgress: true,
-      ...(progressToken === null
-        ? {}
-        : {
-            onprogress: async (progress) => {
-              await context.mcpReq.notify({
-                method: 'notifications/progress',
-                params: { progressToken, ...progress },
-              });
-            },
-          }),
+    });
+  }
+
+  #progressDispatch(
+    request: UpstreamRequest,
+    context: () => ServerContext | undefined,
+    options: RequestOptions,
+  ): RequestDispatch {
+    const progressToken = this.#progressToken(request.params);
+    let pending = Promise.resolve();
+    let queued = 0;
+    let overflowed = false;
+    return {
+      options: {
+        ...options,
+        ...(progressToken === null
+          ? {}
+          : {
+              onprogress: (progress) => {
+                const active = context();
+                if (!active) return;
+                if (queued >= 256) {
+                  if (!overflowed)
+                    this.#logger.warn('Upstream progress forwarding queue exceeded its limit', {
+                      serverId: this.server.id,
+                    });
+                  overflowed = true;
+                  return;
+                }
+                queued++;
+                // The SDK invokes progress callbacks without awaiting them.
+                pending = pending
+                  .then(async () => {
+                    if (active.mcpReq.signal.aborted || options.signal?.aborted) return;
+                    await active.mcpReq.notify({
+                      method: 'notifications/progress',
+                      params: { progressToken, ...progress },
+                    });
+                  })
+                  .catch((error: unknown) => {
+                    this.#logger.warn('Upstream progress forwarding failed', {
+                      serverId: this.server.id,
+                      error: errorMessage(error),
+                    });
+                  })
+                  .finally(() => {
+                    queued--;
+                  });
+              },
+            }),
+      },
+      flushProgress: async () => {
+        const signal = options.signal;
+        if (signal?.aborted)
+          throw new AppError('request_cancelled', 'Downstream request was cancelled', 499);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let onAbort: () => void = () => undefined;
+        const interrupted = new Promise<never>((_, reject) => {
+          onAbort = () =>
+            reject(new AppError('request_cancelled', 'Downstream request was cancelled', 499));
+          signal?.addEventListener('abort', onAbort, { once: true });
+          timer = setTimeout(
+            () => reject(new AppError('upstream_timeout', 'Progress forwarding timed out', 504)),
+            this.server.settings.maxTotalTimeoutMs,
+          );
+        });
+        try {
+          let tail: Promise<void>;
+          do {
+            tail = pending;
+            await Promise.race([tail, interrupted]);
+          } while (tail !== pending);
+        } finally {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', onAbort);
+        }
+      },
     };
   }
 

@@ -1,4 +1,5 @@
 import {
+  Client,
   ProtocolError as ClientProtocolError,
   ProtocolErrorCode,
   type ClientCapabilities,
@@ -13,6 +14,7 @@ import {
 } from '@modelcontextprotocol/server';
 import { serve, type ServerType } from '@hono/node-server';
 import { once } from 'node:events';
+import { setImmediate } from 'node:timers/promises';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -105,7 +107,14 @@ async function startPinnedFixture(): Promise<PinnedFixture> {
       server.setRequestHandler(
         'tools/call',
         { params: CallToolRequestParamsSchema, result: looseResultSchema },
-        async (request) => {
+        async (request, context) => {
+          const token = request._meta?.progressToken;
+          if (token !== undefined) {
+            await context.mcpReq.notify({
+              method: 'notifications/progress',
+              params: { progressToken: token, progress: 1, total: 1 },
+            });
+          }
           state.calls += 1;
           if (inbound) state.headers = Object.fromEntries(inbound.entries());
           if (state.throwMismatchOnce) {
@@ -324,6 +333,233 @@ describe('UpstreamAdapter contract pinning', () => {
     ).rejects.toMatchObject({ code: ProtocolErrorCode.InvalidParams });
     expect(fixture.headers()['mcp-param-x-query']).toBe('abc');
   });
+});
+
+describe('UpstreamAdapter progress delivery ordering', () => {
+  it.each([
+    ['modern', 'modern', false],
+    ['modern', 'legacy', false],
+    ['legacy', 'modern', false],
+    ['legacy', 'legacy', false],
+    ['modern', 'modern', true],
+    ['legacy', 'modern', true],
+  ] as const)(
+    'flushes %s upstream progress before a %s downstream result (failure=%s)',
+    async (upstream, downstream, fail) => {
+      const directory = mkdtempSync(join(tmpdir(), 'toolhome-progress-order-'));
+      const fixture = upstream === 'modern' ? await startPinnedFixture() : null;
+      const harness = createHarness(
+        directory,
+        fixture
+          ? {
+              type: 'streamable-http',
+              url: fixture.url.toString(),
+              protocolMode: 'modern',
+              allowSseFallback: false,
+              headers: {},
+            }
+          : {
+              type: 'stdio',
+              command: process.execPath,
+              args: [
+                '--import',
+                'tsx',
+                fileURLToPath(new URL('../fixtures/compact-legacy-server.ts', import.meta.url)),
+              ],
+              env: {},
+              protocolMode: 'legacy',
+            },
+        { maxConcurrency: 1 },
+        fixture ? 'remote' : 'home',
+      );
+      let release!: () => void;
+      let started!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const notificationStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const bridge = bridgeContext(harness.controller.signal);
+      if (downstream === 'legacy') delete bridge.context.mcpReq.envelope;
+      const notifications: unknown[] = [];
+      bridge.context.mcpReq.notify = async (notification) => {
+        started();
+        await blocked;
+        notifications.push(notification);
+      };
+      let received!: () => void;
+      const upstreamResponse = new Promise<void>((resolve) => {
+        received = resolve;
+      });
+      const originalRequest = Client.prototype.request;
+      const requestSpy = vi.spyOn(Client.prototype, 'request').mockImplementation(async function (
+        this: Client,
+        ...args
+      ) {
+        try {
+          return await originalRequest.apply(this, args);
+        } finally {
+          if (args[0].method === 'tools/call') received();
+        }
+      });
+      if (fail) fixture?.mismatchOnce();
+      let completed = false;
+      const execution = harness.adapter
+        .execute(
+          {
+            method: 'tools/call',
+            params: {
+              name: fixture ? 'pinned' : 'progress',
+              arguments: { query: 'ordered', fail },
+              _meta: { progressToken: 'downstream-token' },
+            },
+          },
+          bridge,
+          fixture ? { toolDefinition: freshTool } : {},
+        )
+        .then(
+          (result) => {
+            completed = true;
+            return { result };
+          },
+          (error: unknown) => {
+            completed = true;
+            return { error };
+          },
+        );
+      try {
+        await notificationStarted;
+        await upstreamResponse;
+        await setImmediate();
+        expect(completed).toBe(false);
+        release();
+        const result = await execution;
+        expect(notifications).toEqual([
+          {
+            method: 'notifications/progress',
+            params: { progressToken: 'downstream-token', progress: 1, total: 1 },
+          },
+        ]);
+        if (fail)
+          expect(result).toMatchObject({
+            error: { message: fixture ? 'Simulated HeaderMismatch' : 'Fixture progress failure' },
+          });
+        expect(result).toMatchObject(
+          fail
+            ? { error: expect.any(Error) }
+            : {
+                result: fixture
+                  ? { structuredContent: { pinned: 'ordered' } }
+                  : { content: [{ type: 'text', text: JSON.stringify({ progressed: true }) }] },
+              },
+        );
+      } finally {
+        release();
+        await execution.catch(() => undefined);
+        requestSpy.mockRestore();
+        await harness.adapter.close();
+        harness.store.close();
+        await fixture?.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('UpstreamAdapter progress suspension and interruption', () => {
+  it.each(['suspend', 'cancel', 'timeout'] as const)(
+    'handles %s while downstream progress is blocked',
+    async (action) => {
+      const directory = mkdtempSync(join(tmpdir(), 'toolhome-progress-suspend-'));
+      const harness = createHarness(
+        directory,
+        {
+          type: 'stdio',
+          command: process.execPath,
+          args: [
+            '--import',
+            'tsx',
+            fileURLToPath(new URL('../fixtures/compact-legacy-server.ts', import.meta.url)),
+          ],
+          env: {},
+          protocolMode: 'legacy',
+        },
+        {
+          maxConcurrency: 1,
+          requestTimeoutMs: action === 'timeout' ? 200 : 5000,
+          maxTotalTimeoutMs: action === 'timeout' ? 200 : 5000,
+        },
+        'home',
+      );
+      let release!: () => void;
+      let started!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const notificationStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const bridge = bridgeContext(harness.controller.signal, { elicitation: { form: {} } });
+      bridge.context.mcpReq.notify = async () => {
+        started();
+        await blocked;
+      };
+      let completed = false;
+      const execution = harness.adapter
+        .execute(
+          {
+            method: 'tools/call',
+            params: {
+              name: 'confirm',
+              arguments: { marker: 'progress' },
+              _meta: { progressToken: 'suspending-token' },
+            },
+          },
+          bridge,
+        )
+        .then(
+          (result) => {
+            completed = true;
+            return { result };
+          },
+          (error: unknown) => {
+            completed = true;
+            return { error };
+          },
+        );
+      try {
+        await notificationStarted;
+        await setImmediate();
+        expect(completed).toBe(false);
+        if (action === 'suspend') {
+          release();
+          const outcome = await execution;
+          expect(outcome).toMatchObject({ result: { resultType: 'input_required' } });
+          harness.adapter.terminateContinuation(
+            ('result' in outcome
+              ? (outcome.result as { requestState: string })
+              : { requestState: '' }
+            ).requestState,
+          );
+        } else {
+          if (action === 'cancel') harness.controller.abort();
+          expect(await execution).toMatchObject({ error: expect.any(Error) });
+        }
+        const state = await harness.adapter.execute(
+          { method: 'tools/call', params: { name: 'state', arguments: {} } },
+          bridgeContext(new AbortController().signal),
+        );
+        expect(state).toMatchObject({ content: [{ type: 'text' }] });
+      } finally {
+        release();
+        await execution;
+        await harness.adapter.close();
+        harness.store.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('UpstreamAdapter legacy continuation termination', () => {

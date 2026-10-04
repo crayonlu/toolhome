@@ -1,7 +1,30 @@
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Server } from '@modelcontextprotocol/server';
 import { CallToolRequestParamsSchema } from '@modelcontextprotocol/core';
 import { z } from 'zod';
+
+const transport = new StdioServerTransport();
+const send = transport.send.bind(transport);
+let bufferedProgress: string | null = null;
+transport.send = async (message) => {
+  if (
+    'method' in message &&
+    message.method === 'notifications/progress' &&
+    message.params?.total === 1
+  ) {
+    bufferedProgress = `${JSON.stringify(message)}\n`;
+    return;
+  }
+  if (bufferedProgress !== null && 'id' in message && !('method' in message)) {
+    const batch = bufferedProgress + `${JSON.stringify(message)}\n`;
+    bufferedProgress = null;
+    await new Promise<void>((resolve, reject) =>
+      process.stdout.write(batch, (error) => (error ? reject(error) : resolve())),
+    );
+    return;
+  }
+  await send(message);
+};
 
 let effects = 0;
 let calls = 0;
@@ -44,6 +67,7 @@ serveStdio(
               method: 'notifications/progress',
               params: { progressToken: token, progress: 1, total: 1 },
             });
+          if (request.arguments?.fail) throw new Error('Fixture progress failure');
           return {
             content: [{ type: 'text', text: JSON.stringify({ progressed: token !== undefined }) }],
           };
@@ -71,6 +95,15 @@ serveStdio(
           });
           return { content: [{ type: 'text', text: 'completed' }] };
         }
+        if (
+          request.arguments?.marker === 'progress' &&
+          request._meta?.progressToken !== undefined
+        ) {
+          await context.mcpReq.notify({
+            method: 'notifications/progress',
+            params: { progressToken: request._meta.progressToken, progress: 1, total: 2 },
+          });
+        }
         const input = await context.mcpReq.elicitInput({
           mode: 'form',
           message: 'Confirm fixture effect',
@@ -95,5 +128,5 @@ serveStdio(
     );
     return server;
   },
-  { legacy: 'serve' },
+  { legacy: 'serve', transport },
 );
