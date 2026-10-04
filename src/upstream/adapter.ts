@@ -8,6 +8,7 @@ import {
   type McpSubscription,
   type RequestOptions,
   type ServerContext,
+  type Tool,
   type Transport,
 } from '@modelcontextprotocol/client';
 import {
@@ -65,6 +66,35 @@ export interface BridgeContext {
   transformClientResult?(value: unknown): unknown;
   transformNotification?(notification: Notification): Notification;
   transformRequest?(request: UpstreamRequest): UpstreamRequest;
+}
+
+/**
+ * Internal knobs threaded from the data plane into one upstream call. This is
+ * not part of the public MCP surface.
+ *
+ * `toolDefinition` pins the validated upstream contract. For a modern
+ * `tools/call` the SDK uses it to mirror declared parameters into
+ * `Mcp-Param-*` headers and to compile the output validator from the same
+ * definition, without consulting (or refreshing) the cached `tools/list`. It
+ * also suppresses the SDK's implicit `tools/list` refresh + resend of the
+ * original arguments on `HeaderMismatch` (-32020).
+ */
+export interface ExecutionOptions {
+  toolDefinition?: Tool;
+  onDispatch?: () => void;
+}
+
+/**
+ * Outcome of releasing the process-local state bound to a signed continuation.
+ * `legacy` means an adapter-held round matched. Modern continuations carry no
+ * adapter-held resource (the in-flight request is aborted by cancelling the
+ * original downstream signal), so `unknown` is reported rather than inventing
+ * one; `limitation` explains that case.
+ */
+export interface TerminationResult {
+  kind: 'legacy' | 'unknown';
+  terminated: boolean;
+  limitation?: string;
 }
 
 export type BridgeTransforms = Pick<
@@ -164,7 +194,11 @@ export class UpstreamAdapter {
     return null;
   }
 
-  async execute(request: UpstreamRequest, bridge: BridgeContext): Promise<unknown> {
+  async execute(
+    request: UpstreamRequest,
+    bridge: BridgeContext,
+    execution: ExecutionOptions = {},
+  ): Promise<unknown> {
     if (request.method === 'resources/subscribe') {
       await this.#retainResource(bridge.clientCapabilities, this.#requestUri(request));
       return {};
@@ -175,6 +209,7 @@ export class UpstreamAdapter {
     }
     const legacyRoundId = this.#legacyRoundId(request.params?.requestState);
     if (legacyRoundId !== null) {
+      execution.onDispatch?.();
       return this.#resumeLegacyRound(legacyRoundId, request, bridge);
     }
     const slot = await this.#acquire(bridge.clientCapabilities);
@@ -184,22 +219,52 @@ export class UpstreamAdapter {
       contextIsModern(bridge.context) &&
       mrtrMethods.has(request.method)
     ) {
-      return this.#startLegacyRound(slot, request, bridge);
+      return this.#startLegacyRound(slot, request, bridge, execution);
     }
     try {
       const options = this.#requestOptions(request, bridge.context);
-      return await this.#requestOnSlot(slot, request, options);
+      return await this.#requestOnSlot(slot, request, options, execution);
     } finally {
       slot.bridge.current = null;
       this.#release(slot);
     }
   }
 
+  /**
+   * Release the process-local state bound to a signed continuation without
+   * acquiring a slot: termination must free pending work, never create or wait
+   * for a connection. Legacy rounds are cancelled through the same path as an
+   * aborted round (abort the in-flight request, reject pending inputs, release
+   * the held slot). Modern continuations keep no per-request resource in this
+   * stateless adapter — the upstream request is aborted by cancelling the
+   * original downstream signal — so nothing is terminated here.
+   */
+  terminateContinuation(requestState: string, reason?: string): TerminationResult {
+    const id = this.#legacyRoundId(requestState);
+    if (id === null) {
+      return {
+        kind: 'unknown',
+        terminated: false,
+        limitation:
+          'Modern continuations are stateless in the adapter; cancel the original downstream request signal.',
+      };
+    }
+    const round = this.#legacyRounds.get(id);
+    if (!round || round.closed) return { kind: 'legacy', terminated: false };
+    this.#cancelLegacyRound(
+      id,
+      new AppError('continuation_terminated', reason ?? 'Continuation was terminated', 409),
+    );
+    return { kind: 'legacy', terminated: true };
+  }
+
   async #requestOnSlot(
     slot: ConnectionSlot,
     request: UpstreamRequest,
     options: RequestOptions,
+    execution: ExecutionOptions = {},
   ): Promise<unknown> {
+    execution.onDispatch?.();
     if (slot.client.getProtocolEra() === 'modern' && isTaskExtensionMethod(request.method)) {
       return slot.extensions.request(request, options);
     }
@@ -208,11 +273,16 @@ export class UpstreamAdapter {
       // and auto-retries HeaderMismatch (-32020) after refreshing tools/list.
       // The low-level request() path does neither, which breaks upstreams that
       // require header-mirrored params (e.g. GitHub's get_file_contents).
+      // A pinned toolDefinition makes the SDK use the validated contract for
+      // mirroring and output validation, and disables that implicit retry.
       const result = await slot.client.callTool(
         request.params as { name: string; arguments?: Record<string, unknown> },
         {
           ...options,
           allowInputRequired: true,
+          ...(execution.toolDefinition === undefined
+            ? {}
+            : { toolDefinition: execution.toolDefinition }),
         },
       );
       return restoreTaskResult(result);
@@ -231,6 +301,7 @@ export class UpstreamAdapter {
     slot: ConnectionSlot,
     request: UpstreamRequest,
     bridge: BridgeContext,
+    execution: ExecutionOptions,
   ): Promise<unknown> {
     const id = randomUUID();
     const controller = new AbortController();
@@ -260,7 +331,7 @@ export class UpstreamAdapter {
     this.#attachLegacyBridge(round, bridge);
     if (round.closed) return this.#awaitLegacyRound(round);
     const options = this.#legacyRoundRequestOptions(request, slot.bridge, controller.signal);
-    void this.#requestOnSlot(slot, request, options).then(
+    void this.#requestOnSlot(slot, request, options, execution).then(
       (value) => round.settle({ kind: 'result', value }),
       (error) =>
         round.settle({

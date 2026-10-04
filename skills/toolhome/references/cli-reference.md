@@ -137,6 +137,25 @@ are stored as encrypted credentials; everything else lands in the server transpo
 `--upsert` re-imports as an update: existing servers are diffed (unchanged → skip,
 changed → update transport/env/credential) instead of reported as conflicts.
 
+## mcp
+
+```bash
+toolhome mcp launch <slug>                    # run one node-placed server (stdio)
+toolhome mcp stdio                            # front every node-placed server (stdio)
+toolhome mcp stdio --node <id>                # pick a node label (default: config, else hostname)
+toolhome mcp stdio --tool-mode <mode>         # full (default) or compact
+```
+
+`toolhome mcp launch <slug>` spawns one node-placed server with its stored credential and
+hands this process's stdio to it, preserving original tool names. `toolhome mcp stdio` fronts
+every server placed on the machine in one stdio connection using `{slug}_{encodedToolName}`
+names; children spawn lazily.
+
+`--tool-mode compact` exposes only the `search`/`exec` discovery pair instead of the full tool
+list. The mode is independent per entry, so the host aggregate's `TOOLHOME_MCP_TOOL_MODE` and
+this flag do not affect each other. Roll back by omitting `--tool-mode` and reconnecting the
+client.
+
 ## endpoint
 
 ```bash

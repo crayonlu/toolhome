@@ -115,6 +115,11 @@ export class DataPlane {
   }
 
   registryChanged(): void {
+    void this.#factory
+      .catalogChanged()
+      .catch((error) =>
+        this.#logger.warn('Pending invocation cleanup failed', { error: String(error) }),
+      );
     this.#aggregate.modern.notify.toolsChanged();
     this.#aggregate.modern.notify.promptsChanged();
     this.#aggregate.modern.notify.resourcesChanged();
@@ -125,6 +130,7 @@ export class DataPlane {
 
   async close(): Promise<void> {
     this.#unsubscribe();
+    await this.#factory.close();
     await Promise.allSettled([
       this.#closeEndpoint(this.#aggregate),
       ...[...this.#individual.values()].map((handler) => this.#closeEndpoint(handler)),

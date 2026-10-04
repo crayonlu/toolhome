@@ -26,6 +26,8 @@ jobs:
         run: npm ci
       - name: Server typecheck
         run: npm run check
+      - name: Server build for process tests
+        run: npm run build:server
       - name: Server tests
         run: npm run test
       - name: Web deps

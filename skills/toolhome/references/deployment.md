@@ -25,6 +25,9 @@ TOOLHOME_MASTER_KEY=<32+ char random>
 TOOLHOME_BOOTSTRAP_CONTROL_KEY=tch_ctl_<random suffix, different from master>
 TOOLHOME_PUBLIC_URL=https://tool.cyncyn.xyz
 TOOLHOME_ALLOWED_HOSTS=tool.cyncyn.xyz
+# Optional: aggregate /mcp tool exposure. full (default) lists every enabled
+# server's tools; compact exposes only the search/exec discovery pair.
+TOOLHOME_MCP_TOOL_MODE=full
 ```
 
 ```bash

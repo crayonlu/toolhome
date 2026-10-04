@@ -172,6 +172,30 @@ ToolHome 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据�
 
 下游 Dynamic Client Registration 返回由主密钥签名的无状态 Client ID，不依赖进程内注册表；使用同一主密钥重启后仍然有效。同时支持 HTTPS URL-based Client Metadata，并限制响应大小、重定向和非公网目标。
 
+## 工具暴露模式
+
+聚合入口 `POST /mcp` 支持两种工具暴露模式。`full` 为默认，直接列出每个启用 Server 的工具；`compact` 需显式启用，只暴露两个工具：
+
+- `search` —— `action: "servers"` 列出可用服务器目录，`action: "find"` 按任务返回排序候选，`action: "describe"` 返回选中工具的完整参数 schema。
+- `exec` —— 执行 `search` 返回的某个精确工具，并在真实调用前校验其当前合同。
+
+按入口分别启用，而不是全局开关：
+
+- Host：`TOOLHOME_MCP_TOOL_MODE=compact`。
+- 本机 node：`toolhome mcp stdio --tool-mode compact`。
+
+发现只读取入口本地已保存的定义：`search` 不发起上游请求，也不启动子进程；执行只连接被选中的 Server。切换模式后需要重新连接客户端，因为多数客户端会缓存 `tools/list`。独立入口 `/mcp/{server_slug}` 与 `full` 行为保持不变。
+
+**响应预算与兼容边界。** 目录和候选摘要的完整 MCP 结果上限为 8 KiB；完整定义上限为 16 KiB。定义包含参数合同与所需上游说明，超限时返回 `definition_too_large` 和 full/独立入口指引，执行前也遵守该限制。业务结果保留上游内容。带 MCP App 的服务器使用独立入口；要求 Task 的工具和不兼容的 Task 请求会在副作用前给出指引。`definition_changed` 应先 describe，再显式 exec；`may_have_run` 表示此前调用可能已产生副作用，应先核对状态。现代上游的挂起状态由上游管理，当前协议没有通用的挂起调用终止方法。
+
+**检索范围。** 首版采用本地词项排序。纯中文任务通常需要补充英文工具或任务关键词；它未提供原生中文语义检索。固定定义减少初始工具 schema，完整任务成本仍包含发现轮次、完整合同和业务输出，应按实际客户端测量。
+
+**本机范围。** Node-hosted Server 仍然只在所属机器上运行，本机 compact 目录只包含放置在该 node 的 Server。启动时本机入口会镜像控制面的工具可见性；若某个 Server 的投影读取失败，它会一直排除在 compact 目录之外（fail closed），直到下次启动或显式刷新。在控制面修改可见性后，本机入口需要重新连接才会生效。
+
+**回退到 full。** 在 Host 上把 `TOOLHOME_MCP_TOOL_MODE` 设回 `full`（或删除该变量），或去掉 `toolhome mcp stdio --tool-mode`，然后重新连接客户端。无需数据迁移：full 会清除 compact 镜像写入的可见性行，重新暴露全部启用工具。
+
+**只保留一层发现。** 不要把 ToolHome compact 叠加在已经自带 search/exec 或 Code Mode 的上游之上。二选一：使用 ToolHome `full`/独立入口，或使用上游的完整工具列表。对 Cloudflare API MCP，如需退出 Code Mode，请自行使用其文档给出的 `?codemode=false` URL；ToolHome 不会改写上游 URL 或查询参数，`truncateToolResult` 是另一个独立开关，也不会替你修改。
+
 ## 上游鉴权
 
 Remote-native Server 支持：
@@ -248,6 +272,7 @@ npm run cli -- config import backup.json
 | `TOOLHOME_WEB_DIR`               | Web 控制台静态文件目录                            | 未启用                  |
 | `TOOLHOME_MARKET_DIR`            | Market npm 安装目录                               | `<dataDir>/market`      |
 | `TOOLHOME_OAUTH_URL_CLIENT_ID`   | 是否启用 URL-based Client Metadata                | `true`                  |
+| `TOOLHOME_MCP_TOOL_MODE`         | 聚合 `/mcp` 工具暴露模式：`full` 或 `compact`     | `full`                  |
 
 ## 安全模型
 

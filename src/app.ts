@@ -86,6 +86,7 @@ export function createApplication(config: RuntimeConfig = loadConfig()): Applica
     config.masterKey,
     projections,
     callRecorder,
+    { toolMode: config.mcpToolMode ?? 'full', scope: 'host' },
   );
   const dataPlane = new DataPlane(gatewayFactory, registry, upstreams, auth, oauth, store, logger);
   const app = dataPlane.createApp({

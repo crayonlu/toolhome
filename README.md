@@ -172,6 +172,30 @@ The data plane also implements OAuth 2.1: a harness can discover the authorizati
 
 Downstream Dynamic Client Registration returns a stateless Client ID signed with the master key — no in-process registry, valid across restarts with the same key. HTTPS URL-based Client Metadata is also supported, with limits on response size, redirects, and non-public targets.
 
+## Tool Exposure Modes
+
+The aggregate `POST /mcp` endpoint supports two exposure modes. `full` is the default and lists every enabled server's tools directly. `compact` is opt-in and exposes exactly two tools:
+
+- `search` — `action: "servers"` lists the usable server catalog, `action: "find"` ranks tools for a task, and `action: "describe"` returns a selected tool's complete input schema.
+- `exec` — runs one exact tool returned by `search`, validating that tool's current contract before a fresh call.
+
+Enable it per entry, not globally:
+
+- Host: `TOOLHOME_MCP_TOOL_MODE=compact`.
+- Local node: `toolhome mcp stdio --tool-mode compact`.
+
+Discovery reads only definitions already stored on the entry: `search` makes no upstream request and spawns no process. Execution connects only to the selected server. After changing the mode, reconnect the client because many clients cache `tools/list`. Individual `/mcp/{server_slug}` endpoints and `full` behavior are unchanged.
+
+**Response budgets and compatibility.** Complete MCP directory and candidate-summary results are limited to 8 KiB; complete definitions are limited to 16 KiB. Definitions include the argument contract and required upstream instructions. Oversized definitions return `definition_too_large` with full/individual-endpoint guidance; execution enforces the same limit. Business results preserve upstream content. Servers with MCP Apps use individual endpoints; Task-required tools and incompatible Task requests receive guidance before side effects. After `definition_changed`, describe the tool and explicitly invoke exec again. `may_have_run` means an earlier invocation may have produced effects, so check its state first. Modern upstreams own their suspended state; the current protocol has no generic suspended-invocation termination method.
+
+**Retrieval scope.** The first version uses local lexical ranking. Chinese-only tasks commonly need English tool or task keywords; native Chinese semantic retrieval remains a limitation. Fixed definitions reduce initial tool schemas. Complete task cost includes discovery rounds, complete contracts and business outputs, and should be measured for the actual client.
+
+**Local scope.** Node-placed servers still run only on their owning machine, and the local compact catalog covers only servers placed on that node. At startup the local entry mirrors the control plane's tool visibility; if a server's projection cannot be read it stays out of the compact catalog (fail closed) until the next start or explicit refresh. Changing visibility on the control plane requires the local entry to reconnect before it takes effect.
+
+**Roll back to full.** Set `TOOLHOME_MCP_TOOL_MODE=full` (or remove it) on the host, or drop `--tool-mode` from `toolhome mcp stdio`, then reconnect the client. No data migration is needed: full mode clears any compact-mirrored visibility rows so every enabled tool is exposed again.
+
+**Keep one discovery layer.** Do not nest ToolHome compact behind an upstream that already performs its own search/exec or Code Mode. Pick either ToolHome `full`/individual endpoints or the upstream's full tool list. For Cloudflare API MCP, opt out explicitly yourself with its documented `?codemode=false` URL; ToolHome never rewrites upstream URLs or query parameters, and `truncateToolResult` is a separate switch that is never changed for you.
+
 ## Upstream Authentication
 
 Remote-native servers support:
@@ -262,6 +286,7 @@ Backups contain plaintext secrets and deserve the same protection as the master 
 | `TOOLHOME_WEB_DIR`               | Web console static files directory                                            | disabled                |
 | `TOOLHOME_MARKET_DIR`            | Market npm install directory                                                  | `<dataDir>/market`      |
 | `TOOLHOME_OAUTH_URL_CLIENT_ID`   | Enable URL-based Client Metadata                                              | `true`                  |
+| `TOOLHOME_MCP_TOOL_MODE`         | Aggregate `/mcp` tool exposure: `full` or `compact`                           | `full`                  |
 
 ## Security Model
 

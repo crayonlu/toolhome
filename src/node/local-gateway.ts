@@ -8,6 +8,7 @@
  * children are only spawned when a tool call needs them.
  */
 import { ControlClient } from '../control/client.js';
+import type { McpToolMode } from '../config.js';
 import { GatewayServerFactory } from '../data-plane/gateway-server.js';
 import { CapabilityRegistry } from '../data-plane/registry.js';
 import { ToolProjectionService } from '../data-plane/projection.js';
@@ -17,6 +18,7 @@ import { CallRecorder } from '../observability/call-recorder.js';
 import { CursorCodec } from '../security/cursor-codec.js';
 import { SecretBox } from '../security/secret-box.js';
 import { SqliteStore } from '../storage/sqlite-store.js';
+import type { Store } from '../storage/store.js';
 import type { CredentialSource, ResolvedCredential } from '../upstream/credential-resolver.js';
 import { UpstreamManager } from '../upstream/manager.js';
 import { z } from 'zod';
@@ -31,6 +33,11 @@ const runtimeResponseSchema = z.object({
   credentialEnv: z.record(z.string(), z.string()),
 });
 
+const projectionResponseSchema = z.object({
+  defaultVisibility: z.enum(['visible', 'hidden']).default('visible'),
+  overrides: z.record(z.string(), z.enum(['visible', 'hidden'])).default({}),
+});
+
 export interface LocalGatewayOptions {
   /** Authenticated control client; the gateway reads its own servers from it. */
   client: ControlClient;
@@ -38,6 +45,11 @@ export interface LocalGatewayOptions {
   nodeId: string;
   /** Where the local mirror lives, for example `~/.config/toolhome/node.sqlite`. */
   storePath: string;
+  /**
+   * Tool exposure for the local aggregate. Defaults to `full`; `compact`
+   * exposes `search`/`exec` and mirrors the control-plane projection first.
+   */
+  toolMode?: McpToolMode;
   /** Idle time after which discovered children are disconnected again. */
   idleDisconnectMs?: number;
 }
@@ -77,6 +89,87 @@ export interface LocalGatewayRuntime {
   close(): Promise<void>;
 }
 
+/** Outcome of mirroring one server's control-plane projection into the mirror. */
+export interface LocalProjectionSyncResult {
+  slug: string;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Mirror the control plane's tool visibility into the local store, mapping each
+ * control id to the mirrored server's local id by slug. Compact discovery trusts
+ * only these rows: a server whose projection cannot be read is hidden outright
+ * rather than falling back to "all visible".
+ */
+export async function syncLocalProjections(
+  client: Pick<ControlClient, 'request'>,
+  store: Store,
+  servers: ServerRecord[],
+): Promise<LocalProjectionSyncResult[]> {
+  const localBySlug = new Map(store.listServers().map((server) => [server.slug, server]));
+  const results: LocalProjectionSyncResult[] = [];
+  for (const server of servers) {
+    const local = localBySlug.get(server.slug);
+    if (local === undefined) {
+      results.push({ slug: server.slug, ok: false, error: 'not present in the local mirror' });
+      continue;
+    }
+    try {
+      const projection = projectionResponseSchema.parse(
+        await client.request('GET', `/api/v1/servers/${server.id}/projection`),
+      );
+      store.setServerProjection(local.id, projection.defaultVisibility);
+      replaceToolProjections(store, local.id, projection.overrides);
+      results.push({ slug: server.slug, ok: true });
+    } catch (error) {
+      // Fail closed: no trusted projection means the server stays out of the
+      // compact catalog until a later sync succeeds.
+      store.setServerProjection(local.id, 'hidden');
+      replaceToolProjections(store, local.id, {});
+      results.push({
+        slug: server.slug,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
+
+/** Apply non-inherit overrides and drop any that the control plane removed. */
+function replaceToolProjections(
+  store: Store,
+  serverId: string,
+  overrides: Record<string, 'visible' | 'hidden'>,
+): void {
+  for (const existing of store.listToolProjections(serverId)) {
+    if (!Object.hasOwn(overrides, existing.upstreamToolName)) {
+      store.setToolProjection(serverId, existing.upstreamToolName, 'inherit');
+    }
+  }
+  for (const [tool, visibility] of Object.entries(overrides)) {
+    store.setToolProjection(serverId, tool, visibility);
+  }
+}
+
+/**
+ * Return the mirror to its pre-compact state: no effective visibility filter.
+ * Only compact sync writes these rows, so clearing them restores full behavior.
+ */
+function resetLocalProjections(store: Store): void {
+  for (const server of store.listServers()) {
+    if (
+      store.getServerProjection(server.id) === null &&
+      store.listToolProjections(server.id).length === 0
+    ) {
+      continue;
+    }
+    store.setServerProjection(server.id, 'visible');
+    replaceToolProjections(store, server.id, {});
+  }
+}
+
 /** Build the local runtime: mirror the node's servers and compose the gateway. */
 export async function prepareLocalGateway(
   options: LocalGatewayOptions,
@@ -96,6 +189,24 @@ export async function prepareLocalGateway(
   reconcile(store, servers);
   credentials.configure(environments);
 
+  const toolMode = options.toolMode ?? 'full';
+  if (toolMode === 'compact') {
+    // Compact discovery has no upstream requests of its own, so the control
+    // plane's projection must be mirrored once up front and fail closed.
+    for (const synced of await syncLocalProjections(options.client, store, servers)) {
+      if (!synced.ok) {
+        logger.warn('Compact projection unavailable; the server stays hidden', {
+          slug: synced.slug,
+          error: synced.error,
+        });
+      }
+    }
+  } else {
+    // Rows left by an earlier compact run live in the shared mirror; full mode
+    // must keep its original "no projection means visible" behavior.
+    resetLocalProjections(store);
+  }
+
   const registry = new CapabilityRegistry(store);
   const cursors = new CursorCodec(masterKey);
   const projections = new ToolProjectionService(store);
@@ -107,6 +218,7 @@ export async function prepareLocalGateway(
     masterKey,
     projections,
     recorder,
+    { toolMode, scope: 'local', nodeLabel: options.nodeId },
   );
 
   return {
@@ -150,7 +262,9 @@ export async function prepareLocalGateway(
       return checked.sort((left, right) => left.slug.localeCompare(right.slug));
     },
     async close(): Promise<void> {
+      await gatewayFactory.close();
       await upstreams.close();
+      await recorder.close();
     },
   };
 }

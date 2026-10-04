@@ -18,6 +18,10 @@ const publicUrlSchema = z.url().superRefine((value, context) => {
   }
 });
 
+/** Aggregate `/mcp` tool exposure: full tool list, or the opt-in search/exec pair. */
+export const mcpToolModeSchema = z.enum(['full', 'compact']);
+export type McpToolMode = z.infer<typeof mcpToolModeSchema>;
+
 const envSchema = z
   .object({
     TOOLHOME_HOST: z.string().default('127.0.0.1'),
@@ -42,6 +46,7 @@ const envSchema = z
       .min(1)
       .max(86_400)
       .default(300),
+    TOOLHOME_MCP_TOOL_MODE: mcpToolModeSchema.default('full'),
   })
   .superRefine((value, context) => {
     if (value.TOOLHOME_BOOTSTRAP_CONTROL_KEY === value.TOOLHOME_MASTER_KEY) {
@@ -70,6 +75,11 @@ export interface RuntimeConfig {
   callsRetentionDays: number;
   /** Seconds between automatic sweeps that refresh expiring OAuth credentials. */
   oauthRefreshIntervalSeconds: number;
+  /**
+   * Aggregate `/mcp` tool exposure. `compact` exposes only `search`/`exec`.
+   * Optional so manually built configurations keep defaulting to `full`.
+   */
+  mcpToolMode?: McpToolMode;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
@@ -101,5 +111,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
       : { uvIndexUrl: parsed.TOOLHOME_UV_INDEX_URL.toString() }),
     callsRetentionDays: parsed.TOOLHOME_CALLS_RETENTION_DAYS,
     oauthRefreshIntervalSeconds: parsed.TOOLHOME_OAUTH_REFRESH_INTERVAL_SECONDS,
+    mcpToolMode: parsed.TOOLHOME_MCP_TOOL_MODE,
   };
 }

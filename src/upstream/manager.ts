@@ -16,6 +16,8 @@ import type { Store } from '../storage/store.js';
 import {
   UpstreamAdapter,
   type BridgeTransforms,
+  type ExecutionOptions,
+  type TerminationResult,
   type UpstreamEvent,
   type UpstreamRequest,
 } from './adapter.js';
@@ -73,15 +75,20 @@ export class UpstreamManager {
     context: ServerContext,
     clientCapabilities: ClientCapabilities,
     transforms: BridgeTransforms = {},
+    executionOptions: ExecutionOptions = {},
   ): Promise<unknown> {
     const server = this.#requireServer(serverId, true);
     const adapter = await this.#adapterFor(server);
     try {
-      const result = await adapter.execute(request, {
-        context,
-        clientCapabilities,
-        ...transforms,
-      });
+      const result = await adapter.execute(
+        request,
+        {
+          context,
+          clientCapabilities,
+          ...transforms,
+        },
+        executionOptions,
+      );
       if (!context.mcpReq.signal.aborted) this.#markReady(server, adapter);
       return result;
     } catch (error) {
@@ -91,6 +98,28 @@ export class UpstreamManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Release the pending state bound to a signed continuation using only an
+   * adapter this manager already created. This must never build an adapter,
+   * connect, or wait for a slot: termination exists to free pending work, not
+   * to start any. A missing adapter reports an explicit no-op.
+   */
+  terminateContinuation(
+    serverId: string,
+    requestState: string,
+    reason?: string,
+  ): TerminationResult {
+    const adapter = this.#adapters.get(serverId)?.adapter;
+    if (!adapter) {
+      return {
+        kind: 'unknown',
+        terminated: false,
+        limitation: 'No live adapter for this server; nothing to terminate.',
+      };
+    }
+    return adapter.terminateContinuation(requestState, reason);
   }
 
   async notify(

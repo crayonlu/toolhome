@@ -16,6 +16,7 @@ services:
       TOOLHOME_ALLOWED_HOSTS: ${TOOLHOME_ALLOWED_HOSTS:-127.0.0.1,localhost}
       TOOLHOME_LOG_LEVEL: ${TOOLHOME_LOG_LEVEL:-info}
       TOOLHOME_OAUTH_URL_CLIENT_ID: ${TOOLHOME_OAUTH_URL_CLIENT_ID:-true}
+      TOOLHOME_MCP_TOOL_MODE: ${TOOLHOME_MCP_TOOL_MODE:-full}
       TOOLHOME_UV_INDEX_URL: ${TOOLHOME_UV_INDEX_URL:-}
       TOOLHOME_CALLS_RETENTION_DAYS: ${TOOLHOME_CALLS_RETENTION_DAYS:-30}
     volumes:
@@ -24,7 +25,7 @@ services:
       # via the host socket; the runtime user must be in the host docker group.
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
-      - "${DOCKER_GROUP_ID:-999}"
+      - '${DOCKER_GROUP_ID:-999}'
     logging:
       driver: json-file
       options:

@@ -206,6 +206,28 @@ Or per-server (independent endpoint, original tool names):
 
 Aggregate tool names are `{server_slug}_{encoded_tool_name}`; non-alphanumeric UTF-8 bytes are encoded as `-hh` (for example, `github.search_code` becomes `github_search-5fcode`). Per-server preserves original names.
 
+### Choose a Tool Exposure Mode
+
+By default the aggregate `/mcp` endpoint lists every enabled server's tools (`full`). An opt-in `compact` mode instead exposes exactly two tools — `search` and `exec` — so an agent discovers tools on demand:
+
+- `search`: `action=servers` (server catalog), `action=find` (ranked tools for a task), `action=describe` (a selected tool's complete input schema).
+- `exec`: run one exact tool returned by `search`.
+
+Enable it per entry (afterwards reconnect the client, which may cache `tools/list`):
+
+```bash
+# Host
+TOOLHOME_MCP_TOOL_MODE=compact
+# Local node
+toolhome mcp stdio --tool-mode compact
+```
+
+`search` reads only locally stored definitions — no upstream request and no child process; `exec` connects only to the selected server. Node tools still run only on their owning machine, and the local compact catalog covers only that node. At startup the local entry mirrors the control plane's tool visibility; if a server's projection cannot be read it stays hidden (fail closed) until the next start or refresh.
+
+Roll back with `TOOLHOME_MCP_TOOL_MODE=full` (or unset) and/or by dropping `--tool-mode`, then reconnect. No migration is needed: full clears compact-mirrored visibility rows and exposes every enabled tool again.
+
+Do not nest ToolHome compact behind an upstream that already performs its own search/exec or Code Mode — keep a single discovery layer. For Cloudflare API MCP, opt out explicitly with its documented `?codemode=false` URL; ToolHome never rewrites upstream URLs or query parameters.
+
 ### Run a Server on a Client Machine
 
 Some capabilities only exist on the machine running the agent: a local Chrome, a local Ghidra bridge, a local Python tool. Place those servers on a **node** (a label for the machine) and let the CLI launch them locally.
@@ -271,6 +293,7 @@ toolhome events --limit 100 # recent events, including cli.exec
 | `TOOLHOME_OAUTH_URL_CLIENT_ID`    | Global OAuth client registration                   | `true` (URL-based)             |
 | `TOOLHOME_UV_INDEX_URL`           | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
 | `TOOLHOME_CALLS_RETENTION_DAYS`   | Tool call record retention in days (metadata only) | `30`                           |
+| `TOOLHOME_MCP_TOOL_MODE`          | Aggregate `/mcp` exposure: `full` or `compact`     | `full`                         |
 
 ## Deep Dives
 

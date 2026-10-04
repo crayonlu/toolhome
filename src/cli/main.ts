@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { ControlClient } from '../control/client.js';
+import type { McpToolMode } from '../config.js';
 import { stdioTransportSchema } from '../domain/models.js';
 import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
 import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js';
@@ -262,8 +263,14 @@ mcp
     '--node <id>',
     'node label whose servers this machine runs (default: nodeId in the local config, else the hostname)',
   )
+  .option(
+    '--tool-mode <mode>',
+    'tool exposure for this entry: full or compact (default: full)',
+    parseToolMode,
+    'full',
+  )
   .action(
-    run(async (client, options: { node?: string }) => {
+    run(async (client, options: { node?: string; toolMode: McpToolMode }) => {
       const nodeId = options.node ?? loadLocalConfig()?.nodeId ?? (hostname().split('.')[0] || '');
       if (nodeId === '') {
         throw new Error('Could not determine a node label; pass --node <id>');
@@ -272,6 +279,7 @@ mcp
         client,
         nodeId,
         storePath: resolve(dirname(configPath()), 'node.sqlite'),
+        toolMode: options.toolMode,
       });
       process.stderr.write(
         `toolhome: serving node "${nodeId}" over stdio — end the stream to stop\n`,
@@ -748,6 +756,11 @@ function print(value: unknown, output: 'human' | 'json'): void {
 
 function parseOutput(value: string): 'human' | 'json' {
   return z.enum(['human', 'json']).parse(value);
+}
+
+function parseToolMode(value: string): McpToolMode {
+  if (value === 'full' || value === 'compact') return value;
+  throw new Error(`--tool-mode must be "full" or "compact", got "${value}"`);
 }
 
 interface AuthorizeOptions {

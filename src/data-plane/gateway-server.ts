@@ -20,6 +20,7 @@ import {
   SdkErrorCode,
   Server,
   createRequestStateCodec,
+  fromJsonSchema,
   isInputRequiredResult,
   type ClientCapabilities,
   type InputRequiredResult,
@@ -32,12 +33,22 @@ import {
   type Tool,
 } from '@modelcontextprotocol/server';
 import { createHash } from 'node:crypto';
+import { CompactState, type CompactInvocation } from './compact-state.js';
+import { ToolCatalog } from './tool-catalog.js';
+import {
+  CompactError,
+  compactErrorResult,
+  compactTools,
+  parseExecArgs,
+  executionBoundaryForTool,
+} from './compact-protocol.js';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import type { ToolCallDraft, ToolCallStatus } from '../domain/models.js';
 import type { CallRecorder } from '../observability/call-recorder.js';
 import type { CursorCodec } from '../security/cursor-codec.js';
 import type { UpstreamManager } from '../upstream/manager.js';
+import type { ExecutionOptions } from '../upstream/adapter.js';
 import { fingerprint } from '../upstream/stable-json.js';
 import { CapabilityRegistry, type RegistryEntry } from './registry.js';
 import { canonicalTaskMethod } from './task-extension.js';
@@ -102,6 +113,7 @@ interface GatewayRequestState {
   aggregate: boolean;
   serverId: string;
   upstreamRequestState?: string;
+  compactInvocation?: string;
 }
 
 interface Page<T> {
@@ -117,6 +129,12 @@ export class GatewayServerFactory {
   readonly #cursors: CursorCodec;
   readonly #projections: ToolProjectionService;
   readonly #recorder: CallRecorder;
+  readonly #compactState = new CompactState();
+  readonly #options: {
+    toolMode?: 'full' | 'compact';
+    scope?: 'host' | 'local';
+    nodeLabel?: string;
+  };
 
   constructor(
     registry: CapabilityRegistry,
@@ -125,12 +143,14 @@ export class GatewayServerFactory {
     masterKey: string,
     projections: ToolProjectionService,
     recorder: CallRecorder,
+    options: { toolMode?: 'full' | 'compact'; scope?: 'host' | 'local'; nodeLabel?: string } = {},
   ) {
     this.#registry = registry;
     this.#upstreams = upstreams;
     this.#cursors = cursors;
     this.#projections = projections;
     this.#recorder = recorder;
+    this.#options = options;
     this.#stateCodec = createRequestStateCodec<GatewayRequestState>({
       key: createHash('sha256').update(masterKey).digest(),
       ttlSeconds: 86_400,
@@ -144,7 +164,10 @@ export class GatewayServerFactory {
     const server = new Server(
       { name: 'toolhome', version: '0.1.0', title: 'ToolHome' },
       {
-        capabilities: aggregate.capabilities,
+        capabilities:
+          this.#options.toolMode === 'compact'
+            ? { ...aggregate.capabilities, tools: { listChanged: true } }
+            : aggregate.capabilities,
         instructions:
           'ToolHome aggregates enabled servers. Tools use server_slug_encodedToolName; prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
         requestState: { verify: this.#stateCodec.verify },
@@ -153,7 +176,9 @@ export class GatewayServerFactory {
     );
     this.#aggregateServers.add(server);
 
-    if (aggregate.capabilities.tools) {
+    if (this.#options.toolMode === 'compact') {
+      this.#installCompactTools(server);
+    } else if (aggregate.capabilities.tools) {
       server.setRequestHandler('tools/list', async (request, context) => {
         const entries = this.#registry.entries();
         const listed = await this.#aggregateTools(server, entries, context, request.params);
@@ -695,11 +720,433 @@ export class GatewayServerFactory {
     return server;
   }
 
+  async catalogChanged(): Promise<void> {
+    if (this.#options.toolMode !== 'compact') return;
+    await this.#compactState.revoke(
+      (invocation) => {
+        try {
+          const target = this.#catalog().resolve(invocation.exposedTool);
+          return (
+            target.entry.server.id === invocation.serverId &&
+            this.#compactRevision(target.entry) === invocation.revision
+          );
+        } catch {
+          return false;
+        }
+      },
+      (invocation) => this.#terminateCompact(invocation),
+    );
+  }
+
+  async close(): Promise<void> {
+    await this.#compactState.revoke(
+      () => false,
+      (invocation) => this.#terminateCompact(invocation),
+    );
+  }
+
+  #catalog(): ToolCatalog {
+    return new ToolCatalog(this.#registry.store(), this.#projections, {
+      scope: this.#options.scope ?? 'host',
+      nodeId: this.#options.nodeLabel,
+      hosts: (record) => this.#upstreams.hosts(record),
+    });
+  }
+
+  #compactProfile(server: Server, context: ServerContext): string {
+    return fingerprint({
+      principal: context.http?.authInfo?.clientId ?? 'local',
+      capabilities: this.#requestClientCapabilities(server, context),
+    });
+  }
+
+  #compactRevision(entry: RegistryEntry): string {
+    return fingerprint({
+      server: entry.server,
+      snapshot: entry.snapshot.fingerprint,
+      projection: this.#registry.store().getProjectionIndex().get(entry.server.id)
+        ? {
+            default: this.#registry.store().getServerProjection(entry.server.id),
+            tools: this.#registry.store().listToolProjections(entry.server.id),
+          }
+        : null,
+    });
+  }
+
+  #compactKey(profile: string, tool: string): string {
+    return `${profile}/${tool}`;
+  }
+
+  #installCompactTools(server: Server): void {
+    server.setRequestHandler('tools/list', async () => ({
+      tools: compactTools(),
+      ttlMs: 0,
+      cacheScope: 'private',
+    }));
+    server.setRequestHandler(
+      'tools/call',
+      { params: CallToolRequestParamsSchema, result: gatewayCallResultSchema },
+      async (request, context) => {
+        if (request.name === 'search') {
+          const startedAt = Date.now();
+          const catalog = this.#catalog();
+          const profile = this.#compactProfile(server, context);
+          const result = catalog.search(request.arguments, (id) => {
+            try {
+              const resolved = catalog.resolve(id);
+              const tool = this.#compactState.observed(
+                this.#compactKey(profile, id),
+                this.#compactRevision(resolved.entry),
+              );
+              return tool ? { serverId: resolved.entry.server.id, tool } : undefined;
+            } catch {
+              return undefined;
+            }
+          });
+          this.#registry.store().appendEvent({
+            level: 'debug',
+            type: 'compact.search',
+            serverId: null,
+            message: 'Compact capability discovery',
+            detail: {
+              durationMs: Date.now() - startedAt,
+              bytes: Buffer.byteLength(JSON.stringify(result)),
+            },
+          });
+          return result;
+        }
+        if (request.name !== 'exec')
+          return compactErrorResult(
+            new CompactError('unknown_tool', 'Use search or exec in compact mode.'),
+          );
+        return this.#compactExec(server, request, context);
+      },
+    );
+  }
+
+  async #compactExec(
+    server: Server,
+    request: { name: string; arguments?: Record<string, unknown>; task?: unknown },
+    context: ServerContext,
+  ): Promise<z.infer<typeof gatewayCallResultSchema>> {
+    const startedAt = new Date();
+    let target: { entry: RegistryEntry; tool: Tool } | undefined;
+    let invocation: CompactInvocation | undefined;
+    let submitted = false;
+    let ownsInvocation = false;
+    const profile = this.#compactProfile(server, context);
+    const state = context.mcpReq.requestState<GatewayRequestState>();
+    try {
+      const args = parseExecArgs(request.arguments);
+      const catalog = this.#catalog();
+      const key = this.#compactKey(profile, args.tool);
+      if (!state && context.mcpReq.inputResponses !== undefined) {
+        throw new CompactError(
+          'continuation_rejected',
+          'Continuation state is required; the invocation will not be restarted.',
+        );
+      }
+      if (state) {
+        if (!state.compactInvocation)
+          throw new CompactError(
+            'continuation_rejected',
+            'This request state belongs to a different invocation.',
+          );
+        invocation = this.#compactState.invocation(state.compactInvocation);
+        if (
+          !invocation ||
+          invocation.key !== key ||
+          invocation.exposedTool !== args.tool ||
+          state.serverId !== invocation.serverId ||
+          !state.aggregate
+        ) {
+          throw new CompactError(
+            'continuation_rejected',
+            'Continuation target or profile mismatch.',
+          );
+        }
+        if (invocation.busy)
+          throw new CompactError('continuation_rejected', 'Continuation is already in progress.');
+        try {
+          target = catalog.resolve(invocation.exposedTool);
+          if (
+            target.entry.server.id !== invocation.serverId ||
+            this.#compactRevision(target.entry) !== invocation.revision
+          ) {
+            throw new Error('Invocation configuration changed.');
+          }
+        } catch {
+          await this.#terminateCompact(invocation);
+          this.#compactState.release(invocation.id);
+          throw new CompactError(
+            'continuation_rejected',
+            'Invocation is no longer enabled or visible.',
+          );
+        }
+        if (invocation.upstreamRequestState === undefined) {
+          // No upstream round to resume: re-sending the bound arguments would be
+          // a new business invocation, so fail closed instead of replaying.
+          await this.#terminateCompact(invocation);
+          this.#compactState.release(invocation.id);
+          throw new CompactError(
+            'continuation_rejected',
+            'The original invocation cannot be resumed; it will not be restarted.',
+            {
+              nextStep: { action: 'use_individual', guidance: this.#compactEndpoint(target.entry) },
+            },
+          );
+        }
+        if (
+          (Object.keys(args.arguments).length > 0 &&
+            fingerprint(args.arguments) !== fingerprint(invocation.arguments)) ||
+          (args.definition !== undefined && args.definition !== invocation.definition)
+        ) {
+          throw new CompactError(
+            'continuation_rejected',
+            'Continuation must retain its original arguments and definition.',
+          );
+        }
+        invocation.busy = true;
+        ownsInvocation = true;
+        target.tool = invocation.tool;
+        submitted = true;
+      } else {
+        target = catalog.resolve(args.tool);
+        const live = (await this.#listTools(server, target.entry, context, {})).find(
+          (tool) => tool.name === target!.tool.name,
+        );
+        if (!live)
+          throw new CompactError('unknown_tool', 'The target is absent from its live directory.');
+        target.tool = live;
+        if (executionBoundaryForTool(live) !== 'exec' || this.#compactAppServer(target.entry)) {
+          throw new CompactError(
+            'individual_endpoint_required',
+            'Use the original endpoint for this server’s App tools.',
+            {
+              nextStep: { action: 'use_individual', guidance: this.#compactEndpoint(target.entry) },
+            },
+          );
+        }
+        const contractResult = catalog.search({ action: 'describe', tool: args.tool }, () => ({
+          serverId: target!.entry.server.id,
+          tool: live,
+        }));
+        const contractText = contractResult.content.find((item) => item.type === 'text');
+        const contract =
+          contractText?.type === 'text'
+            ? (JSON.parse(contractText.text) as Record<string, unknown>)
+            : {};
+        if (contractResult.isError) return gatewayCallResultSchema.parse(contractResult);
+        const definition = String(contract.definition);
+        const revision = this.#compactRevision(target.entry);
+        const saved = this.#compactState.observe(key, target.entry.server.id, revision, live);
+        if (args.definition !== undefined && args.definition !== definition) {
+          throw new CompactError(
+            saved ? 'definition_changed' : 'definition_too_large',
+            'The target contract changed before invocation. Obtain its current definition.',
+            {
+              nextStep: saved
+                ? { action: 'describe', arguments: { action: 'describe', tool: args.tool } }
+                : { action: 'use_individual', guidance: this.#compactEndpoint(target.entry) },
+            },
+          );
+        }
+        const validation = await fromJsonSchema(
+          live.inputSchema as Parameters<typeof fromJsonSchema>[0],
+        )['~standard'].validate(args.arguments);
+        if (validation.issues)
+          throw new CompactError(
+            'invalid_arguments',
+            validation.issues
+              .map((issue) => issue.message)
+              .join('; ')
+              .slice(0, 1200),
+          );
+        const taskSupport = live.execution?.taskSupport;
+        // Task semantics are carried on the request params (`CallToolRequestParams`
+        // extends `TaskAugmentedRequestParams`), not the `_meta` envelope.
+        const taskRequested = request.task !== undefined;
+        if (taskSupport === 'required' || (taskRequested && taskSupport !== 'optional')) {
+          throw new CompactError(
+            'individual_endpoint_required',
+            'Use the original endpoint for this Task/client combination.',
+            {
+              nextStep: { action: 'use_individual', guidance: this.#compactEndpoint(target.entry) },
+            },
+          );
+        }
+        invocation =
+          this.#compactState.retain(
+            {
+              key,
+              serverId: target.entry.server.id,
+              exposedTool: args.tool,
+              tool: live,
+              arguments: args.arguments,
+              definition,
+              revision,
+            },
+            target.entry.server.settings.maxTotalTimeoutMs,
+            (value) => this.#terminateCompact(value),
+          ) ?? undefined;
+        if (!invocation)
+          throw new CompactError('continuation_rejected', 'Pending invocation capacity exceeded.', {
+            callEffect: 'not_started',
+            nextStep: { action: 'use_individual', guidance: this.#compactEndpoint(target.entry) },
+          });
+        invocation.busy = true;
+        ownsInvocation = true;
+      }
+      const params = this.#restoreParams(
+        {
+          ...request,
+          name: invocation.tool.name,
+          arguments: invocation.arguments,
+          ...(invocation.upstreamRequestState === undefined
+            ? {}
+            : { requestState: invocation.upstreamRequestState }),
+          ...(context.mcpReq.inputResponses === undefined
+            ? {}
+            : { inputResponses: context.mcpReq.inputResponses }),
+        },
+        target.entry.server.slug,
+      );
+      const raw = await this.#execute(
+        server,
+        target.entry,
+        { method: 'tools/call', params },
+        context,
+        {
+          toolDefinition: invocation.tool,
+          onDispatch: () => {
+            submitted = true;
+          },
+        },
+      );
+      this.#recordCall(context, {
+        endpointType: 'aggregate',
+        serverId: target.entry.server.id,
+        exposedToolName: 'exec',
+        upstreamToolName: invocation.tool.name,
+        status: 'success',
+        startedAt,
+        raw,
+      });
+      if (isInputRequiredResult(raw)) {
+        invocation.upstreamRequestState = raw.requestState;
+        invocation.busy = false;
+        const rewritten = rewriteAggregateContent(raw, target.entry.server.slug);
+        return gatewayCallResultSchema.parse({
+          ...(rewritten as Record<string, unknown>),
+          requestState: await this.#stateCodec.mint(
+            { aggregate: true, serverId: target.entry.server.id, compactInvocation: invocation.id },
+            context,
+          ),
+        });
+      }
+      this.#compactState.release(invocation.id);
+      return this.#parseToolResult(raw, context, target.entry.server.id, target.entry.server.slug);
+    } catch (error) {
+      if (invocation && ownsInvocation) {
+        invocation.busy = false;
+        await this.#terminateCompact(invocation);
+        this.#compactState.release(invocation.id);
+      }
+      if (target)
+        this.#recordCallError(context, {
+          endpointType: 'aggregate',
+          serverId: target.entry.server.id,
+          exposedToolName: 'exec',
+          upstreamToolName: target.tool.name,
+          startedAt,
+          error,
+        });
+      if (CompactError.isInstance(error))
+        return compactErrorResult(
+          state && error.callEffect === 'not_started'
+            ? new CompactError('continuation_rejected', error.message, {
+                callEffect: 'may_have_run',
+                nextStep: error.nextStep,
+              })
+            : error,
+        );
+      if (ProtocolError.isInstance(error) && error.code === -32020 && target) {
+        let recovered = false;
+        try {
+          const live = (await this.#listTools(server, target.entry, context, {})).find(
+            (tool) => tool.name === target!.tool.name,
+          );
+          if (live)
+            recovered = this.#compactState.observe(
+              this.#compactKey(profile, aggregateToolName(target.entry.server.slug, live.name)),
+              target.entry.server.id,
+              this.#compactRevision(target.entry),
+              live,
+            );
+        } catch {
+          /* Recovery cannot resubmit the business invocation. */
+        }
+        return compactErrorResult(
+          new CompactError('definition_changed', error.message, {
+            source: 'upstream',
+            callEffect: 'may_have_run',
+            nextStep: {
+              action: 'check_status',
+              guidance: recovered
+                ? 'Check the original invocation, then describe the target before explicitly retrying.'
+                : this.#compactEndpoint(target.entry),
+            },
+            details: { upstreamCode: error.code },
+          }),
+        );
+      }
+      return compactErrorResult(
+        new CompactError(
+          state ? 'continuation_rejected' : 'upstream_failure',
+          error instanceof Error ? error.message.slice(0, 1200) : 'Upstream invocation failed.',
+          {
+            source: submitted ? 'upstream' : 'gateway',
+            callEffect: submitted || state ? 'may_have_run' : 'not_started',
+          },
+        ),
+      );
+    }
+  }
+
+  #compactAppServer(entry: RegistryEntry): boolean {
+    return entry.snapshot.tools.some((tool) => executionBoundaryForTool(tool) !== 'exec');
+  }
+
+  #compactEndpoint(entry: RegistryEntry): string {
+    return this.#options.scope === 'local'
+      ? `Use toolhome mcp launch ${entry.server.slug} on this machine.`
+      : `Use /mcp/${entry.server.slug}.`;
+  }
+
+  async #terminateCompact(invocation: CompactInvocation): Promise<void> {
+    if (invocation.upstreamRequestState !== undefined) {
+      const result = this.#upstreams.terminateContinuation(
+        invocation.serverId,
+        invocation.upstreamRequestState,
+      );
+      if (result.limitation) {
+        this.#registry.store().appendEvent({
+          level: 'warn',
+          type: 'compact.continuation.termination_limited',
+          serverId: invocation.serverId,
+          message: 'Upstream suspended state cannot be terminated by this gateway',
+          detail: { kind: result.kind },
+        });
+      }
+    }
+  }
+
   async #execute(
     server: Server,
     entry: RegistryEntry,
     request: { method: string; params?: Record<string, unknown> | undefined },
     context: ServerContext,
+    executionOptions?: ExecutionOptions,
   ): Promise<unknown> {
     try {
       return await this.#upstreams.execute(
@@ -719,6 +1166,7 @@ export class GatewayServerFactory {
               }) => this.#aggregateRequest(upstreamRequest, entry.server.slug),
             }
           : {},
+        executionOptions,
       );
     } catch (error) {
       if (ProtocolError.isInstance(error)) throw error;

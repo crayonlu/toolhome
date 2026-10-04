@@ -131,3 +131,21 @@ toolhome server refresh <server-id>
 **Cause**: Commander action handler parameter ordering bug (fixed in recent versions).
 
 **Fix**: Update to the latest version: `npm install -g toolhome@latest`.
+
+## Aggregate `/mcp` Only Shows `search` and `exec`
+
+**Cause**: Compact tool exposure is enabled. `compact` intentionally replaces the full tool list with the `search`/`exec` discovery pair.
+
+**Fix**: To go back to the full tool list, set `TOOLHOME_MCP_TOOL_MODE=full` (or remove it) on the host, or drop `--tool-mode` from `toolhome mcp stdio` on a node, then reconnect the client. Full mode clears compact-mirrored visibility rows, so no migration is required.
+
+## Compact Mode Misses a Node Server
+
+**Cause**: The local compact catalog covers only servers placed on this node, and a server whose control-plane projection could not be read at startup stays hidden (fail closed).
+
+**Fix**: Reconnect/restart the local entry (`toolhome mcp stdio`) so it re-mirrors the projection. If it still fails, check `toolhome doctor` and the control-plane connection, and confirm the server is enabled and placed on the correct node. The same rules apply when tool visibility was changed on the control plane after the local entry started.
+
+## Nested Discovery Returns Fewer Tools Than Expected
+
+**Cause**: ToolHome `compact` was stacked behind an upstream that already performs its own search/exec or Code Mode, hiding its real tools behind a second discovery layer.
+
+**Fix**: Keep one discovery layer. Use ToolHome `full`/per-server endpoints, or configure the upstream to expose its full tool list. For Cloudflare API MCP, opt out yourself with its documented `?codemode=false` URL; ToolHome never rewrites upstream URLs or query parameters.

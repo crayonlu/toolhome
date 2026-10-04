@@ -56,6 +56,10 @@ export class CapabilityRegistry {
     return { server, snapshot };
   }
 
+  store(): Store {
+    return this.#store;
+  }
+
   entries(): RegistryEntry[] {
     return this.#store
       .listServers()
