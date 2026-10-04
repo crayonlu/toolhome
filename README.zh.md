@@ -64,6 +64,8 @@ ToolHome 有两个一等平面：
 
 下游 2026 请求保持无状态；2025-era 使用与认证 principal 绑定的持久 Session，保留 initialize 能力声明和双向请求语义。最终 Tasks extension 在 SDK 2.0 尚未注册的部分由隔离兼容层补齐，对外仍是官方 `tasks/*` wire contract。
 
+聚合能力列表在部分上游失败时保留健康上游的结果，并在 `_meta["toolhome/failed-servers"]` 中列出失败的服务器 slug。所有具备相应能力的上游均失败时，列表返回协议错误。客户端取消请求时保持上游运行状态。独立入口返回自身上游的错误。
+
 聚合工具名为 `{server_slug}_{encoded_upstream_name}`，上游名称中除 ASCII 字母与数字外的 UTF-8 字节编码为 `-hh`（十六进制），例如 `github.search_code` 映射为 `github_search-5fcode`；超长名称使用稳定哈希缩短。Prompt 名称仍为 `{server_slug}.{upstream_name}`。未知扩展方法在聚合入口使用 `toolhome/{server_slug}/{upstream_method}`；独立入口原样透传。MCP App 若使用原始工具名，ToolHome 会根据 App 资源上下文或全局唯一名称路由；存在同名歧义时应使用独立入口。
 
 当现代 Harness 调用旧式上游时，ToolHome 会把 Tool、Prompt 和 Resource Read 中的 push-style Elicitation、Sampling、Roots 暂停并转换成现代 `input_required` 多轮交互，再恢复同一个上游请求。旧式自定义扩展若在自定义 method 内主动发起私有 server-to-client request，则没有可映射到现代 MRTR 封闭类型集的标准表示；这类扩展应使用 legacy Harness 或升级上游协议。

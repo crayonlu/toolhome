@@ -93,6 +93,11 @@ const taskParamsSchema = z
   .passthrough();
 const pageSize = 100;
 
+interface AggregateList<T> {
+  items: T[];
+  failedServers: string[];
+}
+
 interface GatewayRequestState {
   aggregate: boolean;
   serverId: string;
@@ -151,14 +156,22 @@ export class GatewayServerFactory {
     if (aggregate.capabilities.tools) {
       server.setRequestHandler('tools/list', async (request, context) => {
         const entries = this.#registry.entries();
-        const tools = await this.#aggregateTools(server, entries, context, request.params);
-        const page = this.#page(tools, request.params?.cursor, fingerprint({ tools }));
+        const listed = await this.#aggregateTools(server, entries, context, request.params);
+        const tools = listed.items;
+        const page = this.#page(
+          tools,
+          request.params?.cursor,
+          fingerprint({ tools, failedServers: listed.failedServers }),
+        );
         return {
           tools: page.items,
           ...this.#nextCursor(page),
           ttlMs: 0,
           cacheScope: 'private',
-          _meta: { 'toolhome/server-count': entries.length },
+          _meta: {
+            'toolhome/server-count': entries.length,
+            ...this.#aggregateListMeta(listed),
+          },
         };
       });
       server.setRequestHandler(
@@ -216,18 +229,24 @@ export class GatewayServerFactory {
 
     if (aggregate.capabilities.prompts) {
       server.setRequestHandler('prompts/list', async (request, context) => {
-        const prompts = await this.#aggregatePrompts(
+        const listed = await this.#aggregatePrompts(
           server,
           this.#registry.entries(),
           context,
           request.params,
         );
-        const page = this.#page(prompts, request.params?.cursor, fingerprint({ prompts }));
+        const prompts = listed.items;
+        const page = this.#page(
+          prompts,
+          request.params?.cursor,
+          fingerprint({ prompts, failedServers: listed.failedServers }),
+        );
         return {
           prompts: page.items,
           ...this.#nextCursor(page),
           ttlMs: 0,
           cacheScope: 'private',
+          _meta: this.#aggregateListMeta(listed),
         };
       });
       server.setRequestHandler('prompts/get', async (request, context) => {
@@ -262,37 +281,45 @@ export class GatewayServerFactory {
 
     if (aggregate.capabilities.resources) {
       server.setRequestHandler('resources/list', async (request, context) => {
-        const resources = await this.#aggregateResources(
+        const listed = await this.#aggregateResources(
           server,
           this.#registry.entries(),
           context,
           request.params,
         );
-        const page = this.#page(resources, request.params?.cursor, fingerprint({ resources }));
+        const resources = listed.items;
+        const page = this.#page(
+          resources,
+          request.params?.cursor,
+          fingerprint({ resources, failedServers: listed.failedServers }),
+        );
         return {
           resources: page.items,
           ...this.#nextCursor(page),
           ttlMs: 0,
           cacheScope: 'private',
+          _meta: this.#aggregateListMeta(listed),
         };
       });
       server.setRequestHandler('resources/templates/list', async (request, context) => {
-        const resourceTemplates = await this.#aggregateResourceTemplates(
+        const listed = await this.#aggregateResourceTemplates(
           server,
           this.#registry.entries(),
           context,
           request.params,
         );
+        const resourceTemplates = listed.items;
         const page = this.#page(
           resourceTemplates,
           request.params?.cursor,
-          fingerprint({ resourceTemplates }),
+          fingerprint({ resourceTemplates, failedServers: listed.failedServers }),
         );
         return {
           resourceTemplates: page.items,
           ...this.#nextCursor(page),
           ttlMs: 0,
           cacheScope: 'private',
+          _meta: this.#aggregateListMeta(listed),
         };
       });
       server.setRequestHandler('resources/read', async (request, context) => {
@@ -401,6 +428,24 @@ export class GatewayServerFactory {
     }
 
     server.fallbackRequestHandler = async (request, context) => {
+      const listKeys: Record<string, string> = {
+        'tools/list': 'tools',
+        'prompts/list': 'prompts',
+        'resources/list': 'resources',
+        'resources/templates/list': 'resourceTemplates',
+      };
+      const emptyListKey = Object.hasOwn(listKeys, request.method)
+        ? listKeys[request.method]
+        : undefined;
+      if (emptyListKey) {
+        context.mcpReq.signal.throwIfAborted();
+        const cursor = request.params?.cursor;
+        if (cursor !== undefined && typeof cursor !== 'string') {
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Invalid cursor');
+        }
+        const page = this.#page([], cursor, fingerprint({ [emptyListKey]: [], failedServers: [] }));
+        return { [emptyListKey]: page.items, ttlMs: 0, cacheScope: 'private' };
+      }
       const taskMethod = canonicalTaskMethod(request.method);
       if (taskMethod) {
         const params = taskParamsSchema.parse(request.params);
@@ -865,27 +910,60 @@ export class GatewayServerFactory {
     };
   }
 
+  #aggregateListMeta(listed: AggregateList<unknown>): Record<string, unknown> {
+    return listed.failedServers.length === 0
+      ? {}
+      : { 'toolhome/failed-servers': listed.failedServers };
+  }
+
+  async #aggregateList<T>(
+    entries: RegistryEntry[],
+    context: ServerContext,
+    list: (entry: RegistryEntry) => Promise<T[]>,
+  ): Promise<AggregateList<T>> {
+    context.mcpReq.signal.throwIfAborted();
+    const results = await Promise.allSettled(entries.map(list));
+    context.mcpReq.signal.throwIfAborted();
+    const items: T[] = [];
+    const failedServers: string[] = [];
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') items.push(...result.value);
+      else failedServers.push(entries[index]!.server.slug);
+    }
+    failedServers.sort();
+    if (results.length > 0 && failedServers.length === results.length) {
+      throw new ProtocolError(
+        ProtocolErrorCode.InternalError,
+        'Every upstream failed to list capabilities',
+        {
+          'toolhome/failed-servers': failedServers,
+        },
+      );
+    }
+    return { items, failedServers };
+  }
+
   async #aggregateTools(
     server: Server,
     entries: RegistryEntry[],
     context: ServerContext,
     params: unknown,
-  ): Promise<Tool[]> {
-    const groups = await Promise.all(
-      entries
-        .filter(({ snapshot }) => snapshot.capabilities.tools)
-        .map(async (entry) => {
-          const tools = await this.#listTools(server, entry, context, params);
-          // Tool visibility is an aggregate-endpoint projection: hidden tools
-          // are excluded here (and enforced again in #liveToolRoute).
-          const visible = this.#projections.apply(entry.server.id, tools);
-          return visible.map((tool) => ({
-            ...rewriteAggregateTool(tool, entry.server.slug),
-            name: aggregateToolName(entry.server.slug, tool.name),
-          }));
-        }),
+  ): Promise<AggregateList<Tool>> {
+    const listed = await this.#aggregateList(
+      entries.filter(({ snapshot }) => snapshot.capabilities.tools),
+      context,
+      async (entry) => {
+        const tools = await this.#listTools(server, entry, context, params);
+        // Tool visibility applies only to the aggregate endpoint.
+        const visible = this.#projections.apply(entry.server.id, tools);
+        return visible.map((tool) => ({
+          ...rewriteAggregateTool(tool, entry.server.slug),
+          name: aggregateToolName(entry.server.slug, tool.name),
+        }));
+      },
     );
-    return groups.flat().sort((left, right) => left.name.localeCompare(right.name));
+    listed.items.sort((left, right) => left.name.localeCompare(right.name));
+    return listed;
   }
 
   async #aggregatePrompts(
@@ -893,18 +971,18 @@ export class GatewayServerFactory {
     entries: RegistryEntry[],
     context: ServerContext,
     params: unknown,
-  ): Promise<Prompt[]> {
-    const groups = await Promise.all(
-      entries
-        .filter(({ snapshot }) => snapshot.capabilities.prompts)
-        .map(async (entry) =>
-          (await this.#listPrompts(server, entry, context, params)).map((prompt) => ({
-            ...prompt,
-            name: aggregateName(entry.server.slug, prompt.name),
-          })),
-        ),
+  ): Promise<AggregateList<Prompt>> {
+    const listed = await this.#aggregateList(
+      entries.filter(({ snapshot }) => snapshot.capabilities.prompts),
+      context,
+      async (entry) =>
+        (await this.#listPrompts(server, entry, context, params)).map((prompt) => ({
+          ...prompt,
+          name: aggregateName(entry.server.slug, prompt.name),
+        })),
     );
-    return groups.flat().sort((left, right) => left.name.localeCompare(right.name));
+    listed.items.sort((left, right) => left.name.localeCompare(right.name));
+    return listed;
   }
 
   async #aggregateResources(
@@ -912,18 +990,18 @@ export class GatewayServerFactory {
     entries: RegistryEntry[],
     context: ServerContext,
     params: unknown,
-  ): Promise<Resource[]> {
-    const groups = await Promise.all(
-      entries
-        .filter(({ snapshot }) => snapshot.capabilities.resources)
-        .map(async (entry) =>
-          (await this.#listResources(server, entry, context, params)).map((resource) => ({
-            ...resource,
-            uri: virtualResourceUri(entry.server.slug, resource.uri),
-          })),
-        ),
+  ): Promise<AggregateList<Resource>> {
+    const listed = await this.#aggregateList(
+      entries.filter(({ snapshot }) => snapshot.capabilities.resources),
+      context,
+      async (entry) =>
+        (await this.#listResources(server, entry, context, params)).map((resource) => ({
+          ...resource,
+          uri: virtualResourceUri(entry.server.slug, resource.uri),
+        })),
     );
-    return groups.flat().sort((left, right) => left.uri.localeCompare(right.uri));
+    listed.items.sort((left, right) => left.uri.localeCompare(right.uri));
+    return listed;
   }
 
   async #aggregateResourceTemplates(
@@ -931,18 +1009,18 @@ export class GatewayServerFactory {
     entries: RegistryEntry[],
     context: ServerContext,
     params: unknown,
-  ): Promise<ResourceTemplateType[]> {
-    const groups = await Promise.all(
-      entries
-        .filter(({ snapshot }) => snapshot.capabilities.resources)
-        .map(async (entry) =>
-          (await this.#listResourceTemplates(server, entry, context, params)).map((template) => ({
-            ...template,
-            uriTemplate: virtualResourceTemplate(entry.server.slug, template.uriTemplate),
-          })),
-        ),
+  ): Promise<AggregateList<ResourceTemplateType>> {
+    const listed = await this.#aggregateList(
+      entries.filter(({ snapshot }) => snapshot.capabilities.resources),
+      context,
+      async (entry) =>
+        (await this.#listResourceTemplates(server, entry, context, params)).map((template) => ({
+          ...template,
+          uriTemplate: virtualResourceTemplate(entry.server.slug, template.uriTemplate),
+        })),
     );
-    return groups.flat().sort((left, right) => left.uriTemplate.localeCompare(right.uriTemplate));
+    listed.items.sort((left, right) => left.uriTemplate.localeCompare(right.uriTemplate));
+    return listed;
   }
 
   async #listTools(
@@ -1250,7 +1328,17 @@ export class GatewayServerFactory {
   }
 
   #page<T>(items: T[], cursor: string | undefined, key: string): Page<T> {
-    const offset = cursor === undefined ? 0 : this.#cursors.decode(cursor, key).offset;
+    let offset = 0;
+    if (cursor !== undefined) {
+      try {
+        offset = this.#cursors.decode(cursor, key).offset;
+      } catch (error) {
+        if (error instanceof AppError) {
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, error.message);
+        }
+        throw error;
+      }
+    }
     const pageItems = items.slice(offset, offset + pageSize);
     const nextOffset = offset + pageItems.length;
     return {

@@ -82,10 +82,13 @@ export class UpstreamManager {
         clientCapabilities,
         ...transforms,
       });
-      this.#markReady(server, adapter);
+      if (!context.mcpReq.signal.aborted) this.#markReady(server, adapter);
       return result;
     } catch (error) {
-      if (this.#isConnectionFailure(error)) this.#markFailure(server, error);
+      // Cancellation can surface as a connection error for this request only.
+      if (!context.mcpReq.signal.aborted && this.#isConnectionFailure(error)) {
+        this.#markFailure(server, error);
+      }
       throw error;
     }
   }

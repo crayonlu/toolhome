@@ -416,6 +416,12 @@ describe('MCP gateway', () => {
       const cancellationResult = await cancellation;
       expect(cancellationResult.kind).toBe('rejected');
       await waitFor(() => remote.slowCancelled() === 1);
+      expect(testRuntime.runtime.store.getRuntimeState(remoteServer.id)?.status).toBe('ready');
+      const afterCancellation = await aggregate.client.callTool({
+        name: 'remote_echo',
+        arguments: { value: 'after cancellation' },
+      });
+      expect(afterCancellation.isError).not.toBe(true);
 
       const toolChanges = aggregate.listChanges.tools;
       remote.toolsChanged();
