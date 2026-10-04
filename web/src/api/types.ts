@@ -232,6 +232,8 @@ export interface MarketRequirement {
 }
 
 export type CredentialSpec =
+  /** No credential: the upstream answers unauthenticated requests. */
+  | { type: 'none' }
   | { type: 'oauth' }
   | { type: 'env' }
   | { type: 'bearer'; tokenKey: string }

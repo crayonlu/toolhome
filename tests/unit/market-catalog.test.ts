@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { marketCatalog, entryPlane } from '../../src/market/catalog.js';
 
 describe('platform CLI Market catalog', () => {
+  it('declares no credential for public entries that need none', () => {
+    const deepwiki = marketCatalog.find((entry) => entry.id === 'deepwiki');
+    expect(deepwiki?.credential).toEqual({ type: 'none' });
+    // A public endpoint that needs no credentials must never be installed with
+    // an OAuth credential, which could never be authorized.
+    expect(
+      marketCatalog.filter(
+        (entry) => /no auth/i.test(entry.description) && entry.credential.type === 'oauth',
+      ),
+    ).toEqual([]);
+  });
+
   it('treats Azure, GitHub, and Tailscale as hosted platform CLIs', () => {
     expect(
       marketCatalog

@@ -6,6 +6,8 @@ export interface MarketRequirement {
 }
 
 export type CredentialSpec =
+  /** No credential: the upstream answers unauthenticated requests. */
+  | { type: 'none' }
   | { type: 'oauth' }
   | { type: 'env' }
   | { type: 'bearer'; tokenKey: string }
@@ -225,7 +227,10 @@ export const marketCatalog: MarketEntry[] = [
     category: 'devtools',
     kind: 'remote',
     url: 'https://mcp.deepwiki.com/mcp',
-    credential: { type: 'oauth' },
+    // The endpoint answers unauthenticated requests (200 on initialize) and
+    // publishes no OAuth metadata, so an OAuth credential could never be
+    // authorized; installing it that way left a permanent "pending" record.
+    credential: { type: 'none' },
     requires: [],
     docs: 'https://docs.devin.ai/work-with-devin/deepwiki-mcp',
   },

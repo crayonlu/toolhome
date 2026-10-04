@@ -651,11 +651,16 @@ export class MarketService {
       const artifact = installerForEntry(entry);
       const installedRuntime =
         artifact === null ? null : await installArtifact(artifact, this.#installerContext(job));
-      this.#update(job, { step: 'creating credential' });
-      credential = this.#service.createCredential({
-        name: entry.name,
-        payload: this.#credentialPayload(entry, values),
-      });
+      // Entries that need no credential (`{ type: 'none' }`) install without
+      // one; creating an unusable record would show up as permanently pending.
+      const credentialPayload = this.#credentialPayload(entry, values);
+      if (credentialPayload !== null) {
+        this.#update(job, { step: 'creating credential' });
+        credential = this.#service.createCredential({
+          name: entry.name,
+          payload: credentialPayload,
+        });
+      }
       this.#update(job, { step: 'creating server' });
       const transport = this.#serverTransport(entry, installedRuntime, values);
       server = await this.#service.createServer({
@@ -663,7 +668,7 @@ export class MarketService {
         name: entry.name,
         kind: installedRuntime === null ? 'remote' : 'home',
         transport,
-        credentialId: credential.id,
+        credentialId: credential?.id ?? null,
         enabled: true,
       });
       installation = this.#store.createInstallation({
@@ -673,7 +678,7 @@ export class MarketService {
         recipeRevision: fingerprint(entry),
         targetType: 'server',
         targetId: server.id,
-        credentialId: credential.id,
+        credentialId: credential?.id ?? null,
       });
       const result = { server, credential, installation };
       this.#update(job, { step: 'done', result });
@@ -973,8 +978,11 @@ export class MarketService {
     };
   }
 
-  #credentialPayload(entry: MarketEntry, values: Record<string, string>): CredentialPayload {
+  /** `null` for entries that declare no credential at all. */
+  #credentialPayload(entry: MarketEntry, values: Record<string, string>): CredentialPayload | null {
     switch (entry.credential.type) {
+      case 'none':
+        return null;
       case 'oauth':
         return { type: 'oauth', tokenType: 'Bearer' };
       case 'env':

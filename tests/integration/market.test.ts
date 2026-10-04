@@ -767,13 +767,30 @@ exit 0
   it('installs a remote oauth entry with an empty credential', async () => {
     const { runtime, controlKey, close } = createTestRuntime();
     try {
-      const result = (await installEntry(runtime, controlKey, 'deepwiki')) as {
+      const result = (await installEntry(runtime, controlKey, 'notion')) as {
         server: unknown;
         credential: unknown;
       };
       const credential = credentialRecordSchema.parse(result.credential);
       expect(credential.type).toBe('oauth');
       expect(credential.status).toBe('pending');
+    } finally {
+      await close();
+    }
+  });
+
+  it('installs a no-auth entry without an unusable OAuth credential', async () => {
+    const { runtime, controlKey, close } = createTestRuntime();
+    try {
+      const result = (await installEntry(runtime, controlKey, 'deepwiki')) as {
+        server: unknown;
+        credential?: unknown;
+      };
+      const server = serverRecordSchema.parse(result.server);
+      expect(server.slug).toBe('deepwiki');
+      expect(server.credentialId).toBeNull();
+      expect(result.credential).toBeUndefined();
+      expect(runtime.store.listCredentials()).toHaveLength(0);
     } finally {
       await close();
     }

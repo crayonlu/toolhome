@@ -55,6 +55,13 @@ export class UpstreamOAuthService {
       server.settings.urlClientId ?? this.#urlClientId,
     );
     const payload = this.#oauthPayload(credentialId);
+    if (!(await this.#advertisesAuthorizationServer(server))) {
+      throw new AppError(
+        'oauth_not_supported',
+        `${server.transport.url} publishes no OAuth authorization server, so this credential cannot be authorized. If the server needs no credentials, delete the credential and keep the server.`,
+        400,
+      );
+    }
     if (input.force) {
       // A forced flow starts over: discard any previously registered client so
       // the next authorization re-registers under the current configuration
@@ -260,6 +267,80 @@ export class UpstreamOAuthService {
       throw new AppError('oauth_credential_invalid', 'Credential is not OAuth', 400);
     }
     return payload;
+  }
+
+  /**
+   * Whether the upstream publishes enough OAuth metadata to authorize against.
+   *
+   * A resource that declares protected-resource metadata naming an
+   * authorization server, publishes authorization-server metadata itself, or
+   * answers with a `resource_metadata` challenge can be authorized. An upstream
+   * that does none of these has no authorization server at all (for example a
+   * public endpoint that needs no credentials): starting a flow against it only
+   * fails later inside dynamic client registration, leaving the credential
+   * permanently pending.
+   */
+  async #advertisesAuthorizationServer(
+    server: ServerRecord & {
+      transport: Extract<ServerRecord['transport'], { type: 'streamable-http' }>;
+    },
+  ): Promise<boolean> {
+    const resource = new URL(server.transport.url);
+    const protectedResource = [
+      new URL(`/.well-known/oauth-protected-resource${resource.pathname}`, resource.origin),
+      new URL('/.well-known/oauth-protected-resource', resource.origin),
+    ];
+    for (const url of protectedResource) {
+      const body = await this.#fetchJson(url);
+      const issuers = body?.authorization_servers;
+      if (!Array.isArray(issuers)) continue;
+      for (const issuer of issuers) {
+        if (typeof issuer !== 'string') continue;
+        if (await this.#publishesAuthorizationServer(new URL(issuer))) return true;
+      }
+    }
+    if (await this.#publishesAuthorizationServer(new URL(resource.origin))) return true;
+    try {
+      // Some servers skip the metadata documents and reply 401 with a
+      // `resource_metadata` challenge; treat that as authorization-capable so a
+      // supported provider is never blocked here.
+      const response = await fetch(resource, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: { accept: 'application/json, text/event-stream' },
+        signal: AbortSignal.timeout(8_000),
+      });
+      const challenge = response.headers.get('www-authenticate');
+      return challenge !== null && /resource_metadata/i.test(challenge);
+    } catch {
+      return false;
+    }
+  }
+
+  async #publishesAuthorizationServer(issuer: URL): Promise<boolean> {
+    for (const path of [
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/openid-configuration',
+    ]) {
+      const body = await this.#fetchJson(new URL(path, issuer));
+      if (typeof body?.authorization_endpoint === 'string') return true;
+    }
+    return false;
+  }
+
+  async #fetchJson(url: URL): Promise<Record<string, unknown> | null> {
+    try {
+      const response = await fetch(url, {
+        headers: { accept: 'application/json' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) return null;
+      const body: unknown = await response.json();
+      return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
   }
 
   async #reload(server: ServerRecord) {
