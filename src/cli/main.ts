@@ -662,10 +662,14 @@ program
 const auth = program.command('auth').description('Manage local CLI connection settings');
 auth
   .command('login')
-  .requiredOption('--url <url>')
+  // commander resolves `--url` after the subcommand to the root option, so
+  // login's own flag never receives the value; fall back to the global one.
+  .option('--url <url>')
   .requiredOption('--control-key <key>')
-  .action((options: { url: string; controlKey: string }) => {
-    const value = localConfigSchema.parse({ url: options.url, controlKey: options.controlKey });
+  .action((options: { url?: string; controlKey: string }) => {
+    const url = options.url ?? program.opts<GlobalOptions>().url;
+    if (!url) throw new Error('required option \'--url <url>\' not specified');
+    const value = localConfigSchema.parse({ url, controlKey: options.controlKey });
     const path = configPath();
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
