@@ -304,6 +304,37 @@ describe('compact describe and resolve', () => {
     ).toContain('DeepWiki');
   });
 
+  it('keeps equivalent observed schemas byte-stable while preserving array order and changes', () => {
+    const { catalog, fixture } = setup();
+    const id = toolId('context7', 'get-library-docs');
+    const schemas: Tool['inputSchema'][] = [
+      {
+        type: 'object',
+        properties: { z: { type: 'string' }, a: { enum: ['z', 'a'], type: 'string' } },
+        required: ['z', 'a'],
+      },
+      {
+        required: ['z', 'a'],
+        properties: { a: { type: 'string', enum: ['z', 'a'] }, z: { type: 'string' } },
+        type: 'object',
+      },
+    ];
+    const results = schemas.map((inputSchema) =>
+      catalog.search({ action: 'describe', tool: id }, () => ({
+        serverId: fixture.bySlug.context7!.id,
+        tool: { name: 'get-library-docs', inputSchema },
+      })),
+    );
+    expect(JSON.stringify(results[0])).toBe(JSON.stringify(results[1]));
+    expect(data(results[1]!).inputSchema).toEqual(schemas[0]);
+    const changed = catalog.search({ action: 'describe', tool: id }, () => ({
+      serverId: fixture.bySlug.context7!.id,
+      tool: { name: 'get-library-docs', inputSchema: { ...schemas[0]!, required: ['a', 'z'] } },
+    }));
+    expect(data(changed).definition).not.toBe(data(results[0]!).definition);
+    expect(JSON.stringify(changed)).not.toBe(JSON.stringify(results[0]));
+  });
+
   it('marks MCP App tools as individual-endpoint execution', () => {
     const { catalog } = setup();
     const payload = data(

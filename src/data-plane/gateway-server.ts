@@ -49,7 +49,7 @@ import type { CallRecorder } from '../observability/call-recorder.js';
 import type { CursorCodec } from '../security/cursor-codec.js';
 import type { UpstreamManager } from '../upstream/manager.js';
 import type { ExecutionOptions } from '../upstream/adapter.js';
-import { fingerprint } from '../upstream/stable-json.js';
+import { canonicalize, fingerprint } from '../upstream/stable-json.js';
 import { CapabilityRegistry, type RegistryEntry } from './registry.js';
 import { canonicalTaskMethod } from './task-extension.js';
 import { ToolProjectionService } from './projection.js';
@@ -1481,10 +1481,15 @@ export class GatewayServerFactory {
         const tools = await this.#listTools(server, entry, context, params);
         // Tool visibility applies only to the aggregate endpoint.
         const visible = this.#projections.apply(entry.server.id, tools);
-        return visible.map((tool) => ({
-          ...rewriteAggregateTool(tool, entry.server.slug),
-          name: aggregateToolName(entry.server.slug, tool.name),
-        }));
+        // Canonical key order keeps the emitted catalog byte-stable when
+        // upstreams reorder equivalent schema objects; arrays stay untouched.
+        return visible.map(
+          (tool) =>
+            canonicalize({
+              ...rewriteAggregateTool(tool, entry.server.slug),
+              name: aggregateToolName(entry.server.slug, tool.name),
+            }) as Tool,
+        );
       },
     );
     listed.items.sort((left, right) => left.name.localeCompare(right.name));

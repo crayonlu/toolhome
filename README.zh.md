@@ -196,6 +196,8 @@ ToolHome 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据�
 
 **回退到 full。** 在 Host 上把 `TOOLHOME_MCP_TOOL_MODE` 设回 `full`（或删除该变量），或去掉 `toolhome mcp stdio --tool-mode`，然后重新连接客户端。无需数据迁移：full 会清除 compact 镜像写入的可见性行，重新暴露全部启用工具。
 
+**定义稳定。** 聚合 `tools/list` 输出规范化后的对象键顺序，数组保持原顺序，因此仅等价 schema 对象的键顺序变化时，序列化字节完全一致。把工具定义放在模型请求前部的客户端可以复用前缀；真实的定义变化仍会改变字节。独立入口保持上游原始键顺序。
+
 **只保留一层发现。** 不要把 ToolHome compact 叠加在已经自带 search/exec 或 Code Mode 的上游之上。二选一：使用 ToolHome `full`/独立入口，或使用上游的完整工具列表。对 Cloudflare API MCP，如需退出 Code Mode，请自行使用其文档给出的 `?codemode=false` URL；ToolHome 不会改写上游 URL 或查询参数，`truncateToolResult` 是另一个独立开关，也不会替你修改。
 
 ## 上游鉴权

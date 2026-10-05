@@ -1,7 +1,7 @@
 import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
 import { isHostHosted, type CapabilitySnapshot, type ServerRecord } from '../domain/models.js';
 import type { Store } from '../storage/store.js';
-import { fingerprint } from '../upstream/stable-json.js';
+import { canonicalize, fingerprint } from '../upstream/stable-json.js';
 import {
   COMPACT_BUDGETS,
   CompactError,
@@ -463,7 +463,7 @@ export class ToolCatalog {
         candidate.entry.snapshot.instructions ?? undefined,
       ),
       description: candidate.tool.description ?? '',
-      inputSchema: candidate.tool.inputSchema,
+      inputSchema: canonicalize(candidate.tool.inputSchema) as Tool['inputSchema'],
       ...(annotations === null ? {} : { annotations }),
       ...(taskSupport === undefined ? {} : { taskSupport }),
       ...(app === null ? {} : { app: { resourceUri: app } }),
@@ -490,7 +490,7 @@ export class ToolCatalog {
       name: contract.name,
       definition: compactContractFingerprint(contract, snapshot.instructions ?? undefined),
       description: contract.description ?? '',
-      inputSchema: contract.inputSchema,
+      inputSchema: canonicalize(contract.inputSchema) as Tool['inputSchema'],
       ...(annotations === null ? {} : { annotations }),
       execution,
       ...(execution === 'individualEndpoint'
