@@ -130,6 +130,12 @@ export class GatewayServerFactory {
   readonly #projections: ToolProjectionService;
   readonly #recorder: CallRecorder;
   readonly #compactState = new CompactState();
+  readonly #listTraversals = new Map<
+    string,
+    { revision: string; expiresAt: number; bytes: number; value: AggregateList<unknown> }
+  >();
+  readonly #unsubscribeLists: () => void;
+  #listGeneration = 0;
   readonly #options: {
     toolMode?: 'full' | 'compact';
     scope?: 'host' | 'local';
@@ -151,6 +157,17 @@ export class GatewayServerFactory {
     this.#projections = projections;
     this.#recorder = recorder;
     this.#options = options;
+    this.#unsubscribeLists = upstreams.subscribe((event) => {
+      if (
+        event.type === 'tools_changed' ||
+        event.type === 'prompts_changed' ||
+        event.type === 'resources_changed' ||
+        event.type === 'connection_closed'
+      ) {
+        this.#listGeneration++;
+        this.#listTraversals.clear();
+      }
+    });
     this.#stateCodec = createRequestStateCodec<GatewayRequestState>({
       key: createHash('sha256').update(masterKey).digest(),
       ttlSeconds: 86_400,
@@ -181,7 +198,9 @@ export class GatewayServerFactory {
     } else if (aggregate.capabilities.tools) {
       server.setRequestHandler('tools/list', async (request, context) => {
         const entries = this.#registry.entries();
-        const listed = await this.#aggregateTools(server, entries, context, request.params);
+        const listed = await this.#traversal(server, entries, context, request.params, () =>
+          this.#aggregateTools(server, entries, context, request.params),
+        );
         const tools = listed.items;
         const page = this.#page(
           tools,
@@ -254,11 +273,9 @@ export class GatewayServerFactory {
 
     if (aggregate.capabilities.prompts) {
       server.setRequestHandler('prompts/list', async (request, context) => {
-        const listed = await this.#aggregatePrompts(
-          server,
-          this.#registry.entries(),
-          context,
-          request.params,
+        const entries = this.#registry.entries();
+        const listed = await this.#traversal(server, entries, context, request.params, () =>
+          this.#aggregatePrompts(server, entries, context, request.params),
         );
         const prompts = listed.items;
         const page = this.#page(
@@ -306,11 +323,9 @@ export class GatewayServerFactory {
 
     if (aggregate.capabilities.resources) {
       server.setRequestHandler('resources/list', async (request, context) => {
-        const listed = await this.#aggregateResources(
-          server,
-          this.#registry.entries(),
-          context,
-          request.params,
+        const entries = this.#registry.entries();
+        const listed = await this.#traversal(server, entries, context, request.params, () =>
+          this.#aggregateResources(server, entries, context, request.params),
         );
         const resources = listed.items;
         const page = this.#page(
@@ -327,11 +342,9 @@ export class GatewayServerFactory {
         };
       });
       server.setRequestHandler('resources/templates/list', async (request, context) => {
-        const listed = await this.#aggregateResourceTemplates(
-          server,
-          this.#registry.entries(),
-          context,
-          request.params,
+        const entries = this.#registry.entries();
+        const listed = await this.#traversal(server, entries, context, request.params, () =>
+          this.#aggregateResourceTemplates(server, entries, context, request.params),
         );
         const resourceTemplates = listed.items;
         const page = this.#page(
@@ -721,6 +734,8 @@ export class GatewayServerFactory {
   }
 
   async catalogChanged(): Promise<void> {
+    this.#listGeneration++;
+    this.#listTraversals.clear();
     if (this.#options.toolMode !== 'compact') return;
     await this.#compactState.revoke(
       (invocation) => {
@@ -739,6 +754,8 @@ export class GatewayServerFactory {
   }
 
   async close(): Promise<void> {
+    this.#unsubscribeLists();
+    this.#listTraversals.clear();
     await this.#compactState.revoke(
       () => false,
       (invocation) => this.#terminateCompact(invocation),
@@ -1358,6 +1375,66 @@ export class GatewayServerFactory {
     };
   }
 
+  async #traversal<T>(
+    server: Server,
+    entries: RegistryEntry[],
+    context: ServerContext,
+    params: unknown,
+    list: () => Promise<AggregateList<T>>,
+  ): Promise<AggregateList<T>> {
+    context.mcpReq.signal.throwIfAborted();
+    const now = Date.now();
+    for (const [key, cached] of this.#listTraversals) {
+      if (cached.expiresAt <= now) this.#listTraversals.delete(key);
+    }
+    const key = fingerprint({
+      method: context.mcpReq.method,
+      principal: context.http?.authInfo?.clientId ?? 'local',
+      scopes: context.http?.authInfo?.scopes,
+      authorization: context.http?.authInfo?.extra,
+      capabilities: this.#requestClientCapabilities(server, context),
+      params: this.#listParams(params, undefined),
+    });
+    const revision = fingerprint({
+      entries: entries.map(({ server, snapshot }) => ({
+        server,
+        fingerprint: snapshot.fingerprint,
+      })),
+      projections: [...this.#registry.store().getProjectionIndex()].map(([id, value]) => [
+        id,
+        value.defaultVisibility,
+        [...value.overrides],
+      ]),
+    });
+    const parsed = paramsSchema.safeParse(params);
+    const cached = this.#listTraversals.get(key);
+    // Reuse only continuation pages; each new traversal still reads live lists.
+    if (parsed.success && typeof parsed.data.cursor === 'string' && cached?.revision === revision)
+      return cached.value as AggregateList<T>;
+    this.#listTraversals.delete(key);
+    const generation = this.#listGeneration;
+    const value = await list();
+    // Partial failures must be retried so recovery still invalidates old cursors.
+    if (
+      generation === this.#listGeneration &&
+      value.failedServers.length === 0 &&
+      value.items.length > pageSize
+    ) {
+      const bytes = Buffer.byteLength(JSON.stringify(value));
+      if (bytes <= 2 * 1024 * 1024) {
+        let total = [...this.#listTraversals.values()].reduce((sum, item) => sum + item.bytes, 0);
+        while (this.#listTraversals.size >= 32 || total + bytes > 8 * 1024 * 1024) {
+          const oldest = this.#listTraversals.keys().next().value;
+          if (oldest === undefined) break;
+          total -= this.#listTraversals.get(oldest)!.bytes;
+          this.#listTraversals.delete(oldest);
+        }
+        this.#listTraversals.set(key, { revision, expiresAt: Date.now() + 30_000, bytes, value });
+      }
+    }
+    return value;
+  }
+
   #aggregateListMeta(listed: AggregateList<unknown>): Record<string, unknown> {
     return listed.failedServers.length === 0
       ? {}
@@ -1477,6 +1554,14 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<Tool[]> {
+    // The owning node's discovered mirror keeps ordinary discovery process-free.
+    if (
+      this.#options.scope === 'local' &&
+      context.mcpReq.method === 'tools/list' &&
+      Object.keys(this.#requestClientCapabilities(server, context)).length === 0
+    ) {
+      return entry.snapshot.tools;
+    }
     const tools: Tool[] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -1502,6 +1587,13 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<Prompt[]> {
+    if (
+      this.#options.scope === 'local' &&
+      context.mcpReq.method === 'prompts/list' &&
+      Object.keys(this.#requestClientCapabilities(server, context)).length === 0
+    ) {
+      return entry.snapshot.prompts;
+    }
     const prompts: Prompt[] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -1527,6 +1619,13 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<Resource[]> {
+    if (
+      this.#options.scope === 'local' &&
+      context.mcpReq.method === 'resources/list' &&
+      Object.keys(this.#requestClientCapabilities(server, context)).length === 0
+    ) {
+      return entry.snapshot.resources;
+    }
     const resources: Resource[] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -1552,6 +1651,13 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<ResourceTemplateType[]> {
+    if (
+      this.#options.scope === 'local' &&
+      context.mcpReq.method === 'resources/templates/list' &&
+      Object.keys(this.#requestClientCapabilities(server, context)).length === 0
+    ) {
+      return entry.snapshot.resourceTemplates;
+    }
     const templates: ResourceTemplateType[] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();

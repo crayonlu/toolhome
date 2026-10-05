@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { once } from 'node:events';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,7 @@ describe('local node gateway', () => {
             type: 'stdio',
             command: process.execPath,
             args: ['--import', 'tsx', fixturePath],
+            env: { FIXTURE_START_LOG: join(directory, 'starts.log') },
             protocolMode: 'legacy',
           },
         }),
@@ -66,6 +67,22 @@ describe('local node gateway', () => {
         await gateway.close();
       }
 
+      // An explicit check updates the persisted mirror used by the next connection.
+      const reopened = await prepareLocalGateway({
+        client: new ControlClient(baseUrl, runtime.controlKey),
+        nodeId: 'local-test',
+        storePath: join(directory, 'node.sqlite'),
+      });
+      const mirrored = reopened.store.getServerBySlug('local-fixture')!;
+      const snapshot = reopened.store.getSnapshot(mirrored.id)!;
+      reopened.store.saveSnapshot({
+        ...snapshot,
+        tools: snapshot.tools.map((tool) =>
+          tool.name === 'echo' ? { ...tool, description: 'updated mirrored description' } : tool,
+        ),
+      });
+      await reopened.close();
+      reopened.store.close();
       client = new Client({ name: 'node-test', version: '1.0.0' }, { capabilities: {} });
       await client.connect(
         new StdioClientTransport({
@@ -81,7 +98,16 @@ describe('local node gateway', () => {
         }),
         { timeout: 10_000 },
       );
+      expect(readFileSync(join(directory, 'starts.log'), 'utf8').trim().split('\n')).toHaveLength(
+        1,
+      );
       const tools = (await client.listTools()).tools;
+      expect(readFileSync(join(directory, 'starts.log'), 'utf8').trim().split('\n')).toHaveLength(
+        1,
+      );
+      expect(tools.find((tool) => tool.name === 'local-fixture_echo')?.description).toBe(
+        'updated mirrored description',
+      );
       expect(tools.map((tool) => tool.name)).toContain('local-fixture_echo');
       expect(tools.map((tool) => tool.name)).toContain('local-fixture_app-2eaction');
       expect(tools.every((tool) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(tool.name))).toBe(true);
@@ -89,6 +115,9 @@ describe('local node gateway', () => {
         name: 'local-fixture_echo',
         arguments: { local: true },
       });
+      expect(readFileSync(join(directory, 'starts.log'), 'utf8').trim().split('\n')).toHaveLength(
+        2,
+      );
       expect(result.structuredContent).toMatchObject({
         arguments: { local: true },
         server: 'home',
