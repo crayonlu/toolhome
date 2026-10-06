@@ -13,7 +13,11 @@ export interface RemoteFixture {
   close(): Promise<void>;
 }
 
-export async function startRemoteFixture(): Promise<RemoteFixture> {
+/**
+ * Starts the remote fixture. Pass an explicit port when a test needs the same
+ * address before and after the upstream becomes reachable.
+ */
+export async function startRemoteFixture(port = 0): Promise<RemoteFixture> {
   const state = createFixtureState();
   const handler = createMcpHandler(
     (context) =>
@@ -27,7 +31,7 @@ export async function startRemoteFixture(): Promise<RemoteFixture> {
   );
   const server = serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port,
     async fetch(request) {
       if (new URL(request.url).pathname !== '/mcp') {
         return new Response('Not found', { status: 404 });

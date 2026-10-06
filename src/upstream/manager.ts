@@ -4,7 +4,7 @@ import {
   type Notification,
   type ServerContext,
 } from '@modelcontextprotocol/client';
-import { AppError, errorMessage } from '../domain/errors.js';
+import { AppError, errorMessage, errorMessageWithCause } from '../domain/errors.js';
 import {
   isHostHosted,
   type CapabilitySnapshot,
@@ -25,6 +25,18 @@ import type { CredentialSource } from './credential-resolver.js';
 
 type UpstreamEventListener = (event: UpstreamEvent) => void;
 
+/**
+ * Delays (ms) before each automatic recovery attempt for a server marked
+ * unreachable by a transient upstream or network failure. Without this, a
+ * single failed connection stayed visible as `unreachable` until an operator
+ * refreshed the server, the hourly OAuth sweep ran, or a client happened to
+ * call it again. The schedule is bounded, so a server that stays down is not
+ * probed forever.
+ */
+export const DEFAULT_RECOVERY_DELAYS_MS: readonly number[] = [
+  30_000, 120_000, 300_000, 900_000, 1_800_000,
+];
+
 interface ManagedAdapter {
   updatedAt: string;
   adapter: UpstreamAdapter;
@@ -35,6 +47,9 @@ export class UpstreamManager {
   readonly #refreshing = new Map<string, Promise<CapabilitySnapshot>>();
   readonly #listeners = new Set<UpstreamEventListener>();
   readonly #recovering = new Map<string, Promise<void>>();
+  readonly #recoveryTimers = new Map<string, NodeJS.Timeout>();
+  readonly #recoveryAttempts = new Map<string, number>();
+  readonly #recoveryDelaysMs: readonly number[];
   readonly #store: Store;
   readonly #credentials: CredentialSource;
   readonly #logger: Logger;
@@ -45,11 +60,16 @@ export class UpstreamManager {
     store: Store,
     credentials: CredentialSource,
     logger: Logger,
-    options: { canHost?: (server: ServerRecord) => boolean } = {},
+    options: {
+      canHost?: (server: ServerRecord) => boolean;
+      /** Delays before automatic recovery attempts while a server is unreachable. */
+      recoveryDelaysMs?: readonly number[];
+    } = {},
   ) {
     this.#store = store;
     this.#credentials = credentials;
     this.#logger = logger;
+    this.#recoveryDelaysMs = options.recoveryDelaysMs ?? DEFAULT_RECOVERY_DELAYS_MS;
     // A ToolHome host only owns remote and home-hosted processes. Node-hosted
     // servers belong to the client machine that runs them, so this process must
     // never spawn them; the node-side runtime passes its own predicate instead.
@@ -178,6 +198,7 @@ export class UpstreamManager {
   }
 
   async remove(serverId: string): Promise<void> {
+    this.#clearRecovery(serverId);
     const managed = this.#adapters.get(serverId);
     this.#adapters.delete(serverId);
     if (managed) await managed.adapter.close();
@@ -203,6 +224,9 @@ export class UpstreamManager {
 
   async close(): Promise<void> {
     this.#closed = true;
+    for (const timer of this.#recoveryTimers.values()) clearTimeout(timer);
+    this.#recoveryTimers.clear();
+    this.#recoveryAttempts.clear();
     const adapters = [...this.#adapters.values()];
     this.#adapters.clear();
     await Promise.allSettled(adapters.map((item) => item.adapter.close()));
@@ -218,6 +242,7 @@ export class UpstreamManager {
       const snapshot = await adapter.discoverSnapshot(previous?.version ?? 0);
       this.#store.saveSnapshot(snapshot);
       if (previous?.fingerprint !== snapshot.fingerprint) this.#emitCapabilityChanges(serverId);
+      this.#clearRecovery(serverId);
       this.#saveRuntime(server, {
         status: server.enabled ? 'ready' : 'disabled',
         protocolVersion: snapshot.protocolVersion,
@@ -317,6 +342,7 @@ export class UpstreamManager {
         processId: null,
         lastError: 'Upstream connection closed',
       });
+      if (server.enabled) this.#scheduleRecovery(serverId);
       return;
     }
     this.#saveRuntime(server, {
@@ -331,7 +357,7 @@ export class UpstreamManager {
       this.#saveRuntime(server, {
         status: 'start-failed',
         processId: null,
-        lastError: errorMessage(error),
+        lastError: errorMessageWithCause(error),
       });
     }
   }
@@ -363,6 +389,7 @@ export class UpstreamManager {
   }
 
   #markReady(server: ServerRecord, adapter: UpstreamAdapter): void {
+    this.#clearRecovery(server.id);
     const state = this.#store.getRuntimeState(server.id);
     if (state?.status === 'ready') return;
     const snapshot = this.#store.getSnapshot(server.id);
@@ -377,7 +404,7 @@ export class UpstreamManager {
   }
 
   #markFailure(server: ServerRecord, error: unknown): void {
-    const message = errorMessage(error);
+    const message = errorMessageWithCause(error);
     const lower = message.toLowerCase();
     const status =
       lower.includes('401') || lower.includes('unauthorized') ? 'auth-required' : 'unreachable';
@@ -389,6 +416,60 @@ export class UpstreamManager {
       message: `Server ${server.slug} failed`,
       detail: { error: message },
     });
+    // A transient network failure must not require an operator refresh.
+    if (status === 'unreachable' && server.enabled && this.#canHost(server)) {
+      this.#scheduleRecovery(server.id);
+    }
+  }
+
+  /**
+   * Queues the next automatic recovery attempt for a server marked unreachable.
+   * Attempts follow `#recoveryDelaysMs` and stop once the schedule is spent, so
+   * a permanently unreachable upstream is probed a bounded number of times.
+   */
+  #scheduleRecovery(serverId: string): void {
+    if (this.#closed) return;
+    // A burst of failures must not consume the schedule: an attempt is already queued.
+    if (this.#recoveryTimers.has(serverId)) return;
+    const attempt = this.#recoveryAttempts.get(serverId) ?? 0;
+    const delay = this.#recoveryDelaysMs[attempt];
+    if (delay === undefined) return;
+    const timer = setTimeout(() => {
+      this.#recoveryTimers.delete(serverId);
+      void this.#attemptRecovery(serverId);
+    }, delay);
+    timer.unref?.();
+    this.#recoveryTimers.set(serverId, timer);
+  }
+
+  async #attemptRecovery(serverId: string): Promise<void> {
+    if (this.#closed) return;
+    this.#recoveryAttempts.set(serverId, (this.#recoveryAttempts.get(serverId) ?? 0) + 1);
+    const server = this.#store.getServer(serverId);
+    if (!server || !server.enabled || !this.#canHost(server)) {
+      this.#clearRecovery(serverId);
+      return;
+    }
+    try {
+      await this.refresh(serverId);
+    } catch (error) {
+      // refresh() already recorded the failure and queued the next attempt.
+      this.#logger.warn('Upstream recovery attempt failed', {
+        serverId,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  #clearRecoveryTimer(serverId: string): void {
+    const timer = this.#recoveryTimers.get(serverId);
+    if (timer) clearTimeout(timer);
+    this.#recoveryTimers.delete(serverId);
+  }
+
+  #clearRecovery(serverId: string): void {
+    this.#clearRecoveryTimer(serverId);
+    this.#recoveryAttempts.delete(serverId);
   }
 
   #saveRuntime(server: ServerRecord, patch: Partial<RuntimeState>): RuntimeState {
