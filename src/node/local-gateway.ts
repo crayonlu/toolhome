@@ -12,6 +12,7 @@ import type { McpToolMode } from '../config.js';
 import { GatewayServerFactory } from '../data-plane/gateway-server.js';
 import { CapabilityRegistry } from '../data-plane/registry.js';
 import { ToolProjectionService } from '../data-plane/projection.js';
+import { AppError, errorMessage } from '../domain/errors.js';
 import { serverRecordSchema, type ServerRecord } from '../domain/models.js';
 import { createLogger, type Logger } from '../observability/logger.js';
 import { CallRecorder } from '../observability/call-recorder.js';
@@ -170,6 +171,27 @@ function resetLocalProjections(store: Store): void {
   }
 }
 
+/**
+ * Opens the local node mirror. A mirror is bound to the node label that created
+ * it, so a label that changed silently (for example a config rewrite that
+ * dropped `nodeId`) used to fail with a bare master-key message that hid the
+ * cause and the fix.
+ */
+function openMirror(storePath: string, masterKey: string, nodeId: string): SqliteStore {
+  try {
+    return new SqliteStore(storePath, new SecretBox(masterKey));
+  } catch (error) {
+    const code = error instanceof AppError ? error.code : null;
+    if (code !== 'master_key_mismatch' && code !== 'credential_decryption_failed') throw error;
+    throw new AppError(
+      code,
+      `${errorMessage(error)}: ${storePath} belongs to a different node label than "${nodeId}". ` +
+        'Run with --node <label> or set "nodeId" in the local CLI config.',
+      500,
+    );
+  }
+}
+
 /** Build the local runtime: mirror the node's servers and compose the gateway. */
 export async function prepareLocalGateway(
   options: LocalGatewayOptions,
@@ -178,7 +200,7 @@ export async function prepareLocalGateway(
   // Deterministic key: the mirror stores no credential payloads, only server
   // records and discovered capability snapshots.
   const masterKey = `toolhome-local-node:${options.nodeId}`;
-  const store = new SqliteStore(options.storePath, new SecretBox(masterKey));
+  const store = openMirror(options.storePath, masterKey, options.nodeId);
   const credentials = new NodeCredentialSource();
   const upstreams = new UpstreamManager(store, credentials, logger, {
     canHost: (server) =>

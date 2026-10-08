@@ -196,6 +196,8 @@ Discovery reads only definitions already stored on the entry: `search` makes no 
 
 **Local scope.** Node-placed servers still run only on their owning machine, and the local compact catalog covers only servers placed on that node. At startup the local entry mirrors the control plane's tool visibility; if a server's projection cannot be read it stays out of the compact catalog (fail closed) until the next start or explicit refresh. Changing visibility on the control plane requires the local entry to reconnect before it takes effect.
 
+**Node label.** `toolhome mcp stdio` binds its local mirror to the node label from `--node` or `nodeId` in the CLI config, falling back to the hostname. Keep that label stable: `auth login` preserves it, and a mirror opened under a different label reports the label it belongs to instead of failing with a bare key error.
+
 **Roll back to full.** Set `TOOLHOME_MCP_TOOL_MODE=full` (or remove it) on the host, or drop `--tool-mode` from `toolhome mcp stdio`, then reconnect the client. No data migration is needed: full mode clears any compact-mirrored visibility rows so every enabled tool is exposed again.
 
 **Keep one discovery layer.** Do not nest ToolHome compact behind an upstream that already performs its own search/exec or Code Mode. Pick either ToolHome `full`/individual endpoints or the upstream's full tool list. For Cloudflare API MCP, opt out explicitly yourself with its documented `?codemode=false` URL; ToolHome never rewrites upstream URLs or query parameters, and `truncateToolResult` is a separate switch that is never changed for you.

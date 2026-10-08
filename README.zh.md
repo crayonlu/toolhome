@@ -194,6 +194,8 @@ ToolHome 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据�
 
 **本机范围。** Node-hosted Server 仍然只在所属机器上运行，本机 compact 目录只包含放置在该 node 的 Server。启动时本机入口会镜像控制面的工具可见性；若某个 Server 的投影读取失败，它会一直排除在 compact 目录之外（fail closed），直到下次启动或显式刷新。在控制面修改可见性后，本机入口需要重新连接才会生效。
 
+**节点标识。** `toolhome mcp stdio` 会把本地镜像绑定到 `--node` 或 CLI 配置里的 `nodeId`，都没有时退回主机名。请保持该标识稳定：`auth login` 会保留它；若镜像是用别的标识建立的，启动时会直接说明它属于哪个节点标识，而不是只报一个密钥错误。
+
 **回退到 full。** 在 Host 上把 `TOOLHOME_MCP_TOOL_MODE` 设回 `full`（或删除该变量），或去掉 `toolhome mcp stdio --tool-mode`，然后重新连接客户端。无需数据迁移：full 会清除 compact 镜像写入的可见性行，重新暴露全部启用工具。
 
 **定义稳定。** 聚合 `tools/list` 输出规范化后的对象键顺序，数组保持原顺序，因此仅等价 schema 对象的键顺序变化时，序列化字节完全一致。把工具定义放在模型请求前部的客户端可以复用前缀；真实的定义变化仍会改变字节。独立入口保持上游原始键顺序。

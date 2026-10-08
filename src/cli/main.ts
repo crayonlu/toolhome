@@ -668,8 +668,15 @@ auth
   .requiredOption('--control-key <key>')
   .action((options: { url?: string; controlKey: string }) => {
     const url = options.url ?? program.opts<GlobalOptions>().url;
-    if (!url) throw new Error('required option \'--url <url>\' not specified');
-    const value = localConfigSchema.parse({ url, controlKey: options.controlKey });
+    if (!url) throw new Error("required option '--url <url>' not specified");
+    // Logging in replaces the connection settings only: the node label decides
+    // the local mirror's key, and dropping it silently broke `mcp stdio`.
+    const existing = loadLocalConfig();
+    const value = localConfigSchema.parse({
+      url,
+      controlKey: options.controlKey,
+      ...(existing?.nodeId === undefined ? {} : { nodeId: existing.nodeId }),
+    });
     const path = configPath();
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
