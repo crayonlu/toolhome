@@ -104,9 +104,21 @@ const taskParamsSchema = z
   .passthrough();
 const pageSize = 100;
 
+/**
+ * Last known good items for an upstream whose live list failed. An upstream
+ * that has never listed this surface keeps its original "failed" report, so the
+ * failure signal survives for servers that genuinely have nothing to serve.
+ */
+function salvageSnapshot<T>(items: T[], transform: (items: T[]) => T[]): T[] | undefined {
+  return items.length === 0 ? undefined : transform(items);
+}
+
 interface AggregateList<T> {
   items: T[];
+  /** Upstreams that contributed nothing: the live list failed and no snapshot data exists. */
   failedServers: string[];
+  /** Upstreams served from their last known good snapshot after a failed live list. */
+  staleServers: string[];
 }
 
 interface GatewayRequestState {
@@ -1436,26 +1448,50 @@ export class GatewayServerFactory {
   }
 
   #aggregateListMeta(listed: AggregateList<unknown>): Record<string, unknown> {
-    return listed.failedServers.length === 0
-      ? {}
-      : { 'toolhome/failed-servers': listed.failedServers };
+    return {
+      ...(listed.failedServers.length === 0
+        ? {}
+        : { 'toolhome/failed-servers': listed.failedServers }),
+      ...(listed.staleServers.length === 0
+        ? {}
+        : { 'toolhome/stale-servers': listed.staleServers }),
+    };
   }
 
   async #aggregateList<T>(
     entries: RegistryEntry[],
     context: ServerContext,
     list: (entry: RegistryEntry) => Promise<T[]>,
+    /**
+     * Last known good items for an upstream whose live list failed. Serving
+     * them keeps the aggregate catalog stable across a transient upstream
+     * failure, which matters because continuation cursors are keyed by the
+     * page contents: dropping a server mid-pagination made real clients fail
+     * with "Cursor is invalid or stale".
+     */
+    salvage?: (entry: RegistryEntry) => T[] | undefined,
   ): Promise<AggregateList<T>> {
     context.mcpReq.signal.throwIfAborted();
     const results = await Promise.allSettled(entries.map(list));
     context.mcpReq.signal.throwIfAborted();
     const items: T[] = [];
     const failedServers: string[] = [];
+    const staleServers: string[] = [];
     for (const [index, result] of results.entries()) {
-      if (result.status === 'fulfilled') items.push(...result.value);
-      else failedServers.push(entries[index]!.server.slug);
+      const entry = entries[index]!;
+      if (result.status === 'fulfilled') {
+        items.push(...result.value);
+        continue;
+      }
+      const salvaged = salvage?.(entry);
+      if (salvaged === undefined) failedServers.push(entry.server.slug);
+      else {
+        items.push(...salvaged);
+        staleServers.push(entry.server.slug);
+      }
     }
     failedServers.sort();
+    staleServers.sort();
     if (results.length > 0 && failedServers.length === results.length) {
       throw new ProtocolError(
         ProtocolErrorCode.InternalError,
@@ -1465,7 +1501,46 @@ export class GatewayServerFactory {
         },
       );
     }
-    return { items, failedServers };
+    return { items, failedServers, staleServers };
+  }
+
+  /** Server-scoped aggregate transforms, shared by live lists and snapshots. */
+  #aggregateServerTools(entry: RegistryEntry, tools: Tool[]): Tool[] {
+    // Tool visibility applies only to the aggregate endpoint.
+    const visible = this.#projections.apply(entry.server.id, tools);
+    // Canonical key order keeps the emitted catalog byte-stable when upstreams
+    // reorder equivalent schema objects; arrays stay untouched.
+    return visible.map(
+      (tool) =>
+        canonicalize({
+          ...rewriteAggregateTool(tool, entry.server.slug),
+          name: aggregateToolName(entry.server.slug, tool.name),
+        }) as Tool,
+    );
+  }
+
+  #aggregateServerPrompts(entry: RegistryEntry, prompts: Prompt[]): Prompt[] {
+    return prompts.map((prompt) => ({
+      ...prompt,
+      name: aggregateName(entry.server.slug, prompt.name),
+    }));
+  }
+
+  #aggregateServerResources(entry: RegistryEntry, resources: Resource[]): Resource[] {
+    return resources.map((resource) => ({
+      ...resource,
+      uri: virtualResourceUri(entry.server.slug, resource.uri),
+    }));
+  }
+
+  #aggregateServerTemplates(
+    entry: RegistryEntry,
+    templates: ResourceTemplateType[],
+  ): ResourceTemplateType[] {
+    return templates.map((template) => ({
+      ...template,
+      uriTemplate: virtualResourceTemplate(entry.server.slug, template.uriTemplate),
+    }));
   }
 
   async #aggregateTools(
@@ -1474,23 +1549,13 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<AggregateList<Tool>> {
-    const listed = await this.#aggregateList(
+    const listed = await this.#aggregateList<Tool>(
       entries.filter(({ snapshot }) => snapshot.capabilities.tools),
       context,
-      async (entry) => {
-        const tools = await this.#listTools(server, entry, context, params);
-        // Tool visibility applies only to the aggregate endpoint.
-        const visible = this.#projections.apply(entry.server.id, tools);
-        // Canonical key order keeps the emitted catalog byte-stable when
-        // upstreams reorder equivalent schema objects; arrays stay untouched.
-        return visible.map(
-          (tool) =>
-            canonicalize({
-              ...rewriteAggregateTool(tool, entry.server.slug),
-              name: aggregateToolName(entry.server.slug, tool.name),
-            }) as Tool,
-        );
-      },
+      async (entry) =>
+        this.#aggregateServerTools(entry, await this.#listTools(server, entry, context, params)),
+      (entry) =>
+        salvageSnapshot(entry.snapshot.tools, (tools) => this.#aggregateServerTools(entry, tools)),
     );
     listed.items.sort((left, right) => left.name.localeCompare(right.name));
     return listed;
@@ -1502,14 +1567,18 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<AggregateList<Prompt>> {
-    const listed = await this.#aggregateList(
+    const listed = await this.#aggregateList<Prompt>(
       entries.filter(({ snapshot }) => snapshot.capabilities.prompts),
       context,
       async (entry) =>
-        (await this.#listPrompts(server, entry, context, params)).map((prompt) => ({
-          ...prompt,
-          name: aggregateName(entry.server.slug, prompt.name),
-        })),
+        this.#aggregateServerPrompts(
+          entry,
+          await this.#listPrompts(server, entry, context, params),
+        ),
+      (entry) =>
+        salvageSnapshot(entry.snapshot.prompts, (prompts) =>
+          this.#aggregateServerPrompts(entry, prompts),
+        ),
     );
     listed.items.sort((left, right) => left.name.localeCompare(right.name));
     return listed;
@@ -1521,14 +1590,18 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<AggregateList<Resource>> {
-    const listed = await this.#aggregateList(
+    const listed = await this.#aggregateList<Resource>(
       entries.filter(({ snapshot }) => snapshot.capabilities.resources),
       context,
       async (entry) =>
-        (await this.#listResources(server, entry, context, params)).map((resource) => ({
-          ...resource,
-          uri: virtualResourceUri(entry.server.slug, resource.uri),
-        })),
+        this.#aggregateServerResources(
+          entry,
+          await this.#listResources(server, entry, context, params),
+        ),
+      (entry) =>
+        salvageSnapshot(entry.snapshot.resources, (resources: Resource[]) =>
+          this.#aggregateServerResources(entry, resources),
+        ),
     );
     listed.items.sort((left, right) => left.uri.localeCompare(right.uri));
     return listed;
@@ -1540,14 +1613,18 @@ export class GatewayServerFactory {
     context: ServerContext,
     params: unknown,
   ): Promise<AggregateList<ResourceTemplateType>> {
-    const listed = await this.#aggregateList(
+    const listed = await this.#aggregateList<ResourceTemplateType>(
       entries.filter(({ snapshot }) => snapshot.capabilities.resources),
       context,
       async (entry) =>
-        (await this.#listResourceTemplates(server, entry, context, params)).map((template) => ({
-          ...template,
-          uriTemplate: virtualResourceTemplate(entry.server.slug, template.uriTemplate),
-        })),
+        this.#aggregateServerTemplates(
+          entry,
+          await this.#listResourceTemplates(server, entry, context, params),
+        ),
+      (entry) =>
+        salvageSnapshot(entry.snapshot.resourceTemplates, (templates: ResourceTemplateType[]) =>
+          this.#aggregateServerTemplates(entry, templates),
+        ),
     );
     listed.items.sort((left, right) => left.uriTemplate.localeCompare(right.uriTemplate));
     return listed;

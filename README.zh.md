@@ -64,7 +64,7 @@ ToolHome 有两个一等平面：
 
 下游 2026 请求保持无状态；2025-era 使用与认证 principal 绑定的持久 Session，保留 initialize 能力声明和双向请求语义。最终 Tasks extension 在 SDK 2.0 尚未注册的部分由隔离兼容层补齐，对外仍是官方 `tasks/*` wire contract。
 
-聚合能力列表在部分上游失败时保留健康上游的结果，并在 `_meta["toolhome/failed-servers"]` 中列出失败的服务器 slug。所有具备相应能力的上游均失败时，列表返回协议错误。客户端取消请求时保持上游运行状态。独立入口返回自身上游的错误。
+聚合能力列表在某个上游实时列举失败时改用该 Server 上次成功发现的快照，因此瞬时上游失败不会改变分页期间的目录组成，客户端的续页游标保持有效。这些上游会出现在 `_meta["toolhome/stale-servers"]` 中；实时列举结果始终优先于快照。从未成功列举过该能力、现在又失败的 Server 会出现在 `_meta["toolhome/failed-servers"]` 中；当没有任何上游能提供列表数据时，列表返回协议错误。客户端取消请求时保持上游运行状态。独立入口返回自身上游的错误。
 
 聚合工具名为 `{server_slug}_{encoded_upstream_name}`，上游名称中除 ASCII 字母与数字外的 UTF-8 字节编码为 `-hh`（十六进制），例如 `github.search_code` 映射为 `github_search-5fcode`；超长名称使用稳定哈希缩短。Prompt 名称仍为 `{server_slug}.{upstream_name}`。未知扩展方法在聚合入口使用 `toolhome/{server_slug}/{upstream_method}`；独立入口原样透传。MCP App 若使用原始工具名，ToolHome 会根据 App 资源上下文或全局唯一名称路由；存在同名歧义时应使用独立入口。
 
