@@ -1,6 +1,44 @@
 import { AppError } from '../domain/errors.js';
 import { cliNdjsonContentType, type CliExecFrame } from '../cli-plane/frames.js';
 
+/**
+ * Name the reason a transport failure happened.
+ *
+ * `fetch` reports DNS failures, refused connections, TLS errors and timeouts as
+ * the same bare "fetch failed"; the errno code sits on `cause` (undici sometimes
+ * nests it in an AggregateError). Without it an unreachable control plane is
+ * indistinguishable from a rejected credential, which turns a five-minute
+ * diagnosis into an hour.
+ */
+export function transportFailureReason(error: unknown): string {
+  const reasons: string[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value !== 'object' || value === null) return;
+    const code = Reflect.get(value, 'code');
+    if (typeof code === 'string') reasons.push(code);
+    const message = Reflect.get(value, 'message');
+    if (typeof message === 'string' && message !== 'fetch failed') reasons.push(message);
+    const nested = Reflect.get(value, 'errors');
+    if (Array.isArray(nested)) for (const item of nested) collect(item);
+    collect(Reflect.get(value, 'cause'));
+  };
+  collect(error);
+  const unique = [...new Set(reasons)];
+  return unique.length === 0 ? 'the connection failed' : unique.join(': ');
+}
+
+async function fetchControl(target: URL, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(target, init);
+  } catch (error) {
+    throw new AppError(
+      'control_api_unreachable',
+      `cannot reach ${target.origin}${target.pathname}: ${transportFailureReason(error)}`,
+      502,
+    );
+  }
+}
+
 export interface ExecOutcomeSummary {
   code: number | null;
   durationMs: number;
@@ -41,7 +79,7 @@ export class ControlClient {
         400,
       );
     }
-    const response = await fetch(target, {
+    const response = await fetchControl(target, {
       method: 'POST',
       redirect: 'error',
       signal: signal ?? AbortSignal.timeout(3_600_000),
@@ -119,7 +157,7 @@ export class ControlClient {
         400,
       );
     }
-    const response = await fetch(target, {
+    const response = await fetchControl(target, {
       method,
       redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),

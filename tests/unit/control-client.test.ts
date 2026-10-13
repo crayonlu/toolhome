@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { ControlClient } from '../../src/control/client.js';
+import { ControlClient, transportFailureReason } from '../../src/control/client.js';
 import type { CliExecFrame } from '../../src/cli-plane/frames.js';
 
 function ndjson(frames: unknown[]): string {
@@ -125,5 +125,68 @@ describe('ControlClient.execStream', () => {
     );
     await expect(pending).rejects.toThrow();
     await vi.waitFor(() => expect(sawAbort).toBe(true));
+  });
+});
+
+describe('transport failure reporting', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('names the errno behind a bare "fetch failed"', () => {
+    const dns = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND tool.example.com'), {
+        code: 'ENOTFOUND',
+      }),
+    });
+    expect(transportFailureReason(dns)).toBe('ENOTFOUND: getaddrinfo ENOTFOUND tool.example.com');
+  });
+
+  it('reads a cause nested in an AggregateError, the shape undici uses for dual-stack connects', () => {
+    const aggregate = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new AggregateError([], 'all attempts failed'), {
+        errors: [
+          Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3344'), {
+            code: 'ECONNREFUSED',
+          }),
+        ],
+      }),
+    });
+    expect(transportFailureReason(aggregate)).toContain('ECONNREFUSED');
+  });
+
+  it('still answers when there is nothing to inspect', () => {
+    expect(transportFailureReason(new TypeError('fetch failed'))).toBe('the connection failed');
+  });
+
+  it('reports an unreachable control plane as such instead of a protocol error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ETIMEDOUT 123.56.83.28:443'), {
+          code: 'ETIMEDOUT',
+        }),
+      }),
+    );
+    const client = new ControlClient(new URL('https://tool.example.com'), 'tch_ctl_test');
+    await expect(client.request('GET', '/api/v1/servers')).rejects.toMatchObject({
+      code: 'control_api_unreachable',
+      message:
+        'cannot reach https://tool.example.com/api/v1/servers: ETIMEDOUT: connect ETIMEDOUT 123.56.83.28:443',
+      status: 502,
+    });
+  });
+
+  it('keeps a real HTTP response a protocol error, not a transport one', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'Invalid control key' } }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const client = new ControlClient(new URL('https://tool.example.com'), 'tch_ctl_test');
+    await expect(client.request('GET', '/api/v1/servers')).rejects.toMatchObject({
+      code: 'control_api_error',
+      status: 401,
+    });
   });
 });
