@@ -46,6 +46,7 @@ const localStateSchema = z
   .object({
     extract: z.object({ command: z.string(), args: z.array(z.string()) }).optional(),
     import: z.object({ args: z.array(z.string()) }).optional(),
+    verify: z.object({ args: z.array(z.string()), expect: z.string() }).optional(),
     target: z.string().optional(),
     credentialOnly: z.boolean().optional(),
     manual: z.string().optional(),
@@ -101,12 +102,9 @@ export async function adoptCliCredentials(
       continue;
     }
 
-    if (!options.force) {
-      const status = statusSchema.parse(await target.request('GET', `/cli/${entry.id}/status`));
-      if (status.loggedIn) {
-        outcomes.push({ slug: entry.id, status: 'already-authenticated' });
-        continue;
-      }
+    if (!options.force && (await authenticationState(target, entry.id, state.verify)) === 'yes') {
+      outcomes.push({ slug: entry.id, status: 'already-authenticated' });
+      continue;
     }
     if (options.dryRun === true) {
       outcomes.push({
@@ -159,8 +157,8 @@ export async function adoptCliCredentials(
       continue;
     }
 
-    const verified = statusSchema.parse(await target.request('GET', `/cli/${entry.id}/status`));
-    if (!verified.loggedIn) {
+    const confirmed = await authenticationState(target, entry.id, state.verify);
+    if (confirmed === 'no') {
       outcomes.push({
         slug: entry.id,
         status: 'failed',
@@ -175,10 +173,45 @@ export async function adoptCliCredentials(
     outcomes.push({
       slug: entry.id,
       status: 'adopted',
-      detail: state.target === undefined ? undefined : `state kept in ${state.target}`,
+      detail:
+        confirmed === 'unknown'
+          ? 'handed over, but this entry reports no login state to confirm it'
+          : state.verify === undefined
+            ? 'reported by the status probe'
+            : `verified with \`${state.verify.args.join(' ')}\``,
     });
   }
   return outcomes;
+}
+
+/**
+ * Ask the target whether the credential works: yes, no, or it cannot say.
+ *
+ * A `status` probe answers `loggedIn` only when the product prints that marker,
+ * and most platform CLIs do not (`gh --version` says nothing about login), so an
+ * entry can declare a `verify` command instead. A probe that reports no markers
+ * is inconclusive — never evidence of failure, and never a reason to skip an
+ * upload that is still needed.
+ */
+async function authenticationState(
+  target: ControlApi,
+  slug: string,
+  verify: { args: string[]; expect: string } | undefined,
+): Promise<'yes' | 'no' | 'unknown'> {
+  if (verify !== undefined) {
+    let stdout = '';
+    await target.execStream(
+      slug,
+      { argv: verify.args },
+      (frame) => {
+        if (frame.type === 'stdout' && frame.data !== undefined) stdout += frame.data;
+      },
+    );
+    return stdout.includes(verify.expect) ? 'yes' : 'no';
+  }
+  const status = statusSchema.parse(await target.request('GET', `/cli/${slug}/status`));
+  if (status.loggedIn) return 'yes';
+  return status.installed === true && status.version === null ? 'unknown' : 'no';
 }
 
 const defaultRunner: LocalRunner = async (command, args) => {

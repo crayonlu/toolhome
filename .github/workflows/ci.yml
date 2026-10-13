@@ -117,9 +117,11 @@ jobs:
           cat > /tmp/gh.Dockerfile <<'EOF'
           FROM alpine:3.20
           ARG GH_VERSION=2.97.0
-          # Route gh through the Cloudflare Worker relay (github.com is
-          # unreachable from the deployment network).
-          ENV GH_HOST=toolhome-gh-relay.crayon-6eb.workers.dev
+          # No GH_HOST: the deployment host reaches api.github.com directly
+          # (verified from inside a container on it), while the Cloudflare Worker
+          # relay that used to be baked in here stopped answering and made every
+          # `gh` call hang until it timed out. Set GH_HOST only if the deployment
+          # network loses that direct route again.
           RUN apk add --no-cache ca-certificates curl git \
            && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tgz \
            && tar -xzf /tmp/gh.tgz -C /tmp \

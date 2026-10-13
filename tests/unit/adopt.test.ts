@@ -10,16 +10,23 @@ interface ExecCall {
 
 function stubApi(options: {
   entries: unknown[];
-  loggedIn?: boolean;
-  exec?: (call: ExecCall) => { code: number | null; stderr?: string };
+  /** What the status probe reports before anything is handed over. */
+  status?: { installed?: boolean | null; version?: string | null; loggedIn?: boolean };
+  /** What it reports once a credential has been handed over; omitted keeps `status`. */
+  statusAfterImport?: { installed?: boolean | null; version?: string | null; loggedIn?: boolean };
+  exec?: (call: ExecCall) => { code: number | null; stderr?: string; stdout?: string };
 }): ControlApi & { execCalls: ExecCall[] } {
   const execCalls: ExecCall[] = [];
-  let loggedIn = options.loggedIn ?? false;
+  let status: { installed: boolean | null; version: string | null; loggedIn: boolean } = {
+    installed: options.status?.installed ?? true,
+    version: options.status?.version ?? '1.0.0',
+    loggedIn: options.status?.loggedIn ?? false,
+  };
   return {
     execCalls,
     async request(_method: string, path: string): Promise<unknown> {
       if (path === '/api/v1/market') return options.entries;
-      if (path.endsWith('/status')) return { loggedIn };
+      if (path.endsWith('/status')) return status;
       throw new Error(`unexpected call ${path}`);
     },
     async execStream(slug, input, onFrame): Promise<{ code: number | null; result: string }> {
@@ -27,7 +34,10 @@ function stubApi(options: {
       execCalls.push(call);
       const outcome = options.exec?.(call) ?? { code: 0 };
       if (outcome.stderr !== undefined) onFrame({ type: 'stderr', data: outcome.stderr });
-      if (outcome.code === 0) loggedIn = true;
+      if (outcome.stdout !== undefined) onFrame({ type: 'stdout', data: outcome.stdout });
+      if (outcome.code === 0 && input.stdin !== null && input.stdin !== undefined && options.statusAfterImport !== undefined) {
+        status = { ...status, ...options.statusAfterImport };
+      }
       return { code: outcome.code, result: outcome.code === 0 ? 'ok' : 'error' };
     },
   };
@@ -48,6 +58,8 @@ const ghEntry = {
 describe('adopting local CLI logins', () => {
   it('feeds the extracted token to the target and never returns it', async () => {
     const api = stubApi({
+      // A probe that does report login: the hand-over is confirmable without verify.
+      statusAfterImport: { installed: true, version: 'gh 2.97.0', loggedIn: true },
       entries: [
         ghEntry,
         {
@@ -78,7 +90,7 @@ describe('adopting local CLI logins', () => {
       { slug: 'gh-cli', argv: ['auth', 'login', '--with-token'], stdin: 'gh auth token-value\n' },
     ]);
     expect(outcomes).toEqual([
-      { slug: 'gh-cli', status: 'adopted', detail: 'state kept in toolhome-gh-cli-state:/root/.config/gh' },
+      { slug: 'gh-cli', status: 'adopted', detail: 'reported by the status probe' },
       {
         slug: 'azure-cli',
         status: 'credential-only',
@@ -95,13 +107,13 @@ describe('adopting local CLI logins', () => {
   });
 
   it('skips a CLI the instance already has a login for unless forced', async () => {
-    const api = stubApi({ entries: [ghEntry], loggedIn: true });
+    const api = stubApi({ entries: [ghEntry], status: { loggedIn: true } });
     expect(await adoptCliCredentials(api, { runLocal: async () => ({ code: 0, stdout: 'x', stderr: '' }) })).toEqual([
       { slug: 'gh-cli', status: 'already-authenticated' },
     ]);
     expect(api.execCalls).toHaveLength(0);
 
-    const forced = stubApi({ entries: [ghEntry], loggedIn: true });
+    const forced = stubApi({ entries: [ghEntry], status: { loggedIn: true } });
     const outcomes = await adoptCliCredentials(forced, {
       force: true,
       runLocal: async () => ({ code: 0, stdout: 'token\n', stderr: '' }),
@@ -142,6 +154,8 @@ describe('adopting local CLI logins', () => {
 
   it('walks only what was asked for', async () => {
     const api = stubApi({
+      // A probe that does report login: the hand-over is confirmable without verify.
+      statusAfterImport: { installed: true, version: 'gh 2.97.0', loggedIn: true },
       entries: [
         ghEntry,
         { id: 'vercel-cli', name: 'Vercel', plane: 'cli', installed: true, localState: { credentialOnly: true } },
@@ -186,5 +200,92 @@ describe('catalog local-state policy', () => {
     expect(
       allow.some((rule) => rule.length <= argv.length && rule.every((token, index) => token === '*' || token === argv[index])),
     ).toBe(true);
+  });
+});
+
+describe('authentication checks', () => {
+  const ghWithVerify = {
+    ...ghEntry,
+    localState: {
+      ...ghEntry.localState,
+      verify: { args: ['auth', 'status'], expect: 'Logged in to' },
+    },
+  };
+
+  it('prefers a declared verify command over the status probe', async () => {
+    let imported = false;
+    const api = stubApi({
+      entries: [ghWithVerify],
+      exec: (call) => {
+        if (call.stdin !== null) {
+          imported = true;
+          return { code: 0, stdout: 'ok\n' };
+        }
+        return imported
+          ? { code: 0, stdout: 'Logged in to github.com account crayonlu\n' }
+          : { code: 1, stdout: 'X not logged in\n' };
+      },
+    });
+    const outcomes = await adoptCliCredentials(api, {
+      runLocal: async () => ({ code: 0, stdout: 'token\n', stderr: '' }),
+    });
+    expect(api.execCalls.map((call) => call.argv)).toEqual([
+      ['auth', 'status'],
+      ['auth', 'login', '--with-token'],
+      ['auth', 'status'],
+    ]);
+    expect(outcomes).toEqual([
+      {
+        slug: 'gh-cli',
+        status: 'adopted',
+        detail: 'verified with `auth status`',
+      },
+    ]);
+  });
+
+  it('stops at already-authenticated when the verify command already succeeds', async () => {
+    const api = stubApi({
+      entries: [ghWithVerify],
+      exec: () => ({ code: 0, stdout: 'Logged in to github.com account crayonlu\n' }),
+    });
+    expect(await adoptCliCredentials(api, { runLocal: async () => ({ code: 0, stdout: 't', stderr: '' }) })).toEqual([
+      { slug: 'gh-cli', status: 'already-authenticated' },
+    ]);
+    expect(api.execCalls).toHaveLength(1);
+  });
+
+  it('reports a hand-over it cannot confirm, and never claims success', async () => {
+    // A probe that emits no markers: `gh --version` with no login output.
+    const api = stubApi({
+      entries: [ghEntry],
+      status: { installed: true, version: null, loggedIn: false },
+      // The probe keeps reporting nothing: it cannot confirm the hand-over.
+      statusAfterImport: { installed: true, version: null, loggedIn: false },
+    });
+    const outcomes = await adoptCliCredentials(api, {
+      runLocal: async () => ({ code: 0, stdout: 'token\n', stderr: '' }),
+    });
+    // Not skipped before the import, and reported as unconfirmed afterwards.
+    expect(api.execCalls).toHaveLength(1);
+    expect(outcomes).toEqual([
+      {
+        slug: 'gh-cli',
+        status: 'adopted',
+        detail: 'handed over, but this entry reports no login state to confirm it',
+      },
+    ]);
+  });
+
+  it('fails when the probe reports a version but no login', async () => {
+    const api = stubApi({
+      entries: [ghEntry],
+      status: { installed: true, version: 'gh 2.97.0', loggedIn: false },
+      statusAfterImport: { installed: true, version: 'gh 2.97.0', loggedIn: false },
+      exec: () => ({ code: 0, stderr: 'error: bad credentials' }),
+    });
+    const outcomes = await adoptCliCredentials(api, {
+      runLocal: async () => ({ code: 0, stdout: 'stale\n', stderr: '' }),
+    });
+    expect(outcomes[0]).toMatchObject({ slug: 'gh-cli', status: 'failed' });
   });
 });

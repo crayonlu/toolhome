@@ -20,6 +20,13 @@ export interface LocalStateSpec {
   extract?: { command: string; args: string[] };
   /** Runs on the target instance; the extracted secret arrives on stdin. */
   import?: { args: string[] };
+  /**
+   * How to check the target accepted the credential: argv plus a substring that
+   * must appear in its output. Needed because a `status` probe answers `version`
+   * and `loggedIn` only when the product prints those markers, which most
+   * platform CLIs do not — `gh --version` can never report a login.
+   */
+  verify?: { args: string[]; expect: string };
   /** Where the target keeps the resulting state, for the report. */
   target?: string;
   /** Nothing to move: the entry authenticates from credential values that already travel. */
@@ -589,6 +596,7 @@ ENTRYPOINT ["gh"]
     localState: {
       extract: { command: 'gh', args: ['auth', 'token'] },
       import: { args: ['auth', 'login', '--with-token'] },
+      verify: { args: ['auth', 'status'], expect: 'Logged in to' },
       target: 'toolhome-gh-cli-state:/root/.config/gh',
     },
     requires: [],
@@ -609,7 +617,16 @@ ENTRYPOINT ["gh"]
       deny: [['auth', 'token']],
     },
     execTimeoutMs: 600_000,
-    probe: { command: 'gh', args: ['--version'] },
+    // `gh --version` says nothing about login, so the probe reports both markers
+    // itself; otherwise every status call answers loggedIn:false for a CLI that
+    // is authenticated.
+    probe: {
+      command: '/bin/sh',
+      args: [
+        '-c',
+        'printf "version=%s\\n" "$(gh --version | head -n1)"; gh auth status >/dev/null 2>&1 && echo "loggedIn=true" || echo "loggedIn=false"',
+      ],
+    },
     docs: 'https://cli.github.com/',
   },
   {
