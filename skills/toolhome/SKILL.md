@@ -23,6 +23,7 @@ ToolHome is a single-user, self-hosted control plane for MCP servers and Hosted 
 - User needs to authorize OAuth for MCP upstreams or reuse access tokens in a CLI
 - User wants to install MCP servers or hosted CLIs from the Market catalog
 - User wants to connect Claude Code, Cursor, Codex, or Grok to a self-hosted MCP gateway
+- User wants to move an instance, or a locally authenticated CLI login, onto another instance
 - User is troubleshooting ToolHome (status, OAuth, connectivity)
 
 ## Installation
@@ -80,6 +81,8 @@ toolhome mcp launch <slug>              # run a server placed on this machine (s
 toolhome endpoint aggregate             # show the aggregate endpoint URL
 toolhome market list                    # browse the Market catalog
 toolhome market install resend         # supply the secret at the one-time browser URL
+toolhome migrate --to https://cloud.example.com --to-key ...  # copy this instance there
+toolhome cli adopt gh-cli               # move a local CLI login into the instance
 toolhome calls list --limit 10                              # recent tool calls
 toolhome calls stats                                        # call statistics
 ```
@@ -268,6 +271,49 @@ The machine's node label comes from `nodeId` in the local config (`~/.config/too
 How it works: the launcher reads the server's transport and its credential values from `GET /api/v1/servers/{id}/runtime` (admin control key, audited, values never logged), merges them into the environment, then spawns the real process with this process's stdio so the client talks to the child directly. `TOOLHOME_*` variables are withheld from the child, so a server cannot read the control key that launched it.
 
 Deployment note: because the launcher resolves its config through ToolHome, a client-machine server is unavailable while the ToolHome server or the network path to it is down. Placement also does not create a private channel — a `node` server still runs with the user's own privileges on that machine.
+
+### Move Everything to Another Instance
+
+`toolhome migrate` copies both planes from the instance the command already points at into a
+second one, in an order that keeps Market provenance:
+
+```bash
+toolhome migrate --to https://cloud.example.com --to-key tch_ctl_... --dry-run
+toolhome migrate --to https://cloud.example.com --to-key tch_ctl_... \
+  --with-state --issue-access-key cloud
+```
+
+1. Market entries are reinstalled on the target first, at their pinned versions, using values
+   harvested from the exported credentials (the same `env`/`bearer`/`api-key`/`headers` shapes
+   the catalog declares).
+2. Then the configuration import runs in `merge` mode: credentials are reused by name, records
+   the target already has are skipped, and the Market-provisioned ones are left alone.
+3. `--with-state` moves each hosted CLI's container volume, which is where platform logins live.
+4. The report lists what still needs a human: every **access key** (stored as a digest, so it
+   cannot be copied — `--issue-access-key` prints a new one with its harness snippet), every
+   hosted CLI that reports no login state, Market entries that need a secret, and every OAuth
+   credential whose client registration still points at the source origin
+   (`--reset-oauth-clients` clears it so the target can authorize itself).
+
+### Move a Local CLI Login into the Instance
+
+Binary upload is not part of this and is not needed: a macOS `gh` is a Mach-O binary and the
+gateway runs Alpine Linux, so the target installs its own pinned build. What has to move is the
+login, and a platform CLI keeps it where it chooses — `gh` in the macOS keychain (its
+`~/.config/gh/hosts.yml` holds no token), `az` in a token cache, others in a container volume.
+
+```bash
+toolhome cli adopt gh-cli                    # extract locally, write into the target's volume
+toolhome cli sync --to https://cloud.example.com --to-key tch_ctl_...
+```
+
+Each catalog entry declares how its state moves, so `adopt` reports one of: `adopted`,
+`already-authenticated`, `credential-only` (values travel with a configuration export),
+`manual` (the login cannot be moved; the entry names the command to run on the target), or
+`failed`. The extracted secret goes straight to the target's `exec` stdin and is never printed
+or logged. `gh-cli` uses `gh auth token` → `gh auth login --with-token`; `azure-cli`,
+`tailscale-cli`, `firecrawl-cli`, `wrangler-cli`, `vercel-cli` and `aliyun-cli` are
+`credential-only`; `lark-cli` must authorize on the target.
 
 ### Diagnose Issues
 

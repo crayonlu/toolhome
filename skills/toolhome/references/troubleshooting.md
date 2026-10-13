@@ -132,6 +132,89 @@ toolhome server refresh <server-id>
 
 **Fix**: Update to the latest version: `npm install -g toolhome@latest`.
 
+## The MCP Client Times Out on `toolhome-local` (70s), Then Never Recovers
+
+**Symptom**: the client reports `MCP server 'toolhome-local' timed out after 70s`. The remote
+`toolhome` entry (same instance) keeps working, and `toolhome mcp stdio` started by hand works
+too.
+
+**Cause**: `toolhome-local` is a stdio entry — `toolhome mcp stdio` — so a timeout means the
+launcher's startup did not finish, not that the instance is down. Startup makes one request
+(`GET /api/v1/servers`) plus one per node-placed server (`/runtime`). Whatever the transport
+reason — a proxy switching nodes, a fake-IP mapping going stale, a stalled VPN, a brief network
+drop — the client has already given up at 70s and **does not retry**, so the session stays
+broken until the client restarts the server. The client's captured stderr is the evidence:
+
+```bash
+cat ~/.grok/logs/mcp/toolhome-local.stderr.log     # e.g. "cannot reach https://… : ETIMEDOUT"
+```
+
+**Check the order that isolates it**:
+
+```bash
+toolhome status          # control plane reachable with this config? (env overrides the file)
+toolhome node status     # the local mirror's view of this machine's servers
+toolhome mcp stdio       # by hand: it must print `serving node "<label>" over stdio`
+```
+
+Read the error text: `ENOTFOUND`/`EAI_AGAIN` is DNS, `ECONNREFUSED` is nothing listening,
+`ETIMEDOUT` is a stalled path, and a plain 401/403 means the control key, not the network.
+
+**On a host with a TUN-mode proxy** (Clash, Surge, sing-box), DNS returns a fake IP from the
+proxy's pool and every connection is tunnelled, which is the usual reason a path that works one
+minute stalls the next. Node's `fetch` ignores `HTTP_PROXY`/`HTTPS_PROXY` unless
+`NODE_USE_ENV_PROXY=1` is set, so the launcher uses the TUN path even when the proxy's HTTP port
+works for `curl`. To make the launcher use the proxy port that is already proven working:
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 \
+  NO_PROXY=localhost,127.0.0.1 toolhome mcp stdio
+```
+
+**If a launcher is wedged**, it holds the local mirror while the client is no longer using it:
+
+```bash
+ps -ax -o pid,command | grep 'toolhome mcp stdio'    # a stuck one shows a high CPU time
+kill -9 <pid>                                        # the client respawns it on demand
+```
+
+The mirror is a cache: deleting `~/.config/toolhome/node.sqlite*` while no launcher runs is safe
+and forces a clean rebuild on the next start.
+
+## A Migrated Hosted CLI Reports `loggedIn: false`
+
+**Symptom**: after `toolhome migrate`, `toolhome cli status gh-cli` on the target says the CLI is
+installed but not logged in.
+
+**Cause**: a platform CLI keeps its login where it chooses, and none of those places is the CLI
+record. `gh` stores its token in the macOS keychain by default — `~/.config/gh/hosts.yml`
+contains `user`, `git_protocol` and an empty `users:` entry but no token — so copying that file
+moves nothing. `az` keeps a token cache under `/root/.azure` inside its state volume. Others log
+in by device flow and write state inside the gateway.
+
+**Fix**: run `toolhome cli adopt <slug>` from the machine that is already logged in (it extracts
+with the CLI's own command, e.g. `gh auth token`, and hands the value to the target's `exec`
+stdin), or migrate with `--with-state` to move the whole state volume. `toolhome cli adopt <slug>
+--dry-run` prints what it would do without touching anything. Entries whose login cannot move
+report `manual` and name the command to run on the target; `lark-cli` is one of those. Access
+keys cannot move at all (only their digests are stored), so re-issue one with
+`toolhome access-key create <name>` and re-point the harnesses.
+
+## OAuth Upstream Fails After a Migration
+
+**Symptom**: an MCP server that worked on the old instance answers `credential_authorization_required`
+or "Invalid client" on the new one.
+
+**Cause**: the OAuth client registration is bound to the instance that created it — the client
+metadata URL and the callback both carry `TOOLHOME_PUBLIC_URL` and the credential id
+(`/oauth/upstream/client/<id>`, `/oauth/upstream/callback/<id>`). A copied credential therefore
+holds a registration the authorization server cannot match. Refresh tokens still work (the
+refresh grant sends no `redirect_uri`), but a new authorization needs a new registration.
+
+**Fix**: re-run the migration with `--reset-oauth-clients`, or call
+`POST /api/v1/credentials/{id}/reset-oauth-registration`, then
+`toolhome credential authorize <name>` on the new instance.
+
 ## Aggregate `/mcp` Only Shows `search` and `exec`
 
 **Cause**: Compact tool exposure is enabled. `compact` intentionally replaces the full tool list with the `search`/`exec` discovery pair.

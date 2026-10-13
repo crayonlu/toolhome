@@ -10,6 +10,7 @@ import type { CallRecorder } from '../observability/call-recorder.js';
 import type { Store } from '../storage/store.js';
 import { evaluateAllowList } from './allow-list.js';
 import type { CliExecFrame } from './frames.js';
+import { exportVolumeArchive, importVolumeArchive } from './state.js';
 import {
   assertCliRuntimeConfig,
   cliExecInputSchema,
@@ -88,6 +89,75 @@ export class CliService {
     const record = this.#store.getCliBySlug(slug);
     if (!record) throw new AppError('cli_not_found', `CLI "${slug}" not found`, 404);
     return record;
+  }
+
+  /**
+   * Read one declared state volume as a tar archive.
+   *
+   * The state belongs to the product and lives in a Docker named volume on the
+   * host, so it can only move as an archive. Anything not backed by a writable
+   * Docker volume is refused rather than guessed at.
+   */
+  async exportState(id: string, volume: string): Promise<{ volume: string; bytes: number; archive: Buffer }> {
+    const record = this.get(id);
+    const declared = this.#stateVolume(record, volume);
+    const archive = await exportVolumeArchive(declared.source);
+    this.#store.appendEvent({
+      level: 'info',
+      type: 'cli.state_exported',
+      serverId: null,
+      message: `Exported the state of ${record.slug} (${declared.source})`,
+      detail: { plane: 'cli', slug: record.slug, volume: declared.source, bytes: archive.byteLength },
+    });
+    return { volume: declared.source, bytes: archive.byteLength, archive };
+  }
+
+  /** Replace one declared state volume with `archive`. */
+  async importState(
+    id: string,
+    volume: string,
+    archive: Buffer,
+  ): Promise<{ volume: string; bytes: number }> {
+    const record = this.get(id);
+    const declared = this.#stateVolume(record, volume);
+    const restored = await importVolumeArchive(declared.source, archive);
+    this.#store.appendEvent({
+      level: 'info',
+      type: 'cli.state_imported',
+      serverId: null,
+      message: `Restored the state of ${record.slug} (${declared.source})`,
+      detail: { plane: 'cli', slug: record.slug, volume: declared.source, bytes: restored.bytes },
+    });
+    return { volume: declared.source, bytes: restored.bytes };
+  }
+
+  #stateVolume(
+    record: CliRecord,
+    volume: string,
+  ): NonNullable<CliRecord['containerVolumes']>[number] {
+    if (record.executionMode !== 'docker') {
+      throw new AppError(
+        'cli_state_unavailable',
+        `CLI "${record.slug}" runs on the host and keeps no container volume state`,
+        400,
+      );
+    }
+    const declared = record.containerVolumes.find((item) => item.source === volume);
+    if (declared === undefined) {
+      throw new AppError(
+        'cli_state_volume_unknown',
+        `CLI "${record.slug}" declares no volume "${volume}"`,
+        400,
+      );
+    }
+    if (declared.readOnly) {
+      throw new AppError(
+        'cli_state_read_only',
+        `Volume "${volume}" is mounted read-only`,
+        400,
+      );
+    }
+    return declared;
   }
 
   create(value: unknown): CliRecord {

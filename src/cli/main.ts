@@ -13,6 +13,8 @@ import { stdioTransportSchema } from '../domain/models.js';
 import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
 import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js';
 import { readNodeStatus } from '../node/status.js';
+import { adoptCliCredentials } from './adopt.js';
+import { migrateConfiguration } from './migrate.js';
 
 function packageVersion(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
@@ -108,6 +110,106 @@ cli
   .command('add <file>')
   .description('Register a hosted CLI from a JSON file or - for stdin')
   .action(run((client, file: string) => client.request('POST', '/api/v1/clis', readJson(file))));
+cli
+  .command('adopt [slug]')
+  .description('Move a locally authenticated CLI login into this ToolHome instance')
+  .option('--to <url>', 'target instance URL (default: the configured instance)')
+  .option('--to-key <key>', 'target Control Key')
+  .option('--dry-run', 'report what would be handed over without doing it')
+  .option('--force', 'hand the credential over even when the instance already has a login')
+  .action(
+    run(
+      async (
+        client,
+        slug: string | undefined,
+        options: { to?: string; toKey?: string; dryRun?: boolean; force?: boolean },
+      ) => {
+        const target = targetClient(client, options);
+        return adoptCliCredentials(target, {
+          ...(slug === undefined ? {} : { slugs: [slug] }),
+          dryRun: options.dryRun === true,
+          force: options.force === true,
+          log: (line) => process.stderr.write(`${line}\n`),
+        });
+      },
+    ),
+  );
+cli
+  .command('export-state <slug>')
+  .description('Write a hosted CLI container volume to a file (or - for stdout)')
+  .requiredOption('--volume <name>', 'declared volume name, e.g. toolhome-gh-cli-state')
+  .option('--to <url>', 'instance URL (default: the configured instance)')
+  .option('--to-key <key>', 'Control Key for --to')
+  .action(
+    run(
+      async (
+        client,
+        slug: string,
+        options: { volume: string; to?: string; toKey?: string },
+      ) => {
+        const exported = z
+          .object({ archive: z.string(), bytes: z.number() })
+          .parse(
+            await targetClient(client, options).request(
+              'GET',
+              `/api/v1/clis/${encodeURIComponent(slug)}/state?volume=${encodeURIComponent(options.volume)}`,
+              undefined,
+              120_000,
+            ),
+          );
+        return exported;
+      },
+    ),
+  );
+cli
+  .command('import-state <slug> <file>')
+  .description('Replace a hosted CLI container volume from a file written by export-state')
+  .requiredOption('--volume <name>', 'declared volume name, e.g. toolhome-gh-cli-state')
+  .option('--to <url>', 'instance URL (default: the configured instance)')
+  .option('--to-key <key>', 'Control Key for --to')
+  .action(
+    run(
+      async (
+        client,
+        slug: string,
+        file: string,
+        options: { volume: string; to?: string; toKey?: string },
+      ) => {
+        const body = readJson(file) as { archive?: unknown };
+        if (typeof body.archive !== 'string') {
+          throw new Error('The file must be the output of `toolhome cli export-state`');
+        }
+        return targetClient(client, options).request(
+          'POST',
+          `/api/v1/clis/${encodeURIComponent(slug)}/state?volume=${encodeURIComponent(options.volume)}`,
+          { archive: body.archive },
+          120_000,
+        );
+      },
+    ),
+  );
+cli
+  .command('sync')
+  .description('Adopt every locally authenticated CLI this instance has installed')
+  .option('--to <url>', 'target instance URL (default: the configured instance)')
+  .option('--to-key <key>', 'target Control Key')
+  .option('--dry-run', 'report what would be handed over without doing it')
+  .option('--force', 'hand credentials over even when the instance already has a login')
+  .action(
+    run(
+      async (
+        client,
+        options: { to?: string; toKey?: string; dryRun?: boolean; force?: boolean },
+      ) => {
+        const target = targetClient(client, options);
+        return adoptCliCredentials(target, {
+          dryRun: options.dryRun === true,
+          force: options.force === true,
+          log: (line) => process.stderr.write(`${line}\n`),
+        });
+      },
+    ),
+  );
 cli
   .command('update <id> <file>')
   .description('Update a hosted CLI from a JSON file or - for stdin')
@@ -291,9 +393,15 @@ mcp
       const stop = async (): Promise<void> => {
         if (stopped) return;
         stopped = true;
+        // Closing waits on children, the recorder and the local mirror; bound it,
+        // because a shutdown that hangs leaves a process holding node.sqlite that
+        // only SIGKILL can remove — the client has already given up by then.
+        const deadline = setTimeout(() => process.exit(0), 5_000);
+        deadline.unref();
         // Children first: they leak if the process exits before they are reaped.
         await gateway.close().catch(() => undefined);
         await handle.close().catch(() => undefined);
+        clearTimeout(deadline);
         process.exit(0);
       };
       process.stdin.on('end', () => void stop());
@@ -492,8 +600,19 @@ config
   );
 config
   .command('import <file>')
+  .description('Apply a configuration export; --mode merge keeps records the target already has')
+  .option('--mode <mode>', 'create or merge', 'create')
+  .option('--upsert', 'update records the target already has (merge mode)')
+  .option('--dry-run', 'report what would change without writing anything')
   .action(
-    run((client, file: string) => client.request('POST', '/api/v1/config/import', readJson(file))),
+    run((client, file: string, options: { mode: string; upsert?: boolean; dryRun?: boolean }) =>
+      client.request('POST', '/api/v1/config/import', {
+        ...(readJson(file) as Record<string, unknown>),
+        mode: options.mode,
+        upsert: options.upsert === true,
+        dryRun: options.dryRun === true,
+      }),
+    ),
   );
 config
   .command('import-harness <file>')
@@ -509,6 +628,57 @@ config
         preview: options.preview ?? false,
         ...(options.upsert ? { mode: 'upsert' } : {}),
       }),
+    ),
+  );
+
+program
+  .command('migrate')
+  .description('Copy this instance into another ToolHome instance (both planes)')
+  .requiredOption('--to <url>', 'target instance URL')
+  .requiredOption('--to-key <key>', 'target Control Key')
+  .option('--planes <planes>', 'mcp, cli or both', 'mcp,cli')
+  .option('--dry-run', 'report what would change without writing to the target')
+  .option('--with-state', 'move each hosted CLI state volume, including its login')
+  .option('--reset-oauth-clients', 'clear OAuth client registrations bound to this origin')
+  .option('--issue-access-key <name>', 'issue an MCP Access Key on the target and print it')
+  .action(
+    run(
+      async (
+        client,
+        options: {
+          to: string;
+          toKey: string;
+          planes: string;
+          dryRun?: boolean;
+          withState?: boolean;
+          resetOauthClients?: boolean;
+          issueAccessKey?: string;
+        },
+      ) => {
+        const planes = options.planes
+          .split(',')
+          .map((plane) => plane.trim())
+          .filter((plane) => plane !== '');
+        for (const plane of planes) {
+          if (plane !== 'mcp' && plane !== 'cli') {
+            throw new Error(`Unknown plane "${plane}"; use mcp, cli or both`);
+          }
+        }
+        const connection = resolveConnection(program.opts<GlobalOptions>());
+        const target = new ControlClient(new URL(options.to), options.toKey);
+        const report = await migrateConfiguration(client, target, {
+          planes: { mcp: planes.includes('mcp'), cli: planes.includes('cli') },
+          dryRun: options.dryRun === true,
+          withState: options.withState === true,
+          resetOauthClients: options.resetOauthClients === true,
+          ...(options.issueAccessKey === undefined
+            ? {}
+            : { accessKeyName: options.issueAccessKey }),
+          log: (line) => process.stderr.write(`${line}\n`),
+        });
+        process.stderr.write(`source ${connection.url} → target ${options.to}\n`);
+        return report;
+      },
     ),
   );
 
@@ -725,6 +895,16 @@ function run<TArgs extends unknown[]>(
       process.exitCode = 1;
     }
   };
+}
+
+/** Reuse the connection the command already resolved unless the caller names another instance. */
+function targetClient(
+  client: ControlClient,
+  options: { to?: string; toKey?: string },
+): ControlClient {
+  if (options.to === undefined) return client;
+  if (options.toKey === undefined) throw new Error('--to-key is required with --to');
+  return new ControlClient(new URL(options.to), options.toKey);
 }
 
 function resolveConnection(options: GlobalOptions): z.infer<typeof localConfigSchema> {

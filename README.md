@@ -277,6 +277,27 @@ npm run cli -- config import backup.json
 
 Backups contain plaintext secrets and deserve the same protection as the master key. `--include-secrets` requires an explicit output file to avoid leaking secrets into terminal logs, and the CLI forces `0600` after writing. Omit it for routine review.
 
+An export covers both planes — MCP servers with their placement, hosted CLIs with their runtime and allow-list, encrypted credentials, and Market provenance. `config import --mode merge` makes a restore idempotent: credentials are reused by name, records the target already holds are skipped, and `--upsert` updates them field by field. `--dry-run` shows the same per-item report without writing, and `create` (the default) still aborts on a conflict and names every clash.
+
+## Migration
+
+`toolhome migrate` copies an instance into another one — handy when a laptop instance graduates to a cloud host:
+
+```bash
+npm run cli -- migrate --to https://cloud.example.com --to-key "$TOOLHOME_CONTROL_KEY" --dry-run
+npm run cli -- migrate --to https://cloud.example.com --to-key "$TOOLHOME_CONTROL_KEY" \
+  --with-state --issue-access-key cloud
+```
+
+The order is deliberate. Market entries are reinstalled on the target first, at their pinned versions, with values harvested from the exported credentials, so the target keeps its own installation records and version tracking. The configuration import then runs in merge mode and leaves what the Market provisioned alone.
+
+Two things cannot cross on their own, and the command reports both rather than pretending otherwise:
+
+- **Access keys** are stored as digests only. Re-issue one on the target (`--issue-access-key <name>` does it and prints the harness snippet).
+- **Hosted CLI logins** live in each product's own place — `gh` in the macOS keychain, `az` in a token cache inside its state volume. `--with-state` moves the volumes; `toolhome cli adopt <slug>` extracts a local login with the CLI's own command and writes it into the target's volume. `toolhome cli sync` walks every installed entry.
+
+Binaries are not part of a migration and do not need to be: a macOS `gh` is a Mach-O binary while the gateway runs Alpine Linux, so the target rebuilds its own pinned artifact from the catalog. Per-entry outcomes are one of `adopted`, `already-authenticated`, `credential-only` (values travel with the export), `manual` (the entry names the command to run on the target), or `failed`.
+
 ## Configuration
 
 | Environment variable             | Description                                                                   | Default                 |

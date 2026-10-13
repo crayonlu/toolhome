@@ -151,9 +151,29 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
     summary: 'Revoke an upstream OAuth credential',
     parameters: [idParameter('credential_id')],
   });
+  add(
+    '/api/v1/credentials/{credential_id}/reset-oauth-registration',
+    'post',
+    'resetCredentialClientRegistration',
+    {
+      summary:
+        "Drop an OAuth client registration bound to another instance's origin while keeping tokens",
+      parameters: [idParameter('credential_id')],
+    },
+  );
 
   // ── CLI registry (Form A CLI plane) ────────────────────────────────────
   add('/api/v1/clis', 'get', 'listClis', { summary: 'List registered CLIs' });
+  add('/api/v1/clis/{id}/state', 'get', 'exportCliState', {
+    summary:
+      'Read one declared container volume of a hosted CLI as a base64 tar archive (admin; contains credentials)',
+    parameters: [idParameter('id')],
+  });
+  add('/api/v1/clis/{id}/state', 'post', 'importCliState', {
+    summary: 'Replace one declared container volume of a hosted CLI from a base64 tar archive (admin)',
+    parameters: [idParameter('id')],
+    body: true,
+  });
   add('/api/v1/clis', 'post', 'createCli', {
     summary: 'Register a CLI (command or image, allow-list, probe, credential)',
     body: true,
@@ -287,7 +307,8 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
     ],
   });
   add('/api/v1/config/import', 'post', 'importConfig', {
-    summary: 'Atomically import a restorable configuration backup (admin)',
+    summary:
+      'Import a configuration backup: mode=create aborts on a slug the target has, mode=merge reuses credentials by name and skips existing records (admin)',
     body: true,
   });
   add('/api/v1/config/import-harness', 'post', 'importHarnessConfig', {

@@ -22,31 +22,89 @@ import {
   toPreview,
   type HarnessImportedEntry,
 } from '../config/harness-import.js';
+import { assertCliRuntimeConfig, cliRecordSchema, type CliRecord } from '../cli-plane/models.js';
+import { validateCliCredentialBindings } from '../security/credential-materializer.js';
 import type { AuthService } from '../security/auth-service.js';
 import type { Store } from '../storage/store.js';
 import type { CredentialResolver } from '../upstream/credential-resolver.js';
 import type { UpstreamManager } from '../upstream/manager.js';
 import type { UpstreamOAuthService } from '../upstream/oauth-service.js';
 
+/** Credential references are file-local keys: they only have to resolve within one export. */
+const credentialRefSchema = z.string().min(1).max(200);
+
 const importCredentialSchema = createCredentialInputSchema.extend({
-  ref: z.string().min(1).max(200),
+  ref: credentialRefSchema,
 });
 
 const importServerSchema = createServerInputObjectSchema
   .omit({ credentialId: true })
-  .extend({ credentialRef: z.string().min(1).max(200).nullable().default(null) })
+  .extend({ credentialRef: credentialRefSchema.nullable().default(null) })
   .superRefine((value, context) => {
     for (const issue of placementIssues(value)) {
       context.addIssue({ code: 'custom', ...issue });
     }
   });
 
+/** A hosted CLI travels as its record without identity or timestamps. */
+const importCliSchema = cliRecordSchema
+  .omit({ id: true, createdAt: true, updatedAt: true, credentialId: true })
+  .extend({ credentialRef: credentialRefSchema.nullable().default(null) });
+
+/**
+ * Market provenance is inventory, not state to write: the target reinstalls the
+ * entry (pinned version, artifact, own credential) and records its own
+ * installation. `targetSlug` replaces the export instance's `targetId`.
+ */
+const importInstallationSchema = z.object({
+  entryId: z.string().min(1),
+  entryVersion: z.string(),
+  recipeRevision: z.string(),
+  targetType: z.enum(['server', 'cli']),
+  targetSlug: z.string().min(1),
+  credentialRef: credentialRefSchema.nullable().default(null),
+});
+
+const importModeSchema = z.enum(['create', 'merge']);
+
 const importSchema = z.object({
   version: z.literal(1),
   secretsIncluded: z.literal(true),
+  mode: importModeSchema.default('create'),
+  upsert: z.boolean().default(false),
   credentials: z.array(importCredentialSchema).default([]),
   servers: z.array(importServerSchema).default([]),
+  clis: z.array(importCliSchema).default([]),
+  installations: z.array(importInstallationSchema).default([]),
 });
+
+type ImportMode = z.infer<typeof importModeSchema>;
+type ImportedServer = z.infer<typeof importServerSchema>;
+type ImportedCli = z.infer<typeof importCliSchema>;
+type ImportStatus = 'created' | 'reused' | 'updated' | 'skipped' | 'conflict';
+
+interface ImportItemReport {
+  slug: string;
+  status: ImportStatus;
+  id?: string;
+  changes?: string[];
+  message?: string;
+}
+
+interface ImportPlan {
+  credentials: { name: string; ref: string; status: ImportStatus; id?: string; message?: string }[];
+  servers: ImportItemReport[];
+  clis: ImportItemReport[];
+  conflicts: string[];
+}
+
+export interface ImportReport extends ImportPlan {
+  mode: ImportMode;
+  upsert: boolean;
+  dryRun: boolean;
+  installations: { entryId: string; targetType: 'server' | 'cli'; targetSlug: string }[];
+  counts: Record<ImportStatus, number>;
+}
 
 export class ControlService {
   readonly #store: Store;
@@ -358,6 +416,12 @@ export class ControlService {
     return this.#upstreamOAuth.revoke(id);
   }
 
+  /** Clear an OAuth client registration that still points at another instance's origin. */
+  resetCredentialClientRegistration(id: string) {
+    this.getCredential(id);
+    return this.#upstreamOAuth.resetClientRegistration(id);
+  }
+
   listKeys(kind: ApiKeyKind) {
     return this.#store.listApiKeys(kind);
   }
@@ -450,6 +514,10 @@ export class ControlService {
   }
 
   exportConfig(includeSecrets = false) {
+    const servers = this.#store.listServers();
+    const clis = this.#store.listClis();
+    const serverSlugById = new Map(servers.map((server) => [server.id, server.slug]));
+    const cliSlugById = new Map(clis.map((cli) => [cli.id, cli.slug]));
     return {
       version: 1,
       secretsIncluded: includeSecrets,
@@ -463,19 +531,60 @@ export class ControlService {
           ...(payload === null ? {} : { payload }),
         };
       }),
-      servers: this.#store.listServers().map((server) => ({
+      servers: servers.map((server) => ({
         slug: server.slug,
         name: server.name,
         kind: server.kind,
+        // Placement travels with the record: without it a node server fails
+        // placement validation on import and aborts the whole transfer.
+        nodeId: server.nodeId,
         transport: includeSecrets ? server.transport : redactTransport(server.transport),
         credentialRef: server.credentialId,
         enabled: server.enabled,
         settings: server.settings,
       })),
+      clis: clis.map((cli) => ({
+        slug: cli.slug,
+        name: cli.name,
+        command: cli.command,
+        executionMode: cli.executionMode,
+        entrypoint: cli.entrypoint,
+        authStrategy: cli.authStrategy,
+        containerVolumes: cli.containerVolumes,
+        platform: cli.platform,
+        allowList: cli.allowList,
+        interactive: cli.interactive,
+        credentialRef: cli.credentialId,
+        credentialBindings: cli.credentialBindings,
+        probe: cli.probe,
+        enabled: cli.enabled,
+        timeoutMs: cli.timeoutMs,
+        maxOutputBytes: cli.maxOutputBytes,
+      })),
+      installations: this.#store.listInstallations().map((installation) => ({
+        entryId: installation.entryId,
+        entryVersion: installation.entryVersion,
+        recipeRevision: installation.recipeRevision,
+        targetType: installation.targetType,
+        targetSlug:
+          installation.targetType === 'cli'
+            ? (cliSlugById.get(installation.targetId) ?? installation.entryId)
+            : (serverSlugById.get(installation.targetId) ?? installation.entryId),
+        credentialRef: installation.credentialId,
+      })),
     };
   }
 
-  importConfig(value: unknown) {
+  /**
+   * Applies an exported configuration.
+   *
+   * `create` keeps the original semantics: a slug the target already has aborts
+   * the import. `merge` reuses credentials by name and skips records the target
+   * already holds, updating them only when `upsert` is set — reassigning a
+   * credential only when the payload actually differs, so a re-run is a no-op.
+   * `dryRun` returns the same report without writing anything.
+   */
+  async importConfig(value: unknown, options: { dryRun?: boolean } = {}): Promise<ImportReport> {
     const input = importSchema.parse(value);
     const refs = new Set<string>();
     for (const credential of input.credentials) {
@@ -488,45 +597,280 @@ export class ControlService {
       }
       refs.add(credential.ref);
     }
-    for (const server of input.servers) {
-      if (server.credentialRef !== null && !refs.has(server.credentialRef)) {
+    for (const item of [...input.servers, ...input.clis]) {
+      if (item.credentialRef !== null && !refs.has(item.credentialRef)) {
         throw new AppError(
           'credential_ref_not_found',
-          `Unknown credential ref: ${server.credentialRef}`,
+          `Unknown credential ref: ${item.credentialRef}`,
           400,
         );
       }
     }
 
-    const imported = this.#store.transaction(() => {
-      const credentialIds = new Map<string, string>();
-      const credentials = input.credentials.map((credential) => {
-        const created = this.#store.createCredential({
-          name: credential.name,
-          payload: credential.payload,
-        });
-        credentialIds.set(credential.ref, created.id);
-        return created;
-      });
-      const servers = input.servers.map((server) => {
-        const credentialId =
-          server.credentialRef === null ? null : (credentialIds.get(server.credentialRef) ?? null);
-        this.#assertCredentialAssignment(credentialId, server.kind);
-        return this.#store.createServer({
-          slug: server.slug,
-          name: server.name,
-          kind: server.kind,
-          nodeId: server.nodeId,
-          transport: server.transport,
-          credentialId,
-          enabled: server.enabled,
-          settings: server.settings,
-        });
-      });
-      return { credentials, servers };
+    const plan = this.#planImport(input);
+    const conflictSlugs = plan.conflicts;
+    if (conflictSlugs.length > 0) {
+      const code = input.mode === 'merge' ? 'credential_conflict' : 'slug_conflict';
+      throw new AppError(
+        code,
+        input.mode === 'merge'
+          ? `Credential payload differs on the target: ${conflictSlugs.join(', ')}. Re-run with --upsert to replace it.`
+          : `The target already has: ${conflictSlugs.join(', ')}. Re-run with --mode merge to keep them.`,
+        409,
+      );
+    }
+    if (options.dryRun === true) return this.#importReport(plan, input, true);
+
+    const applied = await this.#applyImport(plan, input);
+    return this.#importReport(applied, input, false);
+  }
+
+  /** Decide per item without touching the store. */
+  #planImport(input: z.infer<typeof importSchema>): ImportPlan {
+    const conflicts: string[] = [];
+    const credentials: ImportPlan['credentials'] = input.credentials.map((credential) => {
+      const existing = this.#store.listCredentials().find((item) => item.name === credential.name);
+      if (!existing) return { name: credential.name, ref: credential.ref, status: 'created' };
+      const current = this.#store.getCredentialPayload(existing.id);
+      const same = JSON.stringify(current ?? null) === JSON.stringify(credential.payload);
+      if (input.mode === 'create') {
+        // Create mode leaves credentials alone unless the name is taken by a
+        // different secret, which would silently shadow one of the two.
+        return same
+          ? { name: credential.name, ref: credential.ref, status: 'conflict', id: existing.id }
+          : { name: credential.name, ref: credential.ref, status: 'conflict', id: existing.id };
+      }
+      if (same) return { name: credential.name, ref: credential.ref, status: 'reused', id: existing.id };
+      if (input.upsert) return { name: credential.name, ref: credential.ref, status: 'updated', id: existing.id };
+      conflicts.push(`credential "${credential.name}"`);
+      return { name: credential.name, ref: credential.ref, status: 'conflict', id: existing.id };
     });
-    for (const server of imported.servers) this.#refreshInBackground(server.id);
-    return imported;
+
+    const servers = input.servers.map((server) => {
+      const existing = this.#store.getServerBySlug(server.slug);
+      if (!existing) return { slug: server.slug, status: 'created' as ImportStatus };
+      if (input.mode === 'create') {
+        conflicts.push(`server "${server.slug}"`);
+        return { slug: server.slug, status: 'conflict' as ImportStatus, id: existing.id };
+      }
+      const changes = this.#serverDiff(server, existing);
+      if (!input.upsert || changes.length === 0) {
+        return { slug: server.slug, status: 'skipped' as ImportStatus, id: existing.id, changes: [] };
+      }
+      return { slug: server.slug, status: 'updated' as ImportStatus, id: existing.id, changes };
+    });
+
+    const clis = input.clis.map((cli) => {
+      const existing = this.#store.getCliBySlug(cli.slug);
+      if (!existing) return { slug: cli.slug, status: 'created' as ImportStatus };
+      if (input.mode === 'create') {
+        conflicts.push(`CLI "${cli.slug}"`);
+        return { slug: cli.slug, status: 'conflict' as ImportStatus, id: existing.id };
+      }
+      const changes = this.#cliDiff(cli, existing);
+      if (!input.upsert || changes.length === 0) {
+        return { slug: cli.slug, status: 'skipped' as ImportStatus, id: existing.id, changes: [] };
+      }
+      return { slug: cli.slug, status: 'updated' as ImportStatus, id: existing.id, changes };
+    });
+
+    return { credentials, servers, clis, conflicts };
+  }
+
+  async #applyImport(plan: ImportPlan, input: z.infer<typeof importSchema>): Promise<ImportPlan> {
+    const byRef = new Map<string, string>();
+    const applied: ImportPlan = { credentials: [], servers: [], clis: [], conflicts: [] };
+    for (const [index, credential] of plan.credentials.entries()) {
+      const source = input.credentials[index]!;
+      if (credential.status === 'reused' || credential.status === 'skipped') {
+        byRef.set(credential.ref, credential.id!);
+        applied.credentials.push(credential);
+        continue;
+      }
+      if (credential.status === 'updated') {
+        this.#store.updateCredential(credential.id!, { payload: source.payload });
+        byRef.set(credential.ref, credential.id!);
+        applied.credentials.push(credential);
+        continue;
+      }
+      const created = this.#store.createCredential({
+        name: source.name,
+        payload: source.payload,
+      });
+      byRef.set(credential.ref, created.id);
+      applied.credentials.push({ ...credential, status: 'created', id: created.id });
+    }
+
+    const createdServers = new Map<number, ServerRecord>();
+    const createdClis = new Map<number, CliRecord>();
+    this.#store.transaction(() => {
+      for (const [index, server] of input.servers.entries()) {
+        if (plan.servers[index]!.status !== 'created') continue;
+        const credentialId =
+          server.credentialRef === null ? null : (byRef.get(server.credentialRef) ?? null);
+        this.#assertCredentialAssignment(credentialId, server.kind);
+        createdServers.set(
+          index,
+          this.#store.createServer({
+            slug: server.slug,
+            name: server.name,
+            kind: server.kind,
+            nodeId: server.nodeId,
+            transport: server.transport,
+            credentialId,
+            enabled: server.enabled,
+            settings: server.settings,
+          }),
+        );
+      }
+      for (const [index, cli] of input.clis.entries()) {
+        if (plan.clis[index]!.status !== 'created') continue;
+        const credentialId =
+          cli.credentialRef === null ? null : (byRef.get(cli.credentialRef) ?? null);
+        this.#assertCliCredential(credentialId, cli.credentialBindings);
+        assertCliRuntimeConfig(cli);
+        const record = this.#store.createCli({ ...cli, credentialId });
+        this.#store.appendEvent({
+          level: 'info',
+          type: 'cli.created',
+          serverId: null,
+          message: `Imported CLI ${record.slug} from a configuration export`,
+          detail: { plane: 'cli', slug: record.slug },
+        });
+        createdClis.set(index, record);
+      }
+    });
+
+    applied.servers = plan.servers.map((item, index) => {
+      const record = createdServers.get(index);
+      return record === undefined ? item : { ...item, id: record.id };
+    });
+    applied.clis = plan.clis.map((item, index) => {
+      const record = createdClis.get(index);
+      return record === undefined ? item : { ...item, id: record.id };
+    });
+    for (const record of createdServers.values()) this.#refreshInBackground(record.id);
+
+    for (const [index, server] of input.servers.entries()) {
+      const item = applied.servers[index]!;
+      if (item.status !== 'updated') continue;
+      await this.updateServer(item.id!, {
+        transport: server.transport,
+        nodeId: server.nodeId,
+        enabled: server.enabled,
+        settings: server.settings,
+        credentialId:
+          server.credentialRef === null ? null : (byRef.get(server.credentialRef) ?? null),
+      });
+    }
+    for (const [index, cli] of input.clis.entries()) {
+      const item = applied.clis[index]!;
+      if (item.status !== 'updated') continue;
+      this.#store.updateCli(item.id!, {
+        name: cli.name,
+        command: cli.command,
+        executionMode: cli.executionMode,
+        entrypoint: cli.entrypoint,
+        authStrategy: cli.authStrategy,
+        containerVolumes: cli.containerVolumes,
+        platform: cli.platform,
+        allowList: cli.allowList,
+        interactive: cli.interactive,
+        credentialBindings: cli.credentialBindings,
+        probe: cli.probe,
+        enabled: cli.enabled,
+        timeoutMs: cli.timeoutMs,
+        maxOutputBytes: cli.maxOutputBytes,
+        credentialId:
+          cli.credentialRef === null ? null : (byRef.get(cli.credentialRef) ?? null),
+      });
+    }
+    return applied;
+  }
+
+  #importReport(plan: ImportPlan, input: z.infer<typeof importSchema>, dryRun: boolean): ImportReport {
+    const counts: Record<ImportStatus, number> = {
+      created: 0,
+      reused: 0,
+      updated: 0,
+      skipped: 0,
+      conflict: 0,
+    };
+    for (const item of [...plan.servers, ...plan.clis]) counts[item.status] += 1;
+    return {
+      mode: input.mode,
+      upsert: input.upsert,
+      dryRun,
+      credentials: plan.credentials,
+      servers: plan.servers,
+      clis: plan.clis,
+      conflicts: plan.conflicts,
+      installations: input.installations.map((installation) => ({
+        entryId: installation.entryId,
+        targetType: installation.targetType,
+        targetSlug: installation.targetSlug,
+      })),
+      counts,
+    };
+  }
+
+  /** Field-level diff for a server the target already has — names only, never values. */
+  #serverDiff(server: ImportedServer, existing: ServerRecord): string[] {
+    const changes: string[] = [];
+    const next = server.transport;
+    const current = existing.transport;
+    if (server.name !== existing.name) changes.push('name');
+    if (server.kind !== existing.kind) changes.push('kind');
+    if (server.nodeId !== existing.nodeId) changes.push('nodeId');
+    if (server.enabled !== existing.enabled) changes.push('enabled');
+    if (next.type === 'streamable-http' && current.type === 'streamable-http') {
+      if (current.url !== next.url) changes.push('url');
+      if (JSON.stringify(current.headers) !== JSON.stringify(next.headers)) changes.push('headers');
+    } else if (next.type === 'stdio' && current.type === 'stdio') {
+      if (current.command !== next.command) changes.push('command');
+      if (JSON.stringify(current.args) !== JSON.stringify(next.args)) changes.push('args');
+      if (JSON.stringify(current.env ?? {}) !== JSON.stringify(next.env ?? {})) changes.push('env');
+    } else {
+      changes.push('transport');
+    }
+    if (JSON.stringify(server.settings) !== JSON.stringify(existing.settings)) {
+      changes.push('settings');
+    }
+    return changes;
+  }
+
+  /** Field-level diff for a hosted CLI the target already has. */
+  #cliDiff(cli: ImportedCli, existing: CliRecord): string[] {
+    const changes: string[] = [];
+    if (cli.name !== existing.name) changes.push('name');
+    if (cli.command !== existing.command) changes.push('command');
+    if (cli.executionMode !== existing.executionMode) changes.push('executionMode');
+    if (cli.entrypoint !== existing.entrypoint) changes.push('entrypoint');
+    if (cli.authStrategy !== existing.authStrategy) changes.push('authStrategy');
+    if (JSON.stringify(cli.containerVolumes) !== JSON.stringify(existing.containerVolumes)) {
+      changes.push('containerVolumes');
+    }
+    if (JSON.stringify(cli.allowList) !== JSON.stringify(existing.allowList)) changes.push('allowList');
+    if (JSON.stringify(cli.credentialBindings) !== JSON.stringify(existing.credentialBindings)) {
+      changes.push('credentialBindings');
+    }
+    if (JSON.stringify(cli.probe) !== JSON.stringify(existing.probe)) changes.push('probe');
+    if (cli.enabled !== existing.enabled) changes.push('enabled');
+    if (cli.timeoutMs !== existing.timeoutMs) changes.push('timeoutMs');
+    if (cli.maxOutputBytes !== existing.maxOutputBytes) changes.push('maxOutputBytes');
+    return changes;
+  }
+
+  #assertCliCredential(
+    credentialId: string | null,
+    bindings: Record<string, string>,
+  ): void {
+    if (credentialId === null) return;
+    const payload = this.#store.getCredentialPayload(credentialId);
+    if (payload === null) {
+      throw new AppError('credential_not_found', 'Credential not found', 400);
+    }
+    validateCliCredentialBindings(payload, bindings);
   }
 
   async importHarnessConfig(value: unknown, preview = false, mode: 'create' | 'upsert' = 'create') {

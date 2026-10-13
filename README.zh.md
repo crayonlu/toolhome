@@ -263,6 +263,27 @@ npm run cli -- config import backup.json
 
 备份文件包含明文 Secret，应使用与主密钥同等级别的保护。为避免 Secret 意外进入终端日志，`--include-secrets` 必须同时提供目标文件；CLI 会在写入后强制设置 `0600`。日常审阅可省略 `--include-secrets`。
 
+导出覆盖两个平面：MCP 服务器（含放置位置）、Hosted CLI（含运行方式与允许列表）、加密凭据，以及 Market 台账。`config import --mode merge` 让恢复变得幂等：凭据按名称复用，目标已有的记录跳过，加 `--upsert` 才逐字段更新；`--dry-run` 返回同样的逐条报告但不写入；默认的 `create` 模式仍然在冲突时中止并列出全部冲突项。
+
+## 迁移
+
+`toolhome migrate` 把一个实例复制到另一个实例，适合把笔记本上的实例搬到云端主机：
+
+```bash
+npm run cli -- migrate --to https://cloud.example.com --to-key "$TOOLHOME_CONTROL_KEY" --dry-run
+npm run cli -- migrate --to https://cloud.example.com --to-key "$TOOLHOME_CONTROL_KEY" \
+  --with-state --issue-access-key cloud
+```
+
+步骤顺序是刻意的。先在目标实例按 pin 住的版本重装 Market 条目，所需的取值从导出的凭据里提取，因此目标实例保留自己的安装台账和版本追踪；随后配置导入以 merge 模式执行，不动 Market 已经建好的记录。
+
+有两样东西无法自行跨实例，命令会如实列出而不是假装完成：
+
+- **access key** 只存摘要。在目标实例重新签发（`--issue-access-key <name>` 会签发并打印 harness 片段）。
+- **Hosted CLI 的登录态**存放在各产品自己的位置——`gh` 在 macOS 钥匙串，`az` 在其状态卷内的令牌缓存。`--with-state` 搬运状态卷；`toolhome cli adopt <slug>` 用该 CLI 自己的命令在本机提取登录态并写进目标实例的卷；`toolhome cli sync` 遍历所有已安装条目。
+
+二进制不参与迁移，也不需要参与：macOS 上的 `gh` 是 Mach-O 可执行文件，而 gateway 运行 Alpine Linux，目标实例会按 catalog 重建自己的 pin 版本制品。逐条结果是 `adopted`、`already-authenticated`、`credential-only`（取值随导出一起走）、`manual`（条目会给出目标端要执行的命令）或 `failed`。
+
 ## 配置
 
 | 环境变量                         | 说明                                              | 默认值                  |

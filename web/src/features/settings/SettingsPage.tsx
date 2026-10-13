@@ -44,6 +44,16 @@ interface HarnessImportResult {
   })[]
 }
 
+interface ImportReport {
+  mode: 'create' | 'merge'
+  dryRun: boolean
+  counts: Record<string, number>
+  servers: { slug: string; status: string; changes?: string[] }[]
+  clis: { slug: string; status: string; changes?: string[] }[]
+  installations: { entryId: string; targetType: string; targetSlug: string }[]
+  conflicts: string[]
+}
+
 export function SettingsPage() {
   const { t } = useI18n()
   const { locale, setLocale } = useI18n()
@@ -62,7 +72,16 @@ export function SettingsPage() {
   const [harnessText, setHarnessText] = useState('')
   const [harnessBusy, setHarnessBusy] = useState(false)
   const [harnessResult, setHarnessResult] = useState<HarnessImportResult | null>(null)
+  const [importMode, setImportMode] = useState<'create' | 'merge'>('create')
+  const [importUpsert, setImportUpsert] = useState(false)
+  const [importReport, setImportReport] = useState<ImportReport | null>(null)
+  const [exportSummary, setExportSummary] = useState<{
+    servers: number
+    clis: number
+    credentials: number
+  } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const previewRef = useRef<HTMLInputElement>(null)
   const [method, setMethod] = useState('GET')
   const [path, setPath] = useState('/api/v1/overview')
   const [bodyText, setBodyText] = useState('{}')
@@ -77,7 +96,17 @@ export function SettingsPage() {
         },
       )
       if (!response.ok) throw new Error(String(response.status))
-      const blob = await response.blob()
+      const value = (await response.json()) as {
+        servers?: unknown[]
+        clis?: unknown[]
+        credentials?: unknown[]
+      }
+      setExportSummary({
+        servers: value.servers?.length ?? 0,
+        clis: value.clis?.length ?? 0,
+        credentials: value.credentials?.length ?? 0,
+      })
+      const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
@@ -89,14 +118,21 @@ export function SettingsPage() {
     }
   }
 
-  const importConfig = async (file: File) => {
+  const importConfig = async (file: File, dryRun: boolean) => {
     setImporting(true)
     try {
       const text = await file.text()
-      await api.post('/api/v1/config/import', JSON.parse(text))
-      toast('imported', 'success')
+      const report = (await api.post('/api/v1/config/import', {
+        ...(JSON.parse(text) as Record<string, unknown>),
+        mode: importMode,
+        upsert: importMode === 'merge' && importUpsert,
+        dryRun,
+      })) as ImportReport | null
+      setImportReport(report ?? null)
+      if (!dryRun) toast('imported', 'success')
     } catch (error) {
       toast((error as Error).message, 'error')
+      setImportReport(null)
     } finally {
       setImporting(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -166,6 +202,7 @@ export function SettingsPage() {
       </Section>
 
       <Section title={t('settings.config')}>
+        <p className="text-xs text-ink-3">{t('settings.configHint')}</p>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => exportConfig(false)}>
             <Download className="size-4" />
@@ -175,9 +212,47 @@ export function SettingsPage() {
             <Download className="size-4" />
             {t('settings.exportSecrets')}
           </Button>
+        </div>
+        {exportSummary && (
+          <span className="text-xs text-ink-3">
+            {t('settings.exportSummary', {
+              servers: exportSummary.servers,
+              clis: exportSummary.clis,
+              credentials: exportSummary.credentials,
+            })}
+          </span>
+        )}
+        <SelectField
+          label={t('settings.importMode')}
+          value={importMode}
+          onChange={(value) => setImportMode(value === 'merge' ? 'merge' : 'create')}
+          options={[
+            { value: 'create', label: t('settings.importModeCreate') },
+            { value: 'merge', label: t('settings.importModeMerge') },
+          ]}
+        />
+        {importMode === 'merge' && (
+          <label className="flex items-center gap-2 text-xs text-ink-3">
+            <input
+              type="checkbox"
+              checked={importUpsert}
+              onChange={(event) => setImportUpsert(event.target.checked)}
+            />
+            {t('settings.importUpsert')}
+          </label>
+        )}
+        <div className="flex flex-wrap gap-2">
           <Button onClick={() => fileRef.current?.click()} loading={importing}>
             <Upload className="size-4" />
             {t('settings.import')}
+          </Button>
+          <Button
+            variant="secondary"
+            loading={importing}
+            onClick={() => previewRef.current?.click()}
+          >
+            <FileJson className="size-4" />
+            {t('settings.importPreview')}
           </Button>
           <input
             ref={fileRef}
@@ -186,10 +261,67 @@ export function SettingsPage() {
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) importConfig(file)
+              if (file) importConfig(file, false)
+            }}
+          />
+          <input
+            ref={previewRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) importConfig(file, true)
             }}
           />
         </div>
+        {importReport && (
+          <div className="flex flex-col gap-2 bg-surface px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-ink">
+                {importReport.dryRun ? t('settings.importPlan') : t('settings.importReport')}
+              </span>
+              <Badge tone="neutral">{importReport.mode}</Badge>
+              {(['created', 'reused', 'updated', 'skipped'] as const).map((status) =>
+                (importReport.counts[status] ?? 0) > 0 ? (
+                  <Badge key={status} tone={status === 'created' ? 'accent' : 'neutral'}>
+                    {t(`settings.importStatus.${status}`)}: {importReport.counts[status]}
+                  </Badge>
+                ) : null,
+              )}
+            </div>
+            {importReport.installations.length > 0 && (
+              <span className="text-xs text-ink-3">
+                {t('settings.importMarketEntries', {
+                  count: importReport.installations.length,
+                })}
+              </span>
+            )}
+            {[...importReport.servers, ...importReport.clis].map((item) => (
+              <div key={item.slug} className="flex items-center gap-2 text-xs">
+                <span className="font-mono text-ink">{item.slug}</span>
+                <Badge tone={item.status === 'created' ? 'accent' : 'neutral'}>{item.status}</Badge>
+                {item.changes !== undefined && item.changes.length > 0 && (
+                  <span className="text-ink-3">{item.changes.join(', ')}</span>
+                )}
+              </div>
+            ))}
+            {importReport.conflicts.length > 0 && (
+              <span className="text-xs text-warning">{importReport.conflicts.join(', ')}</span>
+            )}
+          </div>
+        )}
+      </Section>
+
+      <Section title={t('settings.migration')}>
+        <p className="text-xs text-ink-3">{t('settings.migrationHint')}</p>
+        <div className="flex items-start gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-surface px-3 py-2 font-mono text-xs text-ink-2">
+            {t('settings.migrationCommand')}
+          </code>
+          <CopyButton text={t('settings.migrationCommand')} />
+        </div>
+        <p className="text-xs text-ink-3">{t('settings.migrationAccessKeys')}</p>
       </Section>
 
       <Section title={t('settings.harnessImport')}>

@@ -197,6 +197,29 @@ export const en: Dict = {
   'settings.export': 'Export',
   'settings.exportSecrets': 'Export (secrets)',
   'settings.import': 'Import',
+  'settings.configHint':
+    'An export covers MCP servers, hosted CLIs, credentials and Market provenance. Import it into another instance, or back into this one.',
+  'settings.exportSummary': '{servers} servers, {clis} hosted CLIs, {credentials} credentials',
+  'settings.importMode': 'Import mode',
+  'settings.importModeCreate': 'Create (fail on conflicts)',
+  'settings.importModeMerge': 'Merge (keep what exists)',
+  'settings.importUpsert': 'Update records the target already has',
+  'settings.importPreview': 'Preview',
+  'settings.importPlan': 'Import plan (nothing written)',
+  'settings.importReport': 'Import report',
+  'settings.importStatus.created': 'created',
+  'settings.importStatus.reused': 'reused',
+  'settings.importStatus.updated': 'updated',
+  'settings.importStatus.skipped': 'skipped',
+  'settings.importMarketEntries':
+    '{count} Market entries carry provenance: reinstall them with `toolhome migrate` to keep version tracking.',
+  'settings.migration': 'Migrate to another instance',
+  'settings.migrationHint':
+    'The CLI runs the whole transfer against a second instance: Market entries are reinstalled at their pinned versions, records are merged, and it reports what still needs a human.',
+  'settings.migrationCommand':
+    'toolhome migrate --to https://cloud.example.com --to-key tch_ctl_... --with-state',
+  'settings.migrationAccessKeys':
+    'Access keys are stored as digests and cannot be copied; --issue-access-key prints a new one for the harness configs.',
   'settings.harnessImport': 'Import from harness',
   'settings.harnessHint':
     'Paste a Claude Desktop / Cursor mcpServers JSON. Secrets (passwords, tokens, keys) become encrypted credentials; the rest goes into server config.',

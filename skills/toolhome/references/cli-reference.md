@@ -126,9 +126,30 @@ toolhome market update <id>                   # update to the catalog pin (keeps
 toolhome config export <file>                 # redacted export
 toolhome config export <file> --include-secrets  # full backup (0600)
 toolhome config import <file>                 # restore (atomic transaction)
+toolhome config import <file> --mode merge [--upsert] [--dry-run]
+                                              # merge keeps what the target already has
 toolhome config import-harness <file> [--preview] [--upsert]
                                               # import a Claude Desktop / Cursor mcpServers JSON;
                                               # secrets become encrypted credentials (never echoed)
+```
+
+An export covers `credentials`, `servers` (including `nodeId` placement), `clis` (the hosted
+CLI plane) and `installations` (Market provenance, reported but not written by the import).
+`--mode create` (default) aborts when the target already has a slug and lists the conflicts;
+`--mode merge` reuses credentials by name, skips records the target already holds, and updates
+them only with `--upsert`. Credentials whose name matches but whose payload differs are a 409
+unless `--upsert` is given, so a re-run is a no-op rather than a silent overwrite.
+`--dry-run` returns the same report without writing. The response lists per-item status:
+
+```json
+{
+  "mode": "merge", "upsert": false, "dryRun": false,
+  "credentials": [{ "name": "Azure SP", "status": "reused" }],
+  "servers": [{ "slug": "firecrawl", "status": "created" }],
+  "clis": [{ "slug": "gh-cli", "status": "skipped", "changes": [] }],
+  "installations": [{ "entryId": "gh-cli", "targetType": "cli", "targetSlug": "gh-cli" }],
+  "counts": { "created": 2, "reused": 1, "updated": 0, "skipped": 1, "conflict": 0 }
+}
 ```
 
 Harness import accepts `{ "mcpServers": { name: { command, args, env } | { url, headers } } }`.
@@ -201,6 +222,39 @@ toolhome cli exec <slug> --stdin-file ./input.txt -- <args...>
 toolhome cli exec <slug> --stdin-file - -- <args...>
 ```
 
+### Moving a login into ToolHome
+
+A platform CLI keeps its login where it likes: `gh` in the macOS keychain, `az` in a token
+cache, others in a container volume on the target. Each catalog entry declares how its state
+moves, and `adopt` follows that declaration.
+
+```bash
+toolhome cli adopt gh-cli                     # one entry, against the configured instance
+toolhome cli adopt gh-cli --to https://cloud.example.com --to-key tch_ctl_... [--dry-run]
+toolhome cli sync --to https://cloud.example.com --to-key tch_ctl_... [--dry-run]
+                                              # every installed CLI entry on the target
+```
+
+Outcomes per entry: `adopted` (credential handed over and accepted), `already-authenticated`,
+`credential-only` (the entry authenticates from injected credential values, which travel with
+a configuration export), `manual` (the login cannot move — the entry says what to run on the
+target), `undeclared`, `failed`. The extracted secret is written to the target's `exec` stdin
+and is never printed, logged or returned.
+
+### Moving a state volume
+
+```bash
+toolhome cli export-state gh-cli --volume toolhome-gh-cli-state > gh-state.json
+toolhome cli import-state gh-cli gh-state.json --volume toolhome-gh-cli-state
+```
+
+Both go through the control API (`GET|POST /api/v1/clis/{id}/state?volume=<name>`) with the
+archive as base64. Only a `docker`-mode record with a declared, writable volume of that name
+is accepted; archives are capped at 64 MiB. **The archive contains the CLI's credentials.**
+The gateway needs the host Docker socket (already required for `executionMode: docker`) and
+pulls `alpine:3.20` on first use. Tools such as `offen/docker-volume-backup` cover the same
+ground if you prefer to move volumes yourself.
+
 `--stdin <text>` and `--stdin-file <path|->` are mutually exclusive. Put platform arguments after `--`; timeout is in milliseconds and cannot exceed the record's limit. Human output streams stdout/stderr; `--output json` emits NDJSON frames and an outcome. A failed or timed-out remote execution exits locally with code 1. Ctrl-C cancels the stream.
 
 ```bash
@@ -251,6 +305,50 @@ Semantics:
   backends are hidden implementation details rather than separate Market products.
 - **Audit**: every exec appends a `cli.exec` event (slug, argv, exit code, duration) visible
   via `toolhome events` / `GET /api/v1/events`.
+
+## migrate
+
+```bash
+toolhome migrate --to https://cloud.example.com --to-key tch_ctl_... [options]
+```
+
+Copies this instance into another one. The source is whatever the command already resolves
+(`--url`/`--key`, `TOOLHOME_URL`/`TOOLHOME_CONTROL_KEY`, or `~/.config/toolhome/config.json`);
+the target is `--to`/`--to-key`. Both keys must be admin-scoped.
+
+| Option | Effect |
+| --- | --- |
+| `--planes <mcp,cli>` | Which planes to move (default both) |
+| `--dry-run` | Report what would change without writing to the target |
+| `--with-state` | Also move each hosted CLI's state volume (contains credentials) |
+| `--reset-oauth-clients` | Clear OAuth client registrations that point at the source origin |
+| `--issue-access-key <name>` | Issue an MCP Access Key on the target and print the harness snippet |
+
+Order is deliberate: Market entries are **reinstalled first** (each one provisions its own
+credential, record and installation record at its pinned version, using values harvested from
+the exported credential), then the configuration import runs in `merge` mode and skips what
+the Market already created. Reinstalling needs the entry's values; `--set`-style values are
+harvested from `env` variables, `bearer` tokens, `api-key` values and `headers` entries. An
+OAuth entry has no harvestable value, so it is reported as needing authorization on the target.
+
+The report ends with what still needs a human: every `access-key` (stored as a digest, so it
+cannot be copied), every hosted CLI that reports no login state, every Market entry that needs
+a secret or failed, and every OAuth credential whose registration was left in place.
+
+```json
+{
+  "dryRun": false,
+  "source": { "servers": 2, "clis": 1, "credentials": 1, "installations": 1 },
+  "target": { "servers": 0, "clis": 0, "credentials": 0 },
+  "reinstalls": [{ "entryId": "gh-cli", "plane": "cli", "status": "installed" }],
+  "imported": { "counts": { "created": 2, "skipped": 1 } },
+  "stateTransfers": [{ "slug": "gh-cli", "volume": "toolhome-gh-cli-state", "status": "moved", "bytes": 412 }],
+  "verification": { "clis": [{ "slug": "gh-cli", "installed": true, "version": "gh 2.97.0", "loggedIn": true }], "mcpOk": true },
+  "oauthRegistrationsReset": [],
+  "accessKey": null,
+  "manual": ["Access keys are stored as digests and cannot be moved: …"]
+}
+```
 
 ## global options
 

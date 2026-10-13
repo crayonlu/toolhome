@@ -193,6 +193,36 @@ export class UpstreamOAuthService {
     };
   }
 
+  /**
+   * Drop the client registration while keeping tokens.
+   *
+   * The registration is bound to this instance's origin: the redirect URI and,
+   * for URL-based clients, the client_id itself carry the public URL and the
+   * credential id. A credential that arrived from another instance therefore
+   * holds a registration the authorization server cannot match any more, while
+   * its tokens can still refresh. Clearing the registration lets the next
+   * authorization re-register (DCR) or re-advertise this origin's metadata.
+   */
+  resetClientRegistration(credentialId: string) {
+    const server = this.#serverFor(credentialId);
+    const provider = this.#provider(
+      credentialId,
+      server.settings.urlClientId ?? this.#urlClientId,
+    );
+    provider.invalidateCredentials('client');
+    this.#store.appendEvent({
+      level: 'info',
+      type: 'credential.client_registration_reset',
+      serverId: server.id,
+      message: `Reset the OAuth client registration for ${server.slug}`,
+      detail: { credentialId },
+    });
+    return {
+      reset: true,
+      credential: this.#store.getCredential(credentialId),
+    };
+  }
+
   async #revokeToken(
     endpoint: string,
     token: string,

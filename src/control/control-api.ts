@@ -270,6 +270,35 @@ export function mountControlApi(
   );
 
   app.get(
+    '/api/v1/clis/:id/state',
+    adminRoute(async (context) => {
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      const volume = requiredVolumeQuery(context);
+      const state = await options.cli.exportState(context.req.param('id'), volume);
+      return { ...state, archive: state.archive.toString('base64') };
+    }),
+  );
+  app.post(
+    '/api/v1/clis/:id/state',
+    adminRoute(async (context) => {
+      if (!options.cli)
+        throw new AppError('cli_plane_disabled', 'CLI plane is not configured', 503);
+      const volume = requiredVolumeQuery(context);
+      const body = (await context.req.json()) as { archive?: unknown };
+      if (typeof body.archive !== 'string') {
+        throw new AppError('invalid_input', 'Missing "archive" (a base64 tar of the volume)', 400);
+      }
+      const restored = await options.cli.importState(
+        context.req.param('id'),
+        volume,
+        Buffer.from(body.archive, 'base64'),
+      );
+      return { restored: true, ...restored };
+    }),
+  );
+
+  app.get(
     '/api/v1/credentials',
     adminRoute(() => options.service.listCredentials()),
   );
@@ -310,6 +339,12 @@ export function mountControlApi(
   app.post(
     '/api/v1/credentials/:id/revoke',
     adminRoute((context) => options.service.revokeCredential(context.req.param('id'))),
+  );
+  app.post(
+    '/api/v1/credentials/:id/reset-oauth-registration',
+    adminRoute((context) =>
+      options.service.resetCredentialClientRegistration(context.req.param('id')),
+    ),
   );
 
   mountKeyRoutes(app, adminRoute, options.service, 'control');
@@ -377,7 +412,10 @@ export function mountControlApi(
   );
   app.post(
     '/api/v1/config/import',
-    adminRoute(async (context) => options.service.importConfig(await context.req.json())),
+    adminRoute(async (context) => {
+      const body = (await context.req.json()) as { dryRun?: unknown };
+      return options.service.importConfig(body, { dryRun: body.dryRun === true });
+    }),
   );
   app.get(
     '/api/v1/endpoints/aggregate',
@@ -557,6 +595,14 @@ function numberQuery(value: string | undefined, fallback: number): number {
 function booleanQuery(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   return z.enum(['true', 'false']).parse(value) === 'true';
+}
+
+function requiredVolumeQuery(context: HonoContext): string {
+  const volume = context.req.query('volume');
+  if (volume === undefined || volume.trim() === '') {
+    throw new AppError('invalid_input', 'Missing "volume" query parameter', 400);
+  }
+  return volume;
 }
 
 function queryObject(context: HonoContext): Record<string, string> {

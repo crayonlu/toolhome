@@ -5,6 +5,29 @@ export interface MarketRequirement {
   required?: boolean;
 }
 
+/**
+ * How a hosted CLI's login state moves from the machine that already has it.
+ *
+ * Platform CLIs keep their login in places of their own choosing — a macOS
+ * keychain for `gh`, a token cache file for `az`, a container volume on the
+ * target — so this is per entry: either the CLI can hand its credential over
+ * (`extract`/`import`), the credential already travels as an injected value
+ * (`credentialOnly`), or the login is bound to the machine that made it
+ * (`manual`).
+ */
+export interface LocalStateSpec {
+  /** Runs on the local machine; stdout is the secret. Never printed or logged. */
+  extract?: { command: string; args: string[] };
+  /** Runs on the target instance; the extracted secret arrives on stdin. */
+  import?: { args: string[] };
+  /** Where the target keeps the resulting state, for the report. */
+  target?: string;
+  /** Nothing to move: the entry authenticates from credential values that already travel. */
+  credentialOnly?: boolean;
+  /** The login cannot be moved; this tells the operator what to do on the target instead. */
+  manual?: string;
+}
+
 export type CredentialSpec =
   /** No credential: the upstream answers unauthenticated requests. */
   | { type: 'none' }
@@ -63,6 +86,8 @@ export interface MarketEntry {
   };
   credential: CredentialSpec;
   requires: MarketRequirement[];
+  /** How this entry's login state moves from a machine that already has it (CLI plane). */
+  localState?: LocalStateSpec;
   /** Optional Docker entrypoint used when the image does not declare its CLI binary. */
   entrypoint?: string;
   /** Status probe argv for the installed CLI (runs with this entry's command/entrypoint). */
@@ -489,6 +514,9 @@ ENTRYPOINT ["markitdown-mcp"]`,
       AZURE_CLIENT_SECRET: 'env:AZURE_CLIENT_SECRET',
       AZURE_TENANT_ID: 'env:AZURE_TENANT_ID',
     },
+    // The service principal authenticates every execution from injected values,
+    // so the credential is the whole story and no login state has to move.
+    localState: { credentialOnly: true },
     cliRuntime: {
       authStrategy: 'azure-service-principal',
       containerVolumes: [{ source: 'toolhome-azure-cli-state', target: '/root/.azure' }],
@@ -554,6 +582,15 @@ ENTRYPOINT ["gh"]
     // login persisted in the toolhome-gh-cli-state volume.
     credential: { type: 'env' },
     credentialBindings: {},
+    // On macOS the token lives in the keychain, not in ~/.config/gh/hosts.yml, so
+    // the only portable extraction is `gh auth token` — and `auth login` is on the
+    // allow list while `auth token` is denied, keeping the token out of the
+    // hosted plane's own reach.
+    localState: {
+      extract: { command: 'gh', args: ['auth', 'token'] },
+      import: { args: ['auth', 'login', '--with-token'] },
+      target: 'toolhome-gh-cli-state:/root/.config/gh',
+    },
     requires: [],
     cliRuntime: {
       containerVolumes: [{ source: 'toolhome-gh-cli-state', target: '/root/.config/gh' }],
@@ -609,6 +646,9 @@ ENTRYPOINT ["gh"]
       allow: [['version'], ['status'], ['netcheck']],
       deny: [['up'], ['logout'], ['down']],
     },
+    // The auth key authenticates the hosted node on every execution; the state
+    // volume only caches node identity, which is rebuilt from that key.
+    localState: { credentialOnly: true },
     probe: { command: 'tailscale', args: ['version'] },
     docs: 'https://tailscale.com/kb/1080/cli/',
   },
@@ -671,6 +711,12 @@ ENTRYPOINT ["gh"]
     },
     // config init blocks until the browser setup completes; give it room.
     execTimeoutMs: 600_000,
+    // lark-cli offers no token hand-off: its login is a device flow that writes
+    // state inside the gateway, so the target authorizes itself.
+    localState: {
+      manual:
+        'run `toolhome cli exec lark-cli -- auth login` on the target and complete the device flow there',
+    },
     docs: 'https://www.npmjs.com/package/@larksuite/cli',
   },
   {
@@ -686,6 +732,8 @@ ENTRYPOINT ["gh"]
     bin: 'firecrawl',
     credential: { type: 'bearer', tokenKey: 'FIRECRAWL_API_KEY' },
     credentialBindings: { FIRECRAWL_API_KEY: 'token' },
+    // The API key is the entire login: it travels with the configuration export.
+    localState: { credentialOnly: true },
     requires: [
       {
         name: 'FIRECRAWL_API_KEY',
@@ -721,6 +769,7 @@ ENTRYPOINT ["gh"]
     bin: 'wrangler',
     credential: { type: 'bearer', tokenKey: 'CLOUDFLARE_API_TOKEN' },
     credentialBindings: { CLOUDFLARE_API_TOKEN: 'token' },
+    localState: { credentialOnly: true },
     requires: [
       {
         name: 'CLOUDFLARE_API_TOKEN',
@@ -759,6 +808,7 @@ ENTRYPOINT ["gh"]
     bin: 'vercel',
     credential: { type: 'bearer', tokenKey: 'VERCEL_TOKEN' },
     credentialBindings: { VERCEL_TOKEN: 'token' },
+    localState: { credentialOnly: true },
     requires: [
       {
         name: 'VERCEL_TOKEN',
@@ -811,6 +861,7 @@ ENTRYPOINT ["gh"]
       ALIBABA_CLOUD_ACCESS_KEY_SECRET: 'env:ALIBABA_CLOUD_ACCESS_KEY_SECRET',
       ALIBABA_CLOUD_REGION_ID: 'env:ALIBABA_CLOUD_REGION_ID',
     },
+    localState: { credentialOnly: true },
     requires: [
       {
         name: 'ALIBABA_CLOUD_ACCESS_KEY_ID',
@@ -858,6 +909,8 @@ ENTRYPOINT ["gh"]
     allowList: { allow: [['-c', '*']], deny: [] },
     credential: { type: 'env' },
     requires: [],
+    // Runs with the gateway's own privileges; there is no login of its own to move.
+    localState: { credentialOnly: true },
     docs: 'https://docs.toolhome.dev/cli-plane',
   },
 ];

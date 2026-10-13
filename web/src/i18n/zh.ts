@@ -188,6 +188,29 @@ export const zh: Dict = {
   'settings.export': '导出',
   'settings.exportSecrets': '导出（含密钥）',
   'settings.import': '导入',
+  'settings.configHint':
+    '导出包含 MCP 服务器、Hosted CLI、凭据与 Market 台账。可导入到另一个实例，也可导回本实例。',
+  'settings.exportSummary': '{servers} 个服务器、{clis} 个 Hosted CLI、{credentials} 条凭据',
+  'settings.importMode': '导入模式',
+  'settings.importModeCreate': '创建（冲突即失败）',
+  'settings.importModeMerge': '合并（保留已有）',
+  'settings.importUpsert': '更新目标实例已有的记录',
+  'settings.importPreview': '预览',
+  'settings.importPlan': '导入计划（未写入任何内容）',
+  'settings.importReport': '导入报告',
+  'settings.importStatus.created': '新建',
+  'settings.importStatus.reused': '复用',
+  'settings.importStatus.updated': '更新',
+  'settings.importStatus.skipped': '跳过',
+  'settings.importMarketEntries':
+    '有 {count} 个 Market 条目带台账：用 `toolhome migrate` 重装才能保留版本追踪。',
+  'settings.migration': '迁移到另一个实例',
+  'settings.migrationHint':
+    'CLI 会对着第二个实例跑完整迁移：Market 条目按 pin 住的版本重装，记录按合并模式写入，最后列出仍需人工处理的部分。',
+  'settings.migrationCommand':
+    'toolhome migrate --to https://cloud.example.com --to-key tch_ctl_... --with-state',
+  'settings.migrationAccessKeys':
+    'access key 只存摘要、无法复制；--issue-access-key 会在目标实例签发一个新的供 harness 使用。',
   'settings.harnessImport': '从 harness 导入',
   'settings.harnessHint':
     '粘贴 Claude Desktop / Cursor 的 mcpServers JSON。密钥类字段（password、token、key）会存为加密凭据，其余进入服务器配置。',
