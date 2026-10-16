@@ -1,4 +1,4 @@
-export type ServerKind = 'remote' | 'home';
+export type ServerKind = 'remote' | 'home' | 'node';
 export type Transport =
   { type: 'streamable-http'; url: string } | { type: 'stdio'; command: string; args?: string[] };
 
@@ -59,6 +59,8 @@ export interface ServerRecord {
   slug: string;
   name: string;
   kind: ServerKind;
+  /** Node label of the machine that runs a `node` server; null for other kinds. */
+  nodeId: string | null;
   transport: Transport;
   credentialId: string | null;
   enabled: boolean;

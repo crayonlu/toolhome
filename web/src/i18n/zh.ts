@@ -3,6 +3,11 @@ import type { Dict } from './types';
 export const zh: Dict = {
   'nav.overview': '概览',
   'nav.servers': '服务器',
+  'servers.placement.label': '放置位置',
+  'servers.placement.all': '全部',
+  'servers.placement.host': 'ToolHome 主机',
+  'servers.placement.node': '节点机',
+  'servers.placement.nodeBadge': 'node · {node}',
   'nav.clis': 'CLI',
   'nav.credentials': '凭据',
   'nav.accessKeys': '访问密钥',

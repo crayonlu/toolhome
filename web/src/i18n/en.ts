@@ -3,6 +3,11 @@ import type { Dict } from './types';
 export const en: Dict = {
   'nav.overview': 'Overview',
   'nav.servers': 'Servers',
+  'servers.placement.label': 'Placement',
+  'servers.placement.all': 'All',
+  'servers.placement.host': 'ToolHome host',
+  'servers.placement.node': 'Node',
+  'servers.placement.nodeBadge': 'node · {node}',
   'nav.clis': 'CLIs',
   'nav.credentials': 'Credentials',
   'nav.accessKeys': 'Access Keys',

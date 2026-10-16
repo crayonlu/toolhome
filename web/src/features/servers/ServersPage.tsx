@@ -18,6 +18,8 @@ import { Toggle } from '../../components/ui/Toggle'
 import { ActionsMenu } from '../../components/ui/Menu'
 import { runtimeStatusLabel, runtimeStatusMeta } from '../../app/status'
 import { ServerFormSheet, type ServerFormValue } from './ServerForm'
+import { PlacementMenu } from './PlacementMenu'
+import { ALL_PLACEMENT, matchesPlacement, placementGroups, resolvePlacement } from './placement'
 import type { ServerRecord } from '../../api/types'
 
 export function ServersPage() {
@@ -32,6 +34,16 @@ export function ServersPage() {
   const serverAction = useServerAction()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<ServerRecord | undefined>(undefined)
+  const [placement, setPlacement] = useState(ALL_PLACEMENT)
+
+  // Node servers are grouped by the machine that runs them so they never read as
+  // remote endpoints; a machine that disappears falls back to showing everything.
+  const groups = useMemo(() => placementGroups(servers ?? []), [servers])
+  const selected = resolvePlacement(groups, placement)
+  const visible = useMemo(
+    () => (servers ?? []).filter((server) => matchesPlacement(server, selected)),
+    [servers, selected],
+  )
 
   // Capability-snapshot availability comes from the diagnostics feed; the rest
   // of what that page showed (status, errors) is already on this list.
@@ -83,11 +95,15 @@ export function ServersPage() {
         </Button>
       </div>
 
+      {!isLoading && groups.length > 2 && (
+        <PlacementMenu groups={groups} value={selected} onChange={setPlacement} />
+      )}
+
       {isLoading ? (
         <div className="text-sm text-ink-3">{t('common.loading')}</div>
-      ) : servers && servers.length > 0 ? (
+      ) : visible.length > 0 ? (
         <div className="flex flex-col divide-y divide-ink-3/10">
-          {servers.map((server) => {
+          {visible.map((server) => {
             const meta = runtimeStatusMeta(server.runtime?.status ?? 'unknown')
             const busy = actionPending(server.id)
             const toggling = updatePending(server.id)
@@ -109,7 +125,13 @@ export function ServersPage() {
                     </span>
                   )}
                 </Link>
-                <Badge tone={server.kind === 'remote' ? 'accent' : 'neutral'}>{server.kind}</Badge>
+                {server.kind === 'node' && server.nodeId !== null ? (
+                  <Badge tone="neutral">
+                    {t('servers.placement.nodeBadge', { node: server.nodeId })}
+                  </Badge>
+                ) : (
+                  <Badge tone={server.kind === 'remote' ? 'accent' : 'neutral'}>{server.kind}</Badge>
+                )}
                 {snapshotBySlug.get(server.slug) === true && (
                   <span className="hidden shrink-0 text-xs text-ink-3 lg:block">
                     {t('diagnostics.snapshot')}

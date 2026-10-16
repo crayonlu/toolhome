@@ -85,7 +85,13 @@ export function ServerDetailPage() {
             </Link>
             <span className="text-ink-3">/</span>
             <h1 className="text-xl font-semibold tracking-[-0.02em]">{server.name}</h1>
-            <Badge tone={server.kind === 'remote' ? 'accent' : 'neutral'}>{server.kind}</Badge>
+            {server.kind === 'node' && server.nodeId !== null ? (
+              <Badge tone="neutral">
+                {t('servers.placement.nodeBadge', { node: server.nodeId })}
+              </Badge>
+            ) : (
+              <Badge tone={server.kind === 'remote' ? 'accent' : 'neutral'}>{server.kind}</Badge>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-2 text-[13px] text-ink-3">
             <StatusDot tone={meta.tone} pulse={meta.pulse} />
