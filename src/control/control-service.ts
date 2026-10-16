@@ -5,6 +5,7 @@ import {
   createServerInputObjectSchema,
   createServerInputSchema,
   isHostHosted,
+  nodeReportInputSchema,
   parseBucketSeconds,
   placementIssues,
   setProjectionInputSchema,
@@ -13,6 +14,7 @@ import {
   updateServerInputSchema,
   type ApiKeyKind,
   type CredentialPayload,
+  type NodeReport,
   type ServerKind,
   type ServerRecord,
   type TransportConfig,
@@ -66,6 +68,9 @@ const importInstallationSchema = z.object({
 });
 
 const importModeSchema = z.enum(['create', 'merge']);
+
+/** How long a node report stays current before it is shown as stale. */
+export const nodeReportTtlMs = 5 * 60_000;
 
 const importSchema = z.object({
   version: z.literal(1),
@@ -137,10 +142,71 @@ export class ControlService {
   }
 
   listServers() {
+    const now = Date.now();
     return this.#store.listServers().map((server) => ({
       ...server,
       runtime: this.#store.getRuntimeState(server.id),
+      nodeReport: this.#nodeReportView(server, now),
     }));
+  }
+
+  /**
+   * A node server runs on a client machine, so the host records nothing for it
+   * and its state is unknown by construction. The machine that does run it
+   * reports what it sees, and that report is what the console shows. Reports
+   * older than the TTL are returned marked stale rather than hidden, so the
+   * console can say when a machine last spoke.
+   */
+  #nodeReportView(
+    server: ServerRecord,
+    now: number,
+  ): (NodeReport & { stale: boolean }) | null {
+    if (server.kind !== 'node') return null;
+    const report = this.#store.getNodeReport(server.id);
+    if (report === null) return null;
+    return { ...report, stale: now - Date.parse(report.reportedAt) > nodeReportTtlMs };
+  }
+
+  /**
+   * Record what a machine says about the servers placed on it. Only servers
+   * actually placed on that node are accepted, so a machine cannot report state
+   * for another one's servers.
+   */
+  reportNodeStatus(nodeId: string, value: unknown) {
+    const input = nodeReportInputSchema.parse(value);
+    const reportedAt = new Date().toISOString();
+    const accepted: { slug: string; status: string }[] = [];
+    const rejected: { slug: string; reason: string }[] = [];
+    for (const entry of input.servers) {
+      const server = this.#store.getServerBySlug(entry.slug);
+      if (server === null) {
+        rejected.push({ slug: entry.slug, reason: 'no such server' });
+        continue;
+      }
+      if (server.kind !== 'node' || server.nodeId !== nodeId) {
+        rejected.push({ slug: entry.slug, reason: `not placed on node "${nodeId}"` });
+        continue;
+      }
+      this.#store.saveNodeReport({
+        serverId: server.id,
+        nodeId,
+        status: entry.status,
+        lastError: entry.error,
+        probeOk: entry.probeOk,
+        probeDetail: entry.probeDetail,
+        tools: entry.tools,
+        reportedAt,
+      });
+      accepted.push({ slug: entry.slug, status: entry.status });
+    }
+    this.#store.appendEvent({
+      level: rejected.length > 0 ? 'warn' : 'info',
+      type: 'node.reported',
+      serverId: null,
+      message: `Node "${nodeId}" reported ${accepted.length} of ${input.servers.length} server(s)`,
+      detail: { nodeId, accepted, rejected },
+    });
+    return { nodeId, reportedAt, accepted, rejected };
   }
 
   async createServer(value: unknown) {

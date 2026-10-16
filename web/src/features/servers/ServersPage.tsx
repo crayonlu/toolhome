@@ -19,6 +19,7 @@ import { ActionsMenu } from '../../components/ui/Menu'
 import { runtimeStatusLabel, runtimeStatusMeta } from '../../app/status'
 import { ServerFormSheet, type ServerFormValue } from './ServerForm'
 import { PlacementMenu } from './PlacementMenu'
+import { displayStatus, nodeReportLine } from './nodeReport'
 import { ALL_PLACEMENT, matchesPlacement, placementGroups, resolvePlacement } from './placement'
 import type { ServerRecord } from '../../api/types'
 
@@ -104,7 +105,9 @@ export function ServersPage() {
       ) : visible.length > 0 ? (
         <div className="flex flex-col divide-y divide-ink-3/10">
           {visible.map((server) => {
-            const meta = runtimeStatusMeta(server.runtime?.status ?? 'unknown')
+            const status = displayStatus(server)
+            const reportLine = nodeReportLine(server, t, locale)
+            const meta = runtimeStatusMeta(status)
             const busy = actionPending(server.id)
             const toggling = updatePending(server.id)
             const removing = deletePending(server.id)
@@ -119,9 +122,24 @@ export function ServersPage() {
                 <Link to={`/servers/${server.id}`} className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium text-ink">{server.name}</span>
                   <span className="truncate font-mono text-xs text-ink-3">{server.slug}</span>
-                  {server.runtime?.lastError && (
-                    <span className="truncate text-xs text-danger" title={server.runtime.lastError}>
-                      {server.runtime.lastError}
+                  {(server.runtime?.lastError ?? server.nodeReport?.lastError) && (
+                    <span
+                      className="truncate text-xs text-danger"
+                      title={server.runtime?.lastError ?? server.nodeReport?.lastError ?? ''}
+                    >
+                      {server.runtime?.lastError ?? server.nodeReport?.lastError}
+                    </span>
+                  )}
+                  {reportLine !== null && (
+                    <span
+                      className={`truncate text-xs ${
+                        server.nodeReport?.stale === true || server.nodeReport?.probeOk === false
+                          ? 'text-warning'
+                          : 'text-ink-3'
+                      }`}
+                      title={server.nodeReport?.probeDetail ?? undefined}
+                    >
+                      {reportLine}
                     </span>
                   )}
                 </Link>
@@ -148,7 +166,7 @@ export function ServersPage() {
                           : t('server.refreshing')}
                     </span>
                   ) : (
-                    runtimeStatusLabel(server.runtime?.status ?? 'unknown', locale)
+                    runtimeStatusLabel(status, locale)
                   )}
                 </span>
                 <Toggle

@@ -231,6 +231,15 @@ export function mountControlApi(
   );
 
   // ── CLI registry (Form A CLI plane) ────────────────────────────────────
+  // What the machine running a node server reports about it. The host cannot
+  // measure these itself, so this is the only source for a node server's state.
+  app.post(
+    '/api/v1/nodes/:nodeId/report',
+    adminRoute(async (context) =>
+      options.service.reportNodeStatus(context.req.param('nodeId'), await context.req.json()),
+    ),
+  );
+
   app.get(
     '/api/v1/clis',
     route(() => options.cli?.list() ?? []),

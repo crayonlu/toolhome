@@ -135,6 +135,56 @@ describe('servers placement menu', () => {
     expect(screen.queryByText('drawio')).toBeNull()
   })
 
+  it('says a node server was not reported instead of leaving a bare unknown', async () => {
+    stubFetch()
+    renderPage()
+
+    // No report yet: the host cannot know, and the row says so.
+    expect(await screen.findByText('not reported by crayons-air yet')).toBeTruthy()
+    expect(screen.getByText('not reported by R9000P yet')).toBeTruthy()
+    // A host-run server carries no such line.
+    expect(screen.queryByText(/not reported by .*firecrawl/)).toBeNull()
+  })
+
+  it('shows what the machine reported, with the probe finding', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const body = url.includes('/api/v1/servers')
+        ? servers.map((server) =>
+            server.kind === 'node' && server.nodeId === 'crayons-air'
+              ? {
+                  ...server,
+                  nodeReport: {
+                    serverId: server.id,
+                    nodeId: 'crayons-air',
+                    status: 'ready',
+                    lastError: null,
+                    probeOk: false,
+                    probeDetail: 'ghidra bridge missing',
+                    tools: 214,
+                    reportedAt: new Date(Date.now() - 60_000).toISOString(),
+                    stale: false,
+                  },
+                }
+              : server,
+          )
+        : url.includes('/api/v1/diagnostics')
+          ? { ok: true, servers: [] }
+          : []
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    renderPage()
+
+    const line = await screen.findByText(/reported by crayons-air/)
+    expect(line.textContent).toContain('214 tools')
+    // Only that machine can know the launch command is missing, so it is flagged.
+    expect(line.textContent).toContain('launch command missing')
+    expect(line.getAttribute('title')).toBe('ghidra bridge missing')
+  })
+
   it('labels a node row with its machine so it cannot read as a remote endpoint', async () => {
     stubFetch()
     renderPage()

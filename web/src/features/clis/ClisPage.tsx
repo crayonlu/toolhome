@@ -1,6 +1,9 @@
-import { Plus, TerminalSquare } from 'lucide-react';
+import { Plus, RefreshCw, TerminalSquare } from 'lucide-react';
 import { useState } from 'react';
+import { api } from '../../api/client';
 import { useClis, useCreateCli, useDeleteCli, useUpdateCli } from '../../app/queries';
+import { ProbeStateLabel } from './ProbeStateLabel';
+import { probeState, probeTone } from './probe';
 import { useI18n } from '../../i18n';
 import { useToast } from '../../components/ui/Toast';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
@@ -10,10 +13,11 @@ import { Toggle } from '../../components/ui/Toggle';
 import { ActionsMenu } from '../../components/ui/Menu';
 import { CliFormSheet, type CliFormValue } from './CliFormSheet';
 import { CliExecSheet } from './CliExecSheet';
-import type { CliRecord } from '../../api/types';
+import type { CliRecord, CliStatus } from '../../api/types';
 
-function statusMeta(status: CliRecord['enabled']) {
-  return status ? { tone: 'success' as const } : { tone: 'neutral' as const };
+/** Record state, shown until a probe answers for that CLI. */
+function recordMeta(enabled: boolean) {
+  return enabled ? { tone: 'success' as const } : { tone: 'neutral' as const };
 }
 
 export function ClisPage() {
@@ -27,6 +31,25 @@ export function ClisPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CliRecord | undefined>(undefined);
   const [execTarget, setExecTarget] = useState<CliRecord | undefined>(undefined);
+  const [statuses, setStatuses] = useState<Record<string, CliStatus>>({});
+  const [checking, setChecking] = useState<string[]>([]);
+
+  // A probe executes the CLI, so it runs on request rather than on page load.
+  const check = async (cli: CliRecord): Promise<void> => {
+    setChecking((current) => [...current, cli.slug]);
+    try {
+      const status = await api.get<CliStatus>(`/cli/${encodeURIComponent(cli.slug)}/status`);
+      setStatuses((current) => ({ ...current, [cli.slug]: status }));
+    } catch (error) {
+      toast((error as Error).message, 'error');
+    } finally {
+      setChecking((current) => current.filter((slug) => slug !== cli.slug));
+    }
+  };
+
+  const checkAll = async (): Promise<void> => {
+    for (const cli of clis ?? []) await check(cli);
+  };
 
   const deletePending = (id: string) => deleteCli.isPending && deleteCli.variables?.id === id;
 
@@ -78,10 +101,20 @@ export function ClisPage() {
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-[-0.02em]">{t('nav.clis')}</h1>
-        <Button variant="primary" onClick={openCreate}>
-          <Plus className="size-4" />
-          {t('common.add')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            loading={checking.length > 0}
+            onClick={() => void checkAll()}
+          >
+            <RefreshCw className="size-4" />
+            {t('cli.checkAll')}
+          </Button>
+          <Button variant="primary" onClick={openCreate}>
+            <Plus className="size-4" />
+            {t('common.add')}
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -89,7 +122,9 @@ export function ClisPage() {
       ) : clis && clis.length > 0 ? (
         <div className="flex flex-col divide-y divide-ink-3/10">
           {clis.map((cli) => {
-            const meta = statusMeta(cli.enabled);
+            const status = statuses[cli.slug];
+            const state = probeState(status);
+            const meta = status === undefined ? recordMeta(cli.enabled) : { tone: probeTone(state) };
             const removing = deletePending(cli.id);
             return (
               <div
@@ -112,8 +147,19 @@ export function ClisPage() {
                 <Badge tone={cli.executionMode === 'docker' ? 'accent' : 'neutral'}>
                   {cli.executionMode}
                 </Badge>
-                <span className="hidden w-24 text-right text-xs text-ink-2 sm:block">
-                  {cli.enabled ? t('status.ready') : t('status.disabled')}
+                <span
+                  className="hidden w-32 text-right text-xs text-ink-2 sm:block"
+                  title={status?.version ?? undefined}
+                >
+                  {status === undefined ? (
+                    cli.enabled ? (
+                      t('cli.configured')
+                    ) : (
+                      t('status.disabled')
+                    )
+                  ) : (
+                    <ProbeStateLabel state={state} version={status.version} />
+                  )}
                 </span>
                 <Toggle
                   checked={cli.enabled}
@@ -127,6 +173,11 @@ export function ClisPage() {
                 />
                 <ActionsMenu
                   actions={[
+                    {
+                      label: t('cli.check'),
+                      disabled: checking.includes(cli.slug),
+                      onSelect: () => void check(cli),
+                    },
                     { label: t('cli.run'), onSelect: () => setExecTarget(cli) },
                     { label: t('common.edit'), onSelect: () => openEdit(cli) },
                     {

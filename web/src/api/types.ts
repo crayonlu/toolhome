@@ -89,7 +89,24 @@ export interface RuntimeState {
   serverInfo?: { name?: string; version?: string };
 }
 
-export type ServerWithRuntime = ServerRecord & { runtime: RuntimeState | null };
+export interface NodeReport {
+  serverId: string;
+  nodeId: string;
+  status: RuntimeStatus;
+  lastError: string | null;
+  probeOk: boolean | null;
+  probeDetail: string | null;
+  tools: number | null;
+  reportedAt: string;
+  /** Older than the host's TTL: shown with its age instead of as current. */
+  stale: boolean;
+}
+
+export type ServerWithRuntime = ServerRecord & {
+  runtime: RuntimeState | null;
+  /** Only ever set for a `node` server, and only by the machine running it. */
+  nodeReport?: NodeReport | null;
+};
 
 export type CredentialType = 'bearer' | 'api-key' | 'headers' | 'env' | 'oauth';
 export type CredentialStatus = 'ready' | 'pending' | 'expired' | 'invalid';

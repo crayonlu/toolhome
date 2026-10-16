@@ -164,8 +164,20 @@ changed → update transport/env/credential) instead of reported as conflicts.
 toolhome mcp launch <slug>                    # run one node-placed server (stdio)
 toolhome mcp stdio                            # front every node-placed server (stdio)
 toolhome mcp stdio --node <id>                # pick a node label (default: config, else hostname)
+toolhome node report                          # publish this machine's view of its servers
+toolhome node status [--check]                # local health of the servers placed here
 toolhome mcp stdio --tool-mode <mode>         # full (default) or compact
 ```
+
+**Node status is reported, not measured.** The host never connects to a server placed on a
+client machine, so `GET /api/v1/servers` cannot know its state; a node server's state comes from
+the machine itself. `toolhome mcp stdio` posts a report at startup and every 60 seconds, and
+`toolhome node report` does it once (useful from cron). The report carries what only that machine
+can answer: the last connection state, whether the launch command exists there, and how many
+tools the server exposes. It goes to `POST /api/v1/nodes/{nodeId}/report`, which accepts only
+servers actually placed on that label. A report older than five minutes is shown with its age
+(`stale: true`) rather than as current, and a server that has never reported shows no state at
+all instead of a misleading "unknown".
 
 `toolhome mcp launch <slug>` spawns one node-placed server with its stored credential and
 hands this process's stdio to it, preserving original tool names. `toolhome mcp stdio` fronts

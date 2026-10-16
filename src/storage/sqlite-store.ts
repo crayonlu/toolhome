@@ -50,6 +50,8 @@ import {
   type EventRecord,
   type InstallJobRecord,
   type MarketInstallation,
+  type NodeReport,
+  nodeReportSchema,
   type RuntimeState,
   type SecureActionRecord,
   type ServerProjection,
@@ -400,6 +402,18 @@ export class SqliteStore implements Store {
         last_error TEXT,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS node_reports (
+        server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+        node_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        last_error TEXT,
+        probe_ok INTEGER,
+        probe_detail TEXT,
+        tools INTEGER,
+        reported_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_node_reports_node ON node_reports(node_id);
 
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -1212,6 +1226,69 @@ export class SqliteStore implements Store {
         valid.updatedAt,
       );
     return valid;
+  }
+
+  /**
+   * The machine's own view of a server placed on it. The host never runs a node
+   * server, so this report is the only thing that can replace "unknown".
+   */
+  saveNodeReport(report: NodeReport): NodeReport {
+    const valid = nodeReportSchema.parse(report);
+    this.#db
+      .prepare(
+        `INSERT INTO node_reports
+        (server_id, node_id, status, last_error, probe_ok, probe_detail, tools, reported_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(server_id) DO UPDATE SET
+          node_id = excluded.node_id,
+          status = excluded.status,
+          last_error = excluded.last_error,
+          probe_ok = excluded.probe_ok,
+          probe_detail = excluded.probe_detail,
+          tools = excluded.tools,
+          reported_at = excluded.reported_at`,
+      )
+      .run(
+        valid.serverId,
+        valid.nodeId,
+        valid.status,
+        valid.lastError,
+        valid.probeOk === null ? null : valid.probeOk ? 1 : 0,
+        valid.probeDetail,
+        valid.tools,
+        valid.reportedAt,
+      );
+    return valid;
+  }
+
+  getNodeReport(serverId: string): NodeReport | null {
+    const row = this.#db.prepare('SELECT * FROM node_reports WHERE server_id = ?').get(serverId);
+    return row === undefined ? null : this.#parseNodeReport(row);
+  }
+
+  listNodeReports(nodeId?: string): NodeReport[] {
+    const rows =
+      nodeId === undefined
+        ? this.#db.prepare('SELECT * FROM node_reports ORDER BY reported_at DESC').all()
+        : this.#db
+            .prepare('SELECT * FROM node_reports WHERE node_id = ? ORDER BY reported_at DESC')
+            .all(nodeId);
+    return rows.map((row) => this.#parseNodeReport(row));
+  }
+
+  #parseNodeReport(row: unknown): NodeReport {
+    const value = row as Record<string, unknown>;
+    const probeOk = value.probe_ok;
+    return nodeReportSchema.parse({
+      serverId: value.server_id,
+      nodeId: value.node_id,
+      status: value.status,
+      lastError: value.last_error,
+      probeOk: probeOk === null || probeOk === undefined ? null : probeOk === 1,
+      probeDetail: value.probe_detail,
+      tools: value.tools,
+      reportedAt: value.reported_at,
+    });
   }
 
   appendEvent(event: Omit<EventRecord, 'id' | 'createdAt'>): EventRecord {

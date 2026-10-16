@@ -9,6 +9,7 @@ import type {
   CredentialRecord,
   EventRecord,
   InstallJobRecord,
+  NodeReport,
   MarketInstallation,
   RuntimeState,
   SecureActionRecord,
@@ -80,6 +81,11 @@ export interface Store {
   deleteSnapshot(serverId: string): void;
   getRuntimeState(serverId: string): RuntimeState | null;
   saveRuntimeState(state: RuntimeState): RuntimeState;
+
+  // ── What the machines running node servers report about them ─────────────
+  getNodeReport(serverId: string): NodeReport | null;
+  listNodeReports(nodeId?: string): NodeReport[];
+  saveNodeReport(report: NodeReport): NodeReport;
   appendEvent(event: Omit<EventRecord, 'id' | 'createdAt'>): EventRecord;
   listEvents(options?: {
     serverId?: string;

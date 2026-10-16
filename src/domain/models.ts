@@ -319,6 +319,40 @@ export type ApiKeyKind = z.infer<typeof apiKeyKindSchema>;
 export type ApiKeyRecord = z.infer<typeof apiKeyRecordSchema>;
 export type RuntimeState = z.infer<typeof runtimeStateSchema>;
 
+/**
+ * What the machine running a node server reports about it. The host never
+ * connects to a node server, so without this its state is permanently unknown;
+ * `probeOk` is the part only that machine can answer — whether the launch
+ * command is actually present there.
+ */
+export const nodeReportSchema = z.object({
+  serverId: z.uuid(),
+  nodeId: nodeIdSchema,
+  status: runtimeStatusSchema,
+  lastError: z.string().nullable(),
+  probeOk: z.boolean().nullable(),
+  probeDetail: z.string().nullable(),
+  tools: z.number().int().nonnegative().nullable(),
+  reportedAt: z.iso.datetime(),
+});
+export type NodeReport = z.infer<typeof nodeReportSchema>;
+
+/** One machine's report for every server it hosts. */
+export const nodeReportInputSchema = z.object({
+  servers: z
+    .array(
+      z.object({
+        slug: slugSchema,
+        status: runtimeStatusSchema,
+        error: z.string().nullable().default(null),
+        probeOk: z.boolean().nullable().default(null),
+        probeDetail: z.string().nullable().default(null),
+        tools: z.number().int().nonnegative().nullable().default(null),
+      }),
+    )
+    .max(200),
+});
+
 export interface CapabilitySnapshot {
   serverId: string;
   version: number;

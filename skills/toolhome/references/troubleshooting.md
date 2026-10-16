@@ -132,6 +132,39 @@ toolhome server refresh <server-id>
 
 **Fix**: Update to the latest version: `npm install -g toolhome@latest`.
 
+## A Node Server Shows No State in the Console
+
+**Symptom**: a server placed on a client machine (`kind: node`) always reads as unknown, while
+host-run servers show Ready.
+
+**Cause**: this is by construction, not a fault. The ToolHome host never connects to a node
+server — the machine running `toolhome mcp stdio` does — so the host has nothing of its own to
+report. Before 0.6.17 that left every node server looking identical to a broken one.
+
+**Fix**: the machine now reports what it sees. `toolhome mcp stdio` posts a report at startup and
+every 60 seconds; `toolhome node report` does it once. The console shows *"reported by
+crayons-air 2 minutes ago · 26 tools"*, and flags the launch command as missing when that machine
+does not have it. If a row says *"not reported by &lt;machine&gt; yet"*, no client has connected
+since the report channel existed — run `toolhome node report` there, or start `toolhome mcp
+stdio`. If it says *"last reported by … 3 hours ago"*, that machine stopped reporting: the state
+is kept with its age instead of being presented as current.
+
+## Hosted CLIs Look Ready but Are Not
+
+**Symptom**: the CLIs page says a CLI is ready while `toolhome cli exec <slug> -- …` fails.
+
+**Cause**: the page used the record's `enabled` flag as its status, which only says ToolHome will
+run the CLI. Whether the binary is installed and signed in is a question for the CLI's own probe,
+and that probe may never answer: the catalog's default probe is `<binary> --version`, which prints
+no `version=`/`loggedIn=` markers.
+
+**Fix**: the page now says **Configured** until a probe answers, and **Check** / **Check all**
+runs the probe on request (it executes the CLI, so it does not run on page load). The result is
+one of *Signed in*, *Not signed in*, *Not installed*, *No status reported* (the probe ran and
+printed no markers — inconclusive, not a failure), *No probe* (the record declares none), or *Not
+checked*. For an entry whose probe cannot report, declare one that does, e.g. `gh-cli` uses
+`/bin/sh -c` to print both markers.
+
 ## The MCP Client Times Out on `toolhome-local` (70s), Then Never Recovers
 
 **Symptom**: the client reports `MCP server 'toolhome-local' timed out after 70s`. The remote

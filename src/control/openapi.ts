@@ -163,6 +163,11 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   );
 
   // ── CLI registry (Form A CLI plane) ────────────────────────────────────
+  add('/api/v1/nodes/{nodeId}/report', 'post', 'reportNodeStatus', {
+    summary:
+      'Record what a client machine reports about the servers placed on it (admin); a node server cannot be measured from the host',
+    body: true,
+  });
   add('/api/v1/clis', 'get', 'listClis', { summary: 'List registered CLIs' });
   add('/api/v1/clis/{id}/state', 'get', 'exportCliState', {
     summary:

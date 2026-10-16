@@ -13,6 +13,7 @@ import { stdioTransportSchema } from '../domain/models.js';
 import { launchEnvironment, spawnStdioServer } from '../node/launch.js';
 import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js';
 import { readNodeStatus } from '../node/status.js';
+import { reportNodeStatus } from '../node/report.js';
 import { adoptCliCredentials } from './adopt.js';
 import { migrateConfiguration } from './migrate.js';
 
@@ -377,15 +378,30 @@ mcp
       if (nodeId === '') {
         throw new Error('Could not determine a node label; pass --node <id>');
       }
+      const storePath = resolve(dirname(configPath()), 'node.sqlite');
       const gateway = await startLocalGateway({
         client,
         nodeId,
-        storePath: resolve(dirname(configPath()), 'node.sqlite'),
+        storePath,
         toolMode: options.toolMode,
       });
       process.stderr.write(
         `toolhome: serving node "${nodeId}" over stdio — end the stream to stop\n`,
       );
+      // The host cannot measure a server placed on this machine, so it is told.
+      // A failed report never takes the data plane down.
+      const publish = async (): Promise<void> => {
+        try {
+          await reportNodeStatus(client, readNodeStatus({ nodeId, storePath }));
+        } catch (error) {
+          process.stderr.write(
+            `toolhome: node report failed: ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+        }
+      };
+      await publish();
+      const reporter = setInterval(() => void publish(), 60_000);
+      reporter.unref();
       // Children are killed when the client closes its side, and on signals, so a
       // session ending never orphans the servers it launched.
       const handle = serveStdio(() => gateway.serverFactory(), { legacy: 'serve' });
@@ -393,6 +409,7 @@ mcp
       const stop = async (): Promise<void> => {
         if (stopped) return;
         stopped = true;
+        clearInterval(reporter);
         // Closing waits on children, the recorder and the local mirror; bound it,
         // because a shutdown that hangs leaves a process holding node.sqlite that
         // only SIGKILL can remove — the client has already given up by then.
@@ -413,6 +430,22 @@ mcp
   );
 
 const node = program.command('node').description('Inspect MCP servers placed on this machine');
+node
+  .command('report')
+  .description('Publish this machine\'s view of its servers to the host (state, launch probe, tools)')
+  .option('--node <id>', 'node label (default: nodeId in the local config, else the hostname)')
+  .action(
+    run(async (client, options: { node?: string }) => {
+      const nodeId = options.node ?? loadLocalConfig()?.nodeId ?? (hostname().split('.')[0] || '');
+      if (nodeId === '') {
+        throw new Error('Could not determine a node label; pass --node <id>');
+      }
+      return reportNodeStatus(
+        client,
+        readNodeStatus({ nodeId, storePath: resolve(dirname(configPath()), 'node.sqlite') }),
+      );
+    }),
+  );
 node
   .command('status')
   .description('Show the local health of the servers placed on this machine')
