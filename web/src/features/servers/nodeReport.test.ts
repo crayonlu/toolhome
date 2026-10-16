@@ -2,14 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { displayStatus, nodeReportLine } from './nodeReport'
 import type { ServerWithRuntime } from '../../api/types'
 
-const base = {
+/** A complete server fixture: the server payload is parsed, not cast. */
+const base: Omit<ServerWithRuntime, 'kind' | 'nodeId'> = {
   id: 's1',
   slug: 'chrome-devtools',
   name: 'Local Chrome',
-  transport: { type: 'stdio' as const, command: 'npx', args: [] },
+  transport: { type: 'stdio', command: 'npx', args: ['chrome-devtools-mcp@1.6.0'] },
   credentialId: null,
   enabled: true,
-  settings: {},
+  settings: {
+    connectTimeoutMs: 10_000,
+    requestTimeoutMs: 30_000,
+    maxTotalTimeoutMs: 60_000,
+    maxConcurrency: 1,
+    restart: 'on-failure',
+  },
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
   runtime: null,
