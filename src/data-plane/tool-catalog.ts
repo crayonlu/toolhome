@@ -22,7 +22,7 @@ import {
 import { compactContractFingerprint } from './compact-state.js';
 import type { RegistryEntry } from './registry.js';
 import { ToolProjectionService } from './projection.js';
-import { aggregateToolName } from './virtualization.js';
+import { aggregateToolName, stripEntryPrefix } from './virtualization.js';
 
 export type { RankAlgorithm } from './compact-protocol.js';
 
@@ -216,6 +216,7 @@ export class ToolCatalog {
 
   /** Exact identity lookup against the same scope/visibility boundary as search. */
   resolve(tool: string, observed?: ObservedToolLookup): ResolvedTool {
+    const wanted = stripEntryPrefix(tool);
     const records = this.#hostedRecords();
     if (observed) {
       const hit = observed(tool);
@@ -226,7 +227,7 @@ export class ToolCatalog {
           server &&
           snapshot &&
           this.#projections.isVisible(server.id, hit.tool.name) &&
-          aggregateToolName(server.slug, hit.tool.name) === tool
+          aggregateToolName(server.slug, hit.tool.name) === wanted
         ) {
           return { entry: { server, snapshot }, tool: hit.tool };
         }
@@ -238,7 +239,7 @@ export class ToolCatalog {
       const found = snapshot.tools.find(
         (candidate) =>
           this.#projections.isVisible(server.id, candidate.name) &&
-          aggregateToolName(server.slug, candidate.name) === tool,
+          aggregateToolName(server.slug, candidate.name) === wanted,
       );
       if (found) return { entry: { server, snapshot }, tool: found };
     }
@@ -473,7 +474,7 @@ export class ToolCatalog {
   // ── describe ────────────────────────────────────────────────────────────
 
   #describe(args: SearchArgs, observed?: ObservedToolLookup): Record<string, unknown> {
-    const tool = args.tool ?? '';
+    const tool = stripEntryPrefix(args.tool ?? '');
     const resolved = this.resolve(tool, observed);
     const { entry, tool: contract } = resolved;
     const snapshot = entry.snapshot;
@@ -481,35 +482,58 @@ export class ToolCatalog {
     const app = appResourceUri(contract);
     const taskSupport = contract.execution?.taskSupport;
     const execution = this.#executionFor(entry, contract);
-    const payload: Record<string, unknown> = {
-      kind: 'definition',
-      scope: this.#scope,
-      ...(this.#scope === 'local' ? { nodeLabel: this.#nodeId } : {}),
-      tool,
-      server: entry.server.slug,
-      name: contract.name,
-      definition: compactContractFingerprint(contract, snapshot.instructions ?? undefined),
-      description: contract.description ?? '',
-      inputSchema: canonicalize(contract.inputSchema) as Tool['inputSchema'],
-      ...(annotations === null ? {} : { annotations }),
-      execution,
-      ...(execution === 'individualEndpoint'
-        ? { guidance: this.#endpointGuidance(entry.server) }
-        : {}),
-      ...(taskSupport === undefined ? {} : { taskSupport }),
-      ...(app === null ? {} : { app: { resourceUri: app } }),
-      ...(snapshot.instructions === null ? {} : { upstreamInstructions: snapshot.instructions }),
-    };
-    const bytes = resultByteLength(jsonToolResult(payload));
-    if (bytes > COMPACT_BUDGETS.describeBytes) {
-      throw definitionTooLargeError({
+    const instructions = snapshot.instructions ?? null;
+    const build = (schema: Tool['inputSchema'], upstreamInstructions: string | null) => {
+      const payload: Record<string, unknown> = {
+        kind: 'definition',
+        scope: this.#scope,
+        ...(this.#scope === 'local' ? { nodeLabel: this.#nodeId } : {}),
         tool,
         server: entry.server.slug,
-        bytes,
-        budget: COMPACT_BUDGETS.describeBytes,
-      });
+        name: contract.name,
+        definition: compactContractFingerprint(contract, upstreamInstructions ?? undefined),
+        description: contract.description ?? '',
+        inputSchema: schema,
+        ...(annotations === null ? {} : { annotations }),
+        execution,
+        ...(execution === 'individualEndpoint'
+          ? { guidance: this.#endpointGuidance(entry.server) }
+          : {}),
+        ...(taskSupport === undefined ? {} : { taskSupport }),
+        ...(app === null ? {} : { app: { resourceUri: app } }),
+        ...(upstreamInstructions === null ? {} : { upstreamInstructions }),
+      };
+      return payload;
+    };
+
+    const full = build(canonicalize(contract.inputSchema) as Tool['inputSchema'], instructions);
+    if (resultByteLength(jsonToolResult(full)) <= COMPACT_BUDGETS.describeBytes) {
+      return full;
     }
-    return payload;
+
+    // The complete definition does not fit. A dead end — an error pointing at the
+    // same budget somewhere else — hides the argument contract the caller needs,
+    // so the schema is shrunk to a faithful outline first and the upstream
+    // instructions are truncated with a marker. The fingerprint always covers the
+    // full contract, so exec still detects a stale hand-over against either form.
+    const shrunken: Record<string, unknown> = isRecord(contract.inputSchema)
+      ? shrinkSchema(contract.inputSchema)
+      : {};
+    shrunken['x-toolhome-schema'] = 'truncated';
+    const shrunkText =
+      instructions === null
+        ? null
+        : `${clampDescription(instructions, 400)}${instructions.length > 400 ? '…' : ''}`;
+    const degraded = build(shrunken as Tool['inputSchema'], shrunkText);
+    if (resultByteLength(jsonToolResult(degraded)) <= COMPACT_BUDGETS.describeBytes) {
+      return { ...degraded, upstreamInstructionsTruncated: instructions !== null };
+    }
+    throw definitionTooLargeError({
+      tool,
+      server: entry.server.slug,
+      bytes: resultByteLength(jsonToolResult(full)),
+      budget: COMPACT_BUDGETS.describeBytes,
+    });
   }
 
   // ── helpers ─────────────────────────────────────────────────────────────
@@ -796,6 +820,40 @@ function summarize(description: string | undefined): Summary {
   const points = Array.from(chosen);
   const truncated = chosen.length < normalized.length || points.length > 240;
   return { text: points.slice(0, 240).join(''), truncated };
+}
+
+/**
+ * A faithful outline of a JSON schema: every property kept with its type,
+ * description (clamped), enum and required list, but nested objects flattened to
+ * one level. Large upstream contracts (Firecrawl's `scrapeOptions` alone is
+ * 2.4 KB) collapse to roughly a third, which is what makes a definition fit the
+ * describe budget while staying truthful about the arguments.
+ */
+function shrinkSchema(node: unknown, depth = 0): Record<string, unknown> {
+  if (!isRecord(node)) return {};
+  const out: Record<string, unknown> = {};
+  if (typeof node.type === 'string') out.type = node.type;
+  if (Array.isArray(node.required)) out.required = node.required;
+  if (Array.isArray(node.enum)) out.enum = node.enum;
+  if (typeof node.description === 'string' && depth === 0) {
+    out.description = clampDescription(node.description, 200);
+  }
+  if (isRecord(node.properties) && depth < 1) {
+    out.properties = Object.fromEntries(
+      Object.entries(node.properties).map(([name, value]) => [name, shrinkSchema(value, depth + 1)]),
+    );
+  } else if (isRecord(node.properties)) {
+    out.properties = Object.fromEntries(
+      Object.keys(node.properties).map((name) => [name, { type: 'object' }]),
+    );
+  }
+  if (isRecord(node.items) && depth < 1) out.items = shrinkSchema(node.items, depth + 1);
+  return out;
+}
+
+function clampDescription(text: string, limit: number): string {
+  const points = Array.from(text);
+  return points.length <= limit ? text : `${points.slice(0, limit).join('')}…`;
 }
 
 function smallAnnotations(tool: Tool): Record<string, unknown> | null {

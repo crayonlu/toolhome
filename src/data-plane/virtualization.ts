@@ -24,6 +24,29 @@ export function splitAggregateToolName(value: string): string | null {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null;
 }
 
+/**
+ * Strip an outer entry prefix a client may have prepended to a tool name.
+ *
+ * A harness that connects to several ToolHome entries namespaces every tool with
+ * its own server label, turning `firecrawl_firecrawl-5fsearch` into
+ * `toolhome-local__firecrawl_firecrawl-5fsearch`. The inner name already starts
+ * with its upstream slug, so the outer prefix (everything up to the first `__`,
+ * also accepted with single underscores) is redundant — and unreognized, since
+ * no upstream slug contains `__`.
+ */
+export function stripEntryPrefix(tool: string): string {
+  const double = tool.indexOf('__');
+  if (double > 0) return tool.slice(double + 2);
+  // Single-underscore form: `toolhome-local_firecrawl_firecrawl-5fsearch`. Only
+  // strip when the remainder still contains a separator, so a plain
+  // `github_search` is never mangled.
+  const first = tool.indexOf('_');
+  if (first > 0 && tool.indexOf('_', first + 1) > first) {
+    return tool.slice(first + 1);
+  }
+  return tool;
+}
+
 export function aggregateName(slug: string, original: string): string {
   const candidate = `${slug}.${original}`;
   if (candidate.length <= maxNameLength) return candidate;

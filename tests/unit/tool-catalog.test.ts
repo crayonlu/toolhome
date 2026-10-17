@@ -395,18 +395,24 @@ describe('compact describe and resolve', () => {
     expect((payload.nextStep as { action: string }).action).toBe('use_full');
   });
 
-  it('provides oversized guidance when required upstream instructions exceed the budget', () => {
+  it('truncates oversized upstream instructions and marks them, keeping the contract', () => {
     const { catalog, fixture, store } = setup();
     const snapshot = store.getSnapshot(fixture.bySlug.deepwiki!.id)!;
-    store.saveSnapshot({
-      ...snapshot,
-      instructions: 'Required upstream constraints. '.repeat(1000),
-    });
+    const oversized = 'Required upstream constraints. '.repeat(1000);
+    store.saveSnapshot({ ...snapshot, instructions: oversized });
     const result = catalog.search({ action: 'describe', tool: toolId('deepwiki', 'ask_question') });
-    const payload = expectError(result);
-    expect(payload.code).toBe('definition_too_large');
-    expect((payload.nextStep as { action: string }).action).toBe('use_full');
-    expect(resultByteLength(result)).toBeLessThanOrEqual(COMPACT_BUDGETS.errorBytes);
+    // The argument contract is the part the caller cannot discover elsewhere, so
+    // it stays complete; the instructions are cut with a marker instead of
+    // failing the whole describe.
+    expect(result.isError).toBeUndefined();
+    const payload = data(result);
+    expect(payload.kind).toBe('definition');
+    expect(payload.upstreamInstructionsTruncated).toBe(true);
+    expect(String(payload.upstreamInstructions).endsWith('…')).toBe(true);
+    expect(String(payload.upstreamInstructions).length).toBeLessThan(oversized.length);
+    expect(resultByteLength(result)).toBeLessThanOrEqual(COMPACT_BUDGETS.describeBytes);
+    // The fingerprint covers the full contract, so exec's stale check is intact.
+    expect(typeof payload.definition).toBe('string');
   });
 
   it('resolves exact encoded identities and throws for unknown ones', () => {
@@ -536,5 +542,210 @@ describe('compact fingerprint, App boundary and BM25', () => {
       if (rank >= 0 && rank < 5) hits += 1;
     }
     expect(hits / targeted.length).toBeGreaterThanOrEqual(0.9);
+  });
+});
+
+
+/** Mirrors the fixture's server settings; the fixture keeps its copy private. */
+const settings = {
+  connectTimeoutMs: 15_000,
+  requestTimeoutMs: 60_000,
+  maxTotalTimeoutMs: 600_000,
+  maxConcurrency: 1,
+  restart: 'on-failure' as const,
+};
+
+describe('compact describe degradation and entry prefixes', () => {
+  /** An upstream contract too large for the describe budget even bare. */
+  const hugeSchema = (): Tool['inputSchema'] => ({
+    type: 'object',
+    properties: Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [
+        `option${index}`,
+        {
+          type: 'object',
+          description: `Tunable option block ${index}: controls a distinct behaviour of the search.`,
+          properties: Object.fromEntries(
+            Array.from({ length: 10 }, (_, inner) => [
+              `field${inner}`,
+              {
+                type: 'string',
+                description:
+                  `Field ${inner} accepts a documented value; see the upstream reference for the full list of accepted forms and their interaction with other blocks. `.repeat(2),
+              },
+            ]),
+          ),
+        },
+      ]),
+    ),
+    required: ['option0'],
+  });
+
+  function setupOversized(): ReturnType<typeof setup> {
+    const context = setup();
+    const server = context.store.createServer({
+      slug: 'bigtool',
+      name: 'Big Tool',
+      kind: 'remote',
+      nodeId: null,
+      transport: {
+        type: 'streamable-http',
+        url: 'https://bigtool.example.test/mcp',
+        protocolMode: 'modern',
+        allowSseFallback: false,
+        headers: {},
+      },
+      credentialId: null,
+      enabled: true,
+      settings,
+    });
+    const tools: Tool[] = [
+      {
+        name: 'mega_search',
+        description:
+          'Search across everything with dozens of tunable option blocks, each documented in depth upstream.',
+        inputSchema: hugeSchema(),
+      },
+    ];
+    context.store.saveSnapshot({
+      serverId: server.id,
+      version: 1,
+      protocolVersion: '2026-07-28',
+      protocolEra: 'modern',
+      serverInfo: { name: 'bigtool', version: '1.0.0' },
+      capabilities: { tools: { listChanged: false } },
+      instructions: 'Upstream usage notes. '.repeat(60),
+      tools,
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+      listResults: {
+        tools: { tools },
+        resources: { resources: [] },
+        resourceTemplates: { resourceTemplates: [] },
+        prompts: { prompts: [] },
+      },
+      fingerprint: 'fixture-bigtool-v1',
+      refreshedAt: '2026-10-02T10:00:00.000Z',
+    });
+    return context;
+  }
+
+  it('returns a shrunken definition instead of a dead end when the full one is oversized', () => {
+    const { catalog } = setupOversized();
+    const result = catalog.search({ action: 'describe', tool: 'bigtool_mega-5fsearch' });
+    const payload = data(result);
+    if (result.isError) console.log('DBG:', JSON.stringify(payload.details));
+
+    // The complete payload was over budget: 40 blocks x 8 fields of prose.
+    expect(resultByteLength(result)).toBeLessThanOrEqual(COMPACT_BUDGETS.describeBytes);
+    expect(payload.kind).toBe('definition');
+    expect((payload.inputSchema as Record<string, unknown>)['x-toolhome-schema']).toBe('truncated');
+    // Every top-level argument survives the shrink, with its type and required list.
+    const schema = payload.inputSchema as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(schema.properties)).toHaveLength(12);
+    expect(schema.required).toEqual(['option0']);
+    // The instructions are truncated with a marker, never silently dropped.
+    expect(payload.upstreamInstructionsTruncated).toBe(true);
+    expect(String(payload.upstreamInstructions).endsWith('…')).toBe(true);
+    // The fingerprint still covers the full contract, so exec's stale check works.
+    expect(typeof payload.definition).toBe('string');
+  });
+
+  it('still reports oversized when even the shrunken form cannot fit', () => {
+    // A schema whose top level alone exceeds the budget: 200 required blocks.
+    const { catalog, store } = setup();
+    const server = store.createServer({
+      slug: 'huge',
+      name: 'Huge',
+      kind: 'remote',
+      nodeId: null,
+      transport: {
+        type: 'streamable-http',
+        url: 'https://huge.example.test/mcp',
+        protocolMode: 'modern',
+        allowSseFallback: false,
+        headers: {},
+      },
+      credentialId: null,
+      enabled: true,
+      settings,
+    });
+    const tools: Tool[] = [
+      {
+        name: 'everything',
+        description: 'All of it.',
+        inputSchema: {
+          type: 'object',
+          properties: Object.fromEntries(
+            Array.from({ length: 250 }, (_, index) => [
+              `field${index}`,
+              {
+                type: 'object',
+                description: `Block ${index}: `.padEnd(120, 'x'),
+                properties: Object.fromEntries(
+                  Array.from({ length: 10 }, (_, inner) => [
+                    `f${inner}`,
+                    { type: 'string', description: `Field ${inner} docs `.repeat(4) },
+                  ]),
+                ),
+              },
+            ]),
+          ),
+          required: Array.from({ length: 250 }, (_, index) => `field${index}`),
+        },
+      },
+    ];
+    store.saveSnapshot({
+      serverId: server.id,
+      version: 1,
+      protocolVersion: '2026-07-28',
+      protocolEra: 'modern',
+      serverInfo: { name: 'huge', version: '1.0.0' },
+      capabilities: { tools: { listChanged: false } },
+      instructions: null,
+      tools,
+      resources: [],
+      resourceTemplates: [],
+      prompts: [],
+      listResults: {
+        tools: { tools },
+        resources: { resources: [] },
+        resourceTemplates: { resourceTemplates: [] },
+        prompts: { prompts: [] },
+      },
+      fingerprint: 'fixture-huge-v1',
+      refreshedAt: '2026-10-02T10:00:00.000Z',
+    });
+    const result = catalog.search({ action: 'describe', tool: 'huge_everything' });
+    const payload = expectError(result);
+    expect(payload.code).toBe('definition_too_large');
+    expect((payload.nextStep as { action: string }).action).toBe('use_full');
+  });
+
+  it('accepts a name a multi-entry client prefixed with its own label', () => {
+    const { catalog } = setupOversized();
+    for (const name of [
+      'bigtool_mega-5fsearch',
+      'toolhome-local__bigtool_mega-5fsearch',
+      'toolhome__bigtool_mega-5fsearch',
+    ]) {
+      const payload = data(catalog.search({ action: 'describe', tool: name }));
+      expect(payload.name).toBe('mega_search');
+      expect(payload.server).toBe('bigtool');
+    }
+    // A plain name is never mangled by the same tolerance.
+    expect(data(catalog.search({ action: 'describe', tool: toolId('github', 'create_issue') })).server).toBe(
+      'github',
+    );
+  });
+
+  it('executes through the prefixed name', async () => {
+    const { catalog } = setupOversized();
+    // resolve is what tools/call uses; a prefixed id resolves to the same tool.
+    const direct = catalog.resolve('bigtool_mega-5fsearch');
+    const prefixed = catalog.resolve('toolhome-local__bigtool_mega-5fsearch');
+    expect(prefixed.tool.name).toBe(direct.tool.name);
+    expect(prefixed.entry.server.slug).toBe(direct.entry.server.slug);
   });
 });

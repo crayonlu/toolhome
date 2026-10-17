@@ -4,6 +4,7 @@ import {
   aggregateName,
   aggregateToolName,
   splitAggregateToolName,
+  stripEntryPrefix,
   expandVirtualResourceTemplate,
   parseVirtualResourceTemplate,
   parseVirtualResourceUri,
@@ -118,5 +119,30 @@ describe('aggregate virtualization', () => {
         content: [{ uri: virtualResourceUri('remote', 'fixture://data') }],
       },
     });
+  });
+});
+
+describe('stripEntryPrefix', () => {
+  it('strips a harness entry prefix in both separators', () => {
+    expect(stripEntryPrefix('toolhome-local__firecrawl_firecrawl-5fsearch')).toBe(
+      'firecrawl_firecrawl-5fsearch',
+    );
+    expect(stripEntryPrefix('toolhome-local_firecrawl_firecrawl-5fsearch')).toBe(
+      'firecrawl_firecrawl-5fsearch',
+    );
+    expect(stripEntryPrefix('toolhome__github_search')).toBe('github_search');
+  });
+
+  it('never touches a plain aggregate name', () => {
+    // `github_search` has one separator: stripping would mangle it.
+    expect(stripEntryPrefix('github_search')).toBe('github_search');
+    expect(stripEntryPrefix('chrome-devtools_take-5fscreenshot')).toBe(
+      'chrome-devtools_take-5fscreenshot',
+    );
+  });
+
+  it('preserves the compact discovery names', () => {
+    expect(stripEntryPrefix('search')).toBe('search');
+    expect(stripEntryPrefix('exec')).toBe('exec');
   });
 });
