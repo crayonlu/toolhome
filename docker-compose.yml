@@ -19,6 +19,10 @@ services:
       TOOLHOME_MCP_TOOL_MODE: ${TOOLHOME_MCP_TOOL_MODE:-full}
       TOOLHOME_UV_INDEX_URL: ${TOOLHOME_UV_INDEX_URL:-}
       TOOLHOME_CALLS_RETENTION_DAYS: ${TOOLHOME_CALLS_RETENTION_DAYS:-30}
+      # Node's fetch tries an upstream's IPv6 address first and fails the whole
+      # request when the host has no IPv6 route (Notion published an AAAA that
+      # answers ECONNREFUSED/ETIMEDOUT from dual-stack-less hosts). Prefer IPv4.
+      NODE_OPTIONS: ${NODE_OPTIONS:---dns-result-order=ipv4first}
     volumes:
       - toolhome-data:/data
       # docker-kind Market entries (e.g. markitdown) spawn sibling containers

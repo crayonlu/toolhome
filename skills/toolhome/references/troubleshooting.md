@@ -265,3 +265,26 @@ refresh grant sends no `redirect_uri`), but a new authorization needs a new regi
 **Cause**: ToolHome `compact` was stacked behind an upstream that already performs its own search/exec or Code Mode, hiding its real tools behind a second discovery layer.
 
 **Fix**: Keep one discovery layer. Use ToolHome `full`/per-server endpoints, or configure the upstream to expose its full tool list. For Cloudflare API MCP, opt out yourself with its documented `?codemode=false` URL; ToolHome never rewrites upstream URLs or query parameters.
+
+## Version Negotiation Probe Failed: `fetch failed` on a Remote Server
+
+**Symptom**: a remote upstream (observed with Notion: `mcp.notion.com`) reports
+`Version negotiation probe failed: fetch failed` and the server shows `unreachable`, while the
+same URL answers from the host with `curl` (a 401 is fine — that is the auth challenge).
+
+**Cause**: the upstream publishes an **AAAA record**, and Node's `fetch` tries the IPv6 address
+first. On a host with no IPv6 route the connection fails (`ECONNREFUSED` from a dual-stack-less
+edge, or `ETIMEDOUT`), and `fetch` reports the whole request as failed without trying the working
+IPv4 address. Confirmed from inside the deployed container: `fetch` fails while
+`curl -4` to the same URL answers in under a second.
+
+**Fix**: the image sets `NODE_OPTIONS=--dns-result-order=ipv4first`, so upstreams with AAAA
+records resolve over IPv4. If you override `NODE_OPTIONS`, add
+`--dns-result-order=ipv4first` yourself. To confirm the diagnosis on your host:
+
+```bash
+docker exec toolhome node -e "fetch('https://mcp.notion.com/mcp',{method:'POST'}).then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code ?? e.message))"
+# ECONNREFUSED / ETIMEDOUT before the fix; 401 after it
+```
+
+The 401 is expected without credentials — it proves the connection now works.
