@@ -6,6 +6,7 @@ import {
   COMPACT_BUDGETS,
   CompactError,
   DEFAULT_RANK_ALGORITHM,
+  EXEC_TOOL_NAME,
   appResourceUri,
   compactErrorResult,
   definitionTooLargeError,
@@ -446,6 +447,7 @@ export class ToolCatalog {
       ...(summary.truncated ? { summaryTruncated: true } : {}),
       matchedOn: candidate.matchedOn,
       execution,
+      ...(this.#invocationFor(execution) ?? {}),
       ...(execution === 'individualEndpoint'
         ? { guidance: this.#endpointGuidance(candidate.entry.server) }
         : {}),
@@ -496,6 +498,7 @@ export class ToolCatalog {
         inputSchema: schema,
         ...(annotations === null ? {} : { annotations }),
         execution,
+        ...(this.#invocationFor(execution) ?? {}),
         ...(execution === 'individualEndpoint'
           ? { guidance: this.#endpointGuidance(entry.server) }
           : {}),
@@ -563,6 +566,19 @@ export class ToolCatalog {
     return this.#scope === 'local'
       ? `Use toolhome mcp launch ${server.slug} on this machine.`
       : `Use /mcp/${server.slug}.`;
+  }
+
+  /**
+   * How to invoke this tool from the agent's side. Every catalog identifier is
+   * executed through the aggregate endpoint's `exec` tool; without this hint a
+   * client can reasonably assume the identifier is itself a callable tool name.
+   */
+  #invocationFor(execution: 'exec' | 'individualEndpoint'): Record<string, unknown> | undefined {
+    if (execution !== 'exec') return undefined;
+    return {
+      via: EXEC_TOOL_NAME,
+      call: 'tools/call on this endpoint with name="exec", arguments={ tool: <this identifier>, arguments: <per inputSchema> }',
+    };
   }
 
   #catalogVersion(): string {

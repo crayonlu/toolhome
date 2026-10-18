@@ -47,6 +47,7 @@ export type CompactNextStepAction =
   | 'refresh_catalog'
   | 'use_full'
   | 'use_individual'
+  | 'exec_tool'
   | 'check_status'
   | 'request_approval'
   | 'fix_arguments';
@@ -93,7 +94,12 @@ function defaultNextStep(code: CompactErrorCode): CompactNextStep {
     case 'unknown_server':
       return { action: 'retry_search', arguments: { action: 'servers' } };
     case 'unknown_tool':
-      return { action: 'retry_search', arguments: { action: 'find' } };
+      return {
+        action: 'retry_search',
+        arguments: { action: 'find', query: '<task keywords>' },
+        guidance:
+          'The identifier is not a callable tool name on this endpoint. Call search (action=find) with a task query to discover tools, then execute the returned identifier with exec.',
+      };
     case 'invalid_cursor':
       return { action: 'retry_search', arguments: { action: 'servers' } };
     case 'catalog_unavailable':
@@ -182,6 +188,28 @@ export function unknownServerError(server: string): CompactError {
 export function unknownToolError(tool: string): CompactError {
   // Never leak whether a hidden/disabled/foreign tool exists.
   return new CompactError('unknown_tool', `Unknown tool: ${tool}`, { details: { tool } });
+}
+
+/**
+ * The caller passed a discovery identifier as if it were a tool name. When the
+ * identifier actually resolves in the catalog, the mechanical fix is one exec:
+ * emit a nextStep the client can replay verbatim. Emits nothing for identifiers
+ * we cannot resolve (the generic unknown_tool nextStep applies).
+ */
+export function resolvableIdentifierError(tool: string, catalogId: string): CompactError {
+  return new CompactError(
+    'unknown_tool',
+    `"${tool}" is a compact-catalog identifier, not a tool name on this endpoint. Call the exec tool with {"tool": "${catalogId}", "arguments": ...} instead.`,
+    {
+      details: { tool, catalogIdentifier: catalogId },
+      nextStep: {
+        action: 'exec_tool',
+        arguments: { tool: catalogId, arguments: {} },
+        guidance:
+          'Call tools/call with name="exec" and these arguments; fill `arguments` per the inputSchema from search (action=describe).',
+      },
+    },
+  );
 }
 
 export function invalidCursorError(): CompactError {

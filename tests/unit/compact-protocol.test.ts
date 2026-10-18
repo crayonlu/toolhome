@@ -17,6 +17,7 @@ import {
   jsonToolResult,
   parseExecArgs,
   parseSearchArgs,
+  resolvableIdentifierError,
   resultByteLength,
   unknownToolError,
 } from '../../src/data-plane/compact-protocol.js';
@@ -129,9 +130,28 @@ describe('CompactError', () => {
       code: 'unknown_tool',
       source: 'gateway',
       callEffect: 'not_started',
-      nextStep: { action: 'retry_search' },
+      nextStep: {
+        action: 'retry_search',
+        arguments: { action: 'find', query: '<task keywords>' },
+      },
     });
     expect(data.details).toEqual({ tool: 'deepwiki_missing' });
+  });
+
+  it('emits a mechanical exec nextStep for resolvable catalog identifiers', () => {
+    const error = resolvableIdentifierError('tavily_tavily-5fsearch', 'tavily_tavily-5fsearch');
+    const data = error.toData();
+    expect(data).toMatchObject({
+      kind: 'error',
+      code: 'unknown_tool',
+      callEffect: 'not_started',
+      nextStep: {
+        action: 'exec_tool',
+        arguments: { tool: 'tavily_tavily-5fsearch', arguments: {} },
+      },
+      details: { tool: 'tavily_tavily-5fsearch', catalogIdentifier: 'tavily_tavily-5fsearch' },
+    });
+    expect(data.message).toContain('exec tool');
   });
 
   it('classifies submitted/continuation failures as may_have_run', () => {

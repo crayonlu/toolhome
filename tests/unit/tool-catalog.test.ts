@@ -488,6 +488,16 @@ describe('compact fingerprint, App boundary and BM25', () => {
     );
     expect(plain.execution).toBe('exec');
     expect(plain.guidance).toBeUndefined();
+    // Exec-boundary tools carry an invocation hint so a client knows the
+    // identifier is executed through the aggregate `exec` tool.
+    expect(plain.via).toBe('exec');
+    expect(String(plain.call)).toContain('name="exec"');
+
+    const foundPlain = matches(
+      catalog.search({ action: 'find', query: 'search code on github' }),
+    ).find((match) => match.tool === toolId('github', 'search_code'))!;
+    expect(foundPlain.via).toBe('exec');
+    expect(foundPlain.execution).toBe('exec');
   });
 
   it('bounds catalog error results inside the error budget', () => {

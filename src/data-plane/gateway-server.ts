@@ -41,6 +41,7 @@ import {
   compactTools,
   parseExecArgs,
   executionBoundaryForTool,
+  resolvableIdentifierError,
 } from './compact-protocol.js';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
@@ -190,22 +191,27 @@ export class GatewayServerFactory {
 
   aggregate(): Server {
     const aggregate = this.#registry.aggregate();
+    const compact = this.#options.toolMode === 'compact';
     const server = new Server(
       { name: 'toolhome', version: '0.1.0', title: 'ToolHome' },
       {
-        capabilities:
-          this.#options.toolMode === 'compact'
-            ? { ...aggregate.capabilities, tools: { listChanged: true } }
-            : aggregate.capabilities,
-        instructions:
-          'ToolHome aggregates enabled servers. Tools use server_slug_encodedToolName; prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
+        capabilities: compact
+          ? { ...aggregate.capabilities, tools: { listChanged: true } }
+          : aggregate.capabilities,
+        instructions: compact
+          ? // Compact mode: the tools/list surface is only search/exec, so the
+            // instructions must teach the two-step flow instead of the full-mode
+            // "tools use server_slug_encodedToolName" naming, which would steer
+            // agents into calling catalog identifiers directly.
+            'ToolHome aggregates enabled servers in compact mode. tools/list exposes only `search` and `exec`. Discover tools by calling `search` (action=servers | find | describe), then execute the returned identifier by calling `exec` with { tool: <identifier>, arguments: <per its inputSchema> }. Never call a discovery identifier as if it were a tool name on this endpoint. Use an individual /mcp/{server_slug} endpoint only for exact upstream names and extension semantics.'
+          : 'ToolHome aggregates enabled servers. Tools use server_slug_encodedToolName; prompts use server_slug.name. Resources use toolhome:// virtual URIs. Use an individual /mcp/{server_slug} endpoint for exact upstream names and extension semantics.',
         requestState: { verify: this.#stateCodec.verify },
         inputRequired: { legacyShim: true },
       },
     );
     this.#aggregateServers.add(server);
 
-    if (this.#options.toolMode === 'compact') {
+    if (compact) {
       this.#installCompactTools(server);
     } else if (aggregate.capabilities.tools) {
       server.setRequestHandler('tools/list', async (request, context) => {
@@ -844,10 +850,28 @@ export class GatewayServerFactory {
           });
           return result;
         }
-        if (request.name !== 'exec')
+        if (request.name !== 'exec') {
+          // A likely cause is the caller invoking a discovery identifier as if
+          // it were a tool name. When the identifier resolves in the catalog,
+          // answer with a mechanical exec nextStep instead of a generic refusal.
+          try {
+            this.#catalog().resolve(request.name);
+            return compactErrorResult(resolvableIdentifierError(request.name, request.name));
+          } catch {
+            // Not a catalog identifier either; the generic guidance applies.
+          }
           return compactErrorResult(
-            new CompactError('unknown_tool', 'Use search or exec in compact mode.'),
+            new CompactError('unknown_tool', 'Use search or exec in compact mode.', {
+              details: { tool: request.name },
+              nextStep: {
+                action: 'retry_search',
+                arguments: { action: 'find', query: '<task keywords>' },
+                guidance:
+                  'Discover tools with search (action=find), then execute the returned identifier with exec.',
+              },
+            }),
           );
+        }
         return this.#compactExec(server, request, context);
       },
     );
