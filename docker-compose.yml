@@ -22,7 +22,7 @@ services:
       # Node's fetch tries an upstream's IPv6 address first and fails the whole
       # request when the host has no IPv6 route (Notion published an AAAA that
       # answers ECONNREFUSED/ETIMEDOUT from dual-stack-less hosts). Prefer IPv4.
-      NODE_OPTIONS: ${NODE_OPTIONS:---dns-result-order=ipv4first --no-network-family-autoselection}
+      NODE_OPTIONS: ${NODE_OPTIONS:---dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000}
     volumes:
       - toolhome-data:/data
       # docker-kind Market entries (e.g. markitdown) spawn sibling containers

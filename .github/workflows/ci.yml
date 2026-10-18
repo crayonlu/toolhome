@@ -108,10 +108,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download app image
-        uses: actions/download-artifact@v4
-        with:
-          name: toolhome-app-image
       - name: Build GitHub CLI image
         run: |
           cat > /tmp/gh.Dockerfile <<'EOF'
@@ -130,14 +126,19 @@ jobs:
           EOF
           docker build -f /tmp/gh.Dockerfile -t toolhome/gh-cli:2.97.0 /tmp
           docker save toolhome/gh-cli:2.97.0 | gzip > gh-cli-image.tar.gz
-      - name: Ship gh image to server
+      # The app image is built on the server instead of being shipped: it is
+      # ~1.4 GB, and only dist/, web/dist/ and the manifest change per deploy, so
+      # the npm/apk/uv layers stay cached there and a few MB cross the network.
+      - name: Ship build context and gh image
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
-          source: 'gh-cli-image.tar.gz,toolhome-app-image.tar.gz'
-          target: '/tmp/'
+          source: 'gh-cli-image.tar.gz,dist/**,web/dist/**,package.json,package-lock.json,Dockerfile'
+          target: '/opt/mcp-home/build/'
+          strip_components: 0
+          overwrite: true
       - name: Deploy to Aliyun
         uses: appleboy/ssh-action@v1
         with:
@@ -166,14 +167,18 @@ jobs:
             fi
             grep -q '^TOOLHOME_MASTER_KEY=' .env
             grep -q 'TOOLHOME_MASTER_KEY' docker-compose.yml
-            if [ -f /tmp/gh-cli-image.tar.gz ]; then
-              docker load -i /tmp/gh-cli-image.tar.gz
-              rm -f /tmp/gh-cli-image.tar.gz
+            if [ -f build/gh-cli-image.tar.gz ]; then
+              docker load -i build/gh-cli-image.tar.gz
+              rm -f build/gh-cli-image.tar.gz
             fi
-            if [ -f /tmp/toolhome-app-image.tar.gz ]; then
-              docker load -i /tmp/toolhome-app-image.tar.gz
-              rm -f /tmp/toolhome-app-image.tar.gz
-            fi
+            # Cached layers: npm/apk/uv are keyed on package-lock.json and the
+            # Dockerfile, so a normal deploy only re-copies dist and web-dist.
+            # .build-env may point the mirrors at a local CDN on slow networks.
+            if [ -f .build-env ]; then set -a; . ./.build-env; set +a; fi
+            docker build \
+              --build-arg "APK_MIRROR=${BUILD_APK_MIRROR:-dl-cdn.alpinelinux.org}" \
+              --build-arg "NPM_REGISTRY=${BUILD_NPM_REGISTRY:-https://registry.npmjs.org}" \
+              -t ghcr.io/crayonlu/toolhome:latest build
             docker image inspect ghcr.io/crayonlu/toolhome:latest >/dev/null
             docker compose up -d
             docker image prune -f

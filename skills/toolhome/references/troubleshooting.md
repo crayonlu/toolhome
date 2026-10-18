@@ -279,11 +279,13 @@ IPv4 address. Confirmed from inside the deployed container: `fetch` fails while
 `curl -4` to the same URL answers in under a second.
 
 **Fix**: the image sets
-`NODE_OPTIONS="--dns-result-order=ipv4first --no-network-family-autoselection"`. The second flag
-matters as much as the first: with happy-eyeballs left on, a quick IPv6 failure can abort the
-whole connection before the working IPv4 attempt finishes — the symptom is `ETIMEDOUT` in roughly
-half a second, from a fresh process, for a host that `curl` reaches fine. If you override
-`NODE_OPTIONS`, keep both flags. To confirm the diagnosis on your host:
+`NODE_OPTIONS="--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000"`.
+Ordering alone is not enough: with the default 250 ms attempt budget, a quick IPv6 failure can
+abort the whole connection before the working IPv4 attempt finishes — the symptom is `ETIMEDOUT`
+in roughly half a second, from a fresh process, for a host that `curl` reaches fine. Disabling
+autoselection also "fixes" that, but breaks upstreams with several A records where the first one
+refuses (Notion has one). Keep both flags if you override `NODE_OPTIONS`. To confirm the diagnosis
+on your host:
 
 ```bash
 docker exec toolhome node -e "fetch('https://mcp.notion.com/mcp',{method:'POST'}).then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code ?? e.message))"
