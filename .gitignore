@@ -1,4 +1,5 @@
 .vibe/
+.workbuddy-ai/
 node_modules/
 dist/
 coverage/
