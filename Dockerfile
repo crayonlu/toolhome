@@ -14,7 +14,7 @@ ENV NODE_ENV=production
 # Node's fetch tries an upstream's IPv6 address first and fails the whole request
 # when the host has no IPv6 route (e.g. Notion's AAAA answering ECONNREFUSED).
 # Override with -e NODE_OPTIONS=… if the deployment network is IPv6-native.
-ENV NODE_OPTIONS=--dns-result-order=ipv4first
+ENV NODE_OPTIONS="--dns-result-order=ipv4first --no-network-family-autoselection"
 ENV TOOLHOME_HOST=0.0.0.0
 ENV TOOLHOME_PORT=3344
 ENV TOOLHOME_DATA_DIR=/data

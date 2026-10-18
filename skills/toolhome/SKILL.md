@@ -339,7 +339,7 @@ toolhome events --limit 100 # recent events, including cli.exec
 | `TOOLHOME_OAUTH_URL_CLIENT_ID`    | Global OAuth client registration                   | `true` (URL-based)             |
 | `TOOLHOME_UV_INDEX_URL`           | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
 | `TOOLHOME_CALLS_RETENTION_DAYS`   | Tool call record retention in days (metadata only) | `30`                           |
-| `NODE_OPTIONS`                    | Baked into the image as `--dns-result-order=ipv4first` so upstreams with AAAA records (Notion) resolve over IPv4 on hosts without IPv6 | image default |
+| `NODE_OPTIONS`                    | Baked into the image as `--dns-result-order=ipv4first --no-network-family-autoselection` so upstreams with AAAA records (Notion, Penpot) resolve over IPv4 on hosts without IPv6 | image default |
 | `TOOLHOME_MCP_TOOL_MODE`          | Aggregate `/mcp` exposure: `full` or `compact`     | `full`                         |
 
 ## Deep Dives
