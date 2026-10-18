@@ -175,6 +175,42 @@ describe('compact HTTP gateway', () => {
     }
   });
 
+  it('answers a direct catalog-identifier call with a mechanical exec nextStep', async () => {
+    const env = await setup();
+    try {
+      const id = aggregateToolName('math', 'add_value');
+      const result = payload(
+        await env.client.client.callTool({ name: id, arguments: {} }),
+      );
+      expect(result.code).toBe('unknown_tool');
+      expect(result.callEffect).toBe('not_started');
+      expect(result.nextStep).toMatchObject({
+        action: 'exec_tool',
+        arguments: { tool: id },
+      });
+      expect(result.details).toMatchObject({ tool: id, catalogIdentifier: id });
+    } finally {
+      await env.close();
+    }
+  });
+
+  it('answers a direct non-catalog call with the generic retry_search nextStep', async () => {
+    const env = await setup();
+    try {
+      const result = payload(
+        await env.client.client.callTool({ name: 'totally_unknown', arguments: {} }),
+      );
+      expect(result.code).toBe('unknown_tool');
+      expect(result.message).toBe('Use search or exec in compact mode.');
+      expect(result.nextStep).toMatchObject({
+        action: 'retry_search',
+        arguments: { action: 'find', query: '<task keywords>' },
+      });
+    } finally {
+      await env.close();
+    }
+  });
+
   it('discovers without upstream I/O, validates and calls only the selected tool with pinned headers', async () => {
     const env = await setup();
     try {
