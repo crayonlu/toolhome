@@ -1,11 +1,11 @@
 {
   "name": "toolhome",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Self-hosted home for remote-native and home-hosted MCP servers and CLIs.",
   "type": "module",
   "bin": {
-    "toolhome": "./dist/server/cli/main.js",
-    "mcp-home": "./dist/server/cli/main.js"
+    "toolhome": "dist/server/cli/main.js",
+    "mcp-home": "dist/server/cli/main.js"
   },
   "files": [
     "dist",
