@@ -245,19 +245,16 @@ function CallsPanel() {
                     {call.endpointType === 'cli' ? (
                       <span className="mr-2 text-ink-3">CLI</span>
                     ) : null}
-                    {call.upstreamToolName}
-                    {call.endpointType === 'aggregate' &&
-                      call.exposedToolName !== call.upstreamToolName && (
-                        <span className="ml-2 text-ink-3">{call.exposedToolName}</span>
-                      )}
+                    {(() => {
+                      const [target, tool] = reportIdentity(servers ?? [], call);
+                      return `${target} / ${tool}`;
+                    })()}
+                    {showExposedName(call) && (
+                      <span className="ml-2 text-ink-3">{call.exposedToolName}</span>
+                    )}
                   </span>
                   <span className="truncate text-xs text-ink-3">
-                    {call.serverId
-                      ? serverSlug(servers ?? [], call.serverId)
-                      : call.endpointType === 'cli'
-                        ? call.exposedToolName
-                        : '—'}{' '}
-                    · {new Date(call.startedAt).toLocaleString(locale)} · {call.durationMs}ms
+                    {new Date(call.startedAt).toLocaleString(locale)} · {call.durationMs}ms
                   </span>
                 </div>
               </div>
@@ -271,4 +268,42 @@ function CallsPanel() {
 
 function serverSlug(servers: { id: string; slug: string }[], id: string): string {
   return servers.find((server) => server.id === id)?.slug ?? id.slice(0, 8);
+}
+
+/**
+ * The identity of a call as one line: the thing that was targeted and the tool
+ * that actually ran.
+ *
+ * Compact endpoints expose every upstream tool as `exec`, so a row led by the
+ * exposed name says "exec" for everything and hides the only useful part. The
+ * upstream name leads instead, with the caller it belongs to — the server slug
+ * for MCP, the CLI slug for hosted commands.
+ */
+function reportIdentity(
+  servers: { id: string; slug: string }[],
+  call: { endpointType: string; serverId: string | null; exposedToolName: string; upstreamToolName: string },
+): string[] {
+  if (call.endpointType === 'cli') {
+    return [call.exposedToolName, call.upstreamToolName];
+  }
+  return [
+    call.serverId === null ? '—' : serverSlug(servers, call.serverId),
+    call.upstreamToolName,
+  ];
+}
+
+/** Compact wrappers add no information next to the tool they ran. */
+const discoveryWrappers = new Set(['exec', 'search']);
+
+function showExposedName(call: {
+  endpointType: string;
+  exposedToolName: string;
+  upstreamToolName: string;
+}): boolean {
+  // A CLI's exposed name is its slug, which the identity line already leads with.
+  return (
+    call.endpointType === 'aggregate' &&
+    call.exposedToolName !== call.upstreamToolName &&
+    !discoveryWrappers.has(call.exposedToolName)
+  );
 }
