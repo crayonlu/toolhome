@@ -39,7 +39,13 @@ async function startOAuthUpstream(): Promise<{ url: URL; close(): Promise<void> 
     }
     if (request.url === '/.well-known/oauth-protected-resource/mcp') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }));
+      response.end(
+        JSON.stringify({
+          resource: `${origin}/mcp`,
+          authorization_servers: [origin],
+          scopes_supported: ['read', 'write'],
+        }),
+      );
       return;
     }
     if (request.url === '/.well-known/oauth-authorization-server') {
@@ -53,6 +59,7 @@ async function startOAuthUpstream(): Promise<{ url: URL; close(): Promise<void> 
           response_types_supported: ['code'],
           grant_types_supported: ['authorization_code', 'refresh_token'],
           code_challenge_methods_supported: ['S256'],
+          scopes_supported: ['read', 'write', 'legacy:bind'],
         }),
       );
       return;
@@ -163,6 +170,12 @@ describe('upstream OAuth authorization preflight', () => {
       expect(typeof (result as { authorizationUrl?: unknown }).authorizationUrl === 'string').toBe(
         true,
       );
+      // The resource declares the scopes it needs; the authorization server's
+      // wider list (which includes a scope it no longer accepts) is ignored.
+      const authorizationUrl = new URL(
+        (result as { authorizationUrl: string }).authorizationUrl,
+      );
+      expect(authorizationUrl.searchParams.get('scope')).toBe('read write');
     } finally {
       await upstream.close();
     }

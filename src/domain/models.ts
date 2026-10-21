@@ -209,7 +209,10 @@ export const oauthCredentialPayloadSchema = z.object({
   expiresIn: z.number().nonnegative().optional(),
   clientId: z.string().min(1).optional(),
   clientSecret: z.string().min(1).optional(),
+  /** Scope to request. Only set explicitly; never overwritten by a grant. */
   scope: z.string().min(1).optional(),
+  /** Scope the authorization server actually granted, for diagnostics and refresh. */
+  grantedScope: z.string().min(1).optional(),
   issuer: z.string().min(1).optional(),
   resourceUrl: z.url().optional(),
   authorizationServerUrl: z.url().optional(),

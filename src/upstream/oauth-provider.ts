@@ -136,7 +136,9 @@ export class StoredOAuthProvider implements OAuthClientProvider {
       token_type: payload.tokenType,
       ...(payload.refreshToken === undefined ? {} : { refresh_token: payload.refreshToken }),
       ...(payload.idToken === undefined ? {} : { id_token: payload.idToken }),
-      ...(payload.scope === undefined ? {} : { scope: payload.scope }),
+      ...((payload.grantedScope ?? payload.scope) === undefined
+        ? {}
+        : { scope: payload.grantedScope ?? payload.scope }),
       ...(expiresIn === undefined ? {} : { expires_in: expiresIn }),
       ...(payload.issuer === undefined ? {} : { issuer: payload.issuer }),
     };
@@ -155,7 +157,11 @@ export class StoredOAuthProvider implements OAuthClientProvider {
       tokenType: tokens.token_type,
       expiresIn: tokens.expires_in,
       expiresAt,
-      scope: tokens.scope ?? current.scope,
+      // Requested scope stays exactly as configured. Persisting the granted
+      // scope here made the next authorization replay a stale list — Cloudflare
+      // grants `workers-scripts.bind` in metadata but rejects it at authorize,
+      // so the replay failed with invalid_scope.
+      grantedScope: tokens.scope ?? current.grantedScope,
       issuer: tokens.issuer ?? context?.issuer ?? current.issuer,
       authorizationUrl: undefined,
       pendingExpiresAt: undefined,
