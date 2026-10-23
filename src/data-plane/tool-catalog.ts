@@ -473,14 +473,21 @@ export class ToolCatalog {
         : null;
     if (absentProvider !== null) scored.length = 0;
 
-    scored.sort(
-      (left, right) =>
-        left.tier - right.tier ||
+    scored.sort((left, right) => {
+      if (left.tier !== right.tier) return left.tier - right.tier;
+      // A name that covers every query word names the task directly; a longer
+      // name that merely mentions the words in its description must not win on
+      // that incidental hit. This compares names before total score.
+      const leftName = nameSpecificity(left, queryTokens);
+      const rightName = nameSpecificity(right, queryTokens);
+      if (leftName.hits !== rightName.hits) return rightName.hits - leftName.hits;
+      if (leftName.extra !== rightName.extra) return leftName.extra - rightName.extra;
+      return (
         right.score - left.score ||
-        nameSpecificity(left, queryTokens).extra - nameSpecificity(right, queryTokens).extra ||
         left.tool.name.length - right.tool.name.length ||
-        left.id.localeCompare(right.id),
-    );
+        left.id.localeCompare(right.id)
+      );
+    });
     const gated = scored.slice(0, args.limit);
     const definitionMode = args.detail === 'definition';
 
@@ -954,15 +961,21 @@ function scoreTool(
 }
 
 /**
- * How much of a tool name the query leaves unexplained. `send-batch-emails` and
- * `send-email` tie on the matched words, so the shorter, fully-covered name is
- * the intended tool; this only breaks score ties and never outranks a real hit.
+ * How much of a tool name the query explains. `send-batch-emails` and
+ * `send-email` both mention the task words, so the name that covers more of the
+ * query with fewer unexplained words is the intended tool. This ranks names
+ * ahead of score: a longer name must not win merely because its description
+ * repeats an incidental query word.
  */
-function nameSpecificity(doc: ScoredTool, queryTokens: readonly string[]): { extra: number } {
-  const nameTokens = tokenizeField(doc.tool.name);
+function nameSpecificity(
+  doc: ScoredTool,
+  queryTokens: readonly string[],
+): { hits: number; extra: number } {
+  const nameTokens = new Set(tokenizeField(doc.tool.name));
   const query = new Set(queryTokens);
-  const extra = nameTokens.filter((token) => !query.has(token)).length;
-  return { extra };
+  const hits = queryTokens.filter((token) => nameTokens.has(token)).length;
+  const extra = [...nameTokens].filter((token) => !query.has(token)).length;
+  return { hits, extra };
 }
 
 function parameterText(tool: Tool): string {

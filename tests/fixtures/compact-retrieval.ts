@@ -930,6 +930,13 @@ export const discoveryRegressions: DiscoveryRegression[] = [
     note: 'A hosted provider prefix never falls through to another server when nothing matches.',
   },
   {
+    id: 'name-coverage-beats-incidental-field',
+    query: 'resend send email',
+    entry: 'host',
+    expected: toolId('resend', 'send-email'),
+    note: 'send-batch-emails also hits parameters; name coverage must still win.',
+  },
+  {
     id: 'provider-scoped-mosaic',
     query: 'list bot presets',
     server: 'mosaic',
