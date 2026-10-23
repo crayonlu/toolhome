@@ -475,7 +475,11 @@ export class ToolCatalog {
 
     scored.sort(
       (left, right) =>
-        left.tier - right.tier || right.score - left.score || left.id.localeCompare(right.id),
+        left.tier - right.tier ||
+        right.score - left.score ||
+        nameSpecificity(left, queryTokens).extra - nameSpecificity(right, queryTokens).extra ||
+        left.tool.name.length - right.tool.name.length ||
+        left.id.localeCompare(right.id),
     );
     const gated = scored.slice(0, args.limit);
     const definitionMode = args.detail === 'definition';
@@ -947,6 +951,18 @@ function scoreTool(
   // A provider-slug-only overlap or a single common word must not pass.
   if (!passes) return null;
   return { tier: 2, score, matchedOn };
+}
+
+/**
+ * How much of a tool name the query leaves unexplained. `send-batch-emails` and
+ * `send-email` tie on the matched words, so the shorter, fully-covered name is
+ * the intended tool; this only breaks score ties and never outranks a real hit.
+ */
+function nameSpecificity(doc: ScoredTool, queryTokens: readonly string[]): { extra: number } {
+  const nameTokens = tokenizeField(doc.tool.name);
+  const query = new Set(queryTokens);
+  const extra = nameTokens.filter((token) => !query.has(token)).length;
+  return { extra };
 }
 
 function parameterText(tool: Tool): string {

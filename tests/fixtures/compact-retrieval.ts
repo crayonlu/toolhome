@@ -243,6 +243,25 @@ const resendTools: Tool[] = [
       ['from', 'to', 'subject'],
     ),
   ),
+  tool(
+    'send-batch-emails',
+    'Send up to 100 transactional emails in one request.',
+    objectSchema({ from: { type: 'string' }, to: { type: 'array' }, subject: { type: 'string' } }, [
+      'from',
+      'to',
+      'subject',
+    ]),
+  ),
+  tool(
+    'send-broadcast',
+    'Send a broadcast email to an audience.',
+    objectSchema({ audience: { type: 'string' }, subject: { type: 'string' } }, ['audience']),
+  ),
+  tool(
+    'list-emails',
+    'List sent and received emails.',
+    objectSchema({ limit: { type: 'integer' } }),
+  ),
 ];
 
 const mosaicTools: Tool[] = [
@@ -252,6 +271,10 @@ const mosaicTools: Tool[] = [
     'Create a new bot from a personality preset.',
     objectSchema({ name: { type: 'string' }, preset: { type: 'string' } }, ['name']),
   ),
+  tool('bots_delete', 'Permanently delete a bot by its ID.', objectSchema({})),
+  tool('bots_get', 'Get a single bot by ID.', objectSchema({})),
+  tool('bots_update', 'Update an existing bot.', objectSchema({})),
+  tool('bots_reorder', 'Set the display order of bots.', objectSchema({})),
 ];
 
 const context7Tools: Tool[] = [
@@ -913,6 +936,14 @@ export const discoveryRegressions: DiscoveryRegression[] = [
     entry: 'host',
     expected: toolId('mosaic', 'bots_list'),
     note: 'The recent Mosaic session needed four attempts; the scoped query must be first.',
+  },
+  {
+    id: 'name-tie-shortest-covered',
+    query: 'send email',
+    server: 'resend',
+    entry: 'host',
+    expected: toolId('resend', 'send-email'),
+    note: 'send-batch-emails ties on words; the fully covered name must win.',
   },
   {
     id: 'natural-browser-navigate',
