@@ -49,6 +49,12 @@ export interface SurfaceReport {
   exec?: unknown;
   mixed?: { structuredContent?: unknown; meta?: unknown; contentTypes: unknown[] };
   native?: unknown;
+  /** Near-miss `find` limit above the action maximum. */
+  nearMissLimit?: Record<string, unknown>;
+  /** Provider-scoped find for a slug this entry does not host. */
+  unknownServer?: Record<string, unknown>;
+  /** Unscoped query naming a provider absent from the catalog. */
+  absentProvider?: Record<string, unknown>;
 }
 
 export interface CompactLaunchReport {
@@ -108,6 +114,26 @@ async function inspectSurface(
   );
   report.find = payload(
     await client.callTool({ name: 'search', arguments: { action: 'find', query: 'add number' } }),
+  );
+  // Deterministic recovery paths over the real MCP surface: one corrective call
+  // after an invalid limit, an unknown provider scope, and an absent provider.
+  report.nearMissLimit = payload(
+    await client.callTool({
+      name: 'search',
+      arguments: { action: 'find', query: 'add number', limit: 20 },
+    }),
+  );
+  report.unknownServer = payload(
+    await client.callTool({
+      name: 'search',
+      arguments: { action: 'find', query: 'add number', server: 'not-a-hosted-server' },
+    }),
+  );
+  report.absentProvider = payload(
+    await client.callTool({
+      name: 'search',
+      arguments: { action: 'find', query: 'cloudflare list zones' },
+    }),
   );
   const describe = payload(
     await client.callTool({ name: 'search', arguments: { action: 'describe', tool: toolId } }),
@@ -384,6 +410,29 @@ export function verifyCompactLaunch(report: CompactLaunchReport): void {
         `${label}: directory lists the fixture server`,
       );
       assert.ok(JSON.stringify(surface.find).includes(toolId), `${label}: find returns ${toolId}`);
+      // Near-miss discovery arguments recover in one corrective call.
+      assert.equal(surface.nearMissLimit?.code, 'invalid_arguments', `${label}: limit code`);
+      assert.match(
+        String(surface.nearMissLimit?.message),
+        /between 1 and 10/,
+        `${label}: limit range`,
+      );
+      assert.equal(surface.unknownServer?.code, 'unknown_server', `${label}: unknown server`);
+      assert.ok(
+        Array.isArray(surface.unknownServer?.details) === false &&
+          JSON.stringify(surface.unknownServer?.details).includes('availableServers'),
+        `${label}: unknown server lists choices`,
+      );
+      assert.deepEqual(surface.absentProvider?.matches, [], `${label}: absent provider matches`);
+      assert.equal(
+        surface.absentProvider?.unsupportedProvider,
+        'cloudflare',
+        `${label}: absent provider is named`,
+      );
+      assert.ok(
+        Array.isArray(surface.absentProvider?.availableServers),
+        `${label}: absent provider offers available servers`,
+      );
       assert.deepEqual(
         surface.describe?.inputSchema,
         report.expectedInputSchema,

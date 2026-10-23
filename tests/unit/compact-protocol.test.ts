@@ -19,10 +19,16 @@ import {
   parseSearchArgs,
   resolvableIdentifierError,
   resultByteLength,
+  SEARCH_ACTION_REQUIREMENTS,
+  unknownServerError,
   unknownToolError,
 } from '../../src/data-plane/compact-protocol.js';
 
 function expectInvalid(fn: () => unknown): CompactError {
+  return catchInvalid(fn);
+}
+
+function catchInvalid(fn: () => unknown): CompactError {
   try {
     fn();
   } catch (error) {
@@ -54,6 +60,32 @@ describe('compact protocol schemas', () => {
   it('labels the ranking algorithm for benchmark comparisons', () => {
     expect(RANK_ALGORITHM).toBe('field-score');
     expect(DEFAULT_RANK_ALGORITHM).toBe('field-score');
+  });
+
+  it('teaches the discovery flow from the tool descriptions themselves', () => {
+    const [search, exec] = compactTools();
+    const searchText = `${search!.title ?? ''} ${search!.description ?? ''}`.toLowerCase();
+    const execText = `${exec!.title ?? ''} ${exec!.description ?? ''}`.toLowerCase();
+
+    // A fresh client must know the product, the three actions, and the handoff
+    // without any external documentation.
+    expect(searchText).toContain('toolhome');
+    for (const action of SEARCH_ACTIONS) expect(searchText).toContain(`action=${action}`);
+    expect(searchText).toContain('exec');
+    expect(searchText).toContain('identifier');
+    expect(searchText).toMatch(/not callable|never call/);
+
+    expect(execText).toContain('toolhome');
+    expect(execText).toContain('search');
+    expect(execText).toContain('inputschema');
+
+    // The parameter schema itself repeats the handoff where the model reads it.
+    const toolParam = exec!.inputSchema.properties?.tool as { description?: string };
+    expect(toolParam.description).toContain('never as a tool name');
+    const limitParam = search!.inputSchema.properties?.limit as { description?: string };
+    expect(limitParam.description).toContain('1-50');
+    expect(limitParam.description).toContain('1-10');
+    expect(limitParam.description).toContain('1-3');
   });
 });
 
@@ -118,6 +150,68 @@ describe('compact argument validation', () => {
     expectInvalid(() => parseExecArgs({ tool: 'x', arguments: null }));
     expectInvalid(() => parseExecArgs({ tool: 'x', guessed: true }));
     expectInvalid(() => parseExecArgs({ tool: 'x', arguments: {}, definition: '' }));
+  });
+
+  it('names the action-specific requirement for near-miss find arguments', () => {
+    const missingQuery = catchInvalid(() => parseSearchArgs({ action: 'find' }));
+    expect(missingQuery.message).toContain('query is required for action=find');
+    expect(missingQuery.toData().details).toMatchObject({
+      action: 'find',
+      requirement: SEARCH_ACTION_REQUIREMENTS.find,
+    });
+
+    const oversized = catchInvalid(() =>
+      parseSearchArgs({ action: 'find', query: 'bot', limit: 20 }),
+    );
+    expect(oversized.message).toContain('between 1 and 10');
+    expect(oversized.toData().details).toMatchObject({
+      limit: 20,
+      minimum: 1,
+      maximum: 10,
+      requirement: SEARCH_ACTION_REQUIREMENTS.find,
+    });
+
+    const definitionLimit = catchInvalid(() =>
+      parseSearchArgs({ action: 'find', query: 'bot', detail: 'definition', limit: 4 }),
+    );
+    expect(definitionLimit.message).toContain('between 1 and 3');
+
+    // The same call with the corrected arguments succeeds.
+    expect(parseSearchArgs({ action: 'find', query: 'bot', limit: 10 })).toMatchObject({
+      action: 'find',
+      query: 'bot',
+      limit: 10,
+      detail: 'summary',
+    });
+  });
+
+  it('names the current server directory for an unknown server', () => {
+    const error = unknownServerError('cloudflare', ['github', 'resend', 'shadcn']);
+    const data = error.toData();
+    expect(data.code).toBe('unknown_server');
+    expect(data.message).toContain('cloudflare');
+    expect(data.message).toContain('github, resend, shadcn');
+    expect(data.details).toMatchObject({
+      server: 'cloudflare',
+      availableServers: ['github', 'resend', 'shadcn'],
+    });
+    expect(data.nextStep).toMatchObject({
+      action: 'retry_search',
+      arguments: { action: 'servers' },
+    });
+  });
+
+  it('suggests a near-miss server slug instead of only failing', () => {
+    const data = unknownServerError('resnd', ['github', 'resend', 'shadcn']).toData();
+    expect(data.message).toContain('Did you mean "resend"?');
+    expect(data.details).toMatchObject({ suggestedServer: 'resend' });
+    expect(data.nextStep).toMatchObject({
+      arguments: { action: 'find', query: '<task keywords>', server: 'resend' },
+    });
+
+    const far = unknownServerError('cloudflare', ['github', 'resend']).toData();
+    expect(far.details?.suggestedServer).toBeUndefined();
+    expect(far.nextStep.arguments).toEqual({ action: 'servers' });
   });
 });
 

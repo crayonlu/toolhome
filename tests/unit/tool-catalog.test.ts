@@ -15,6 +15,7 @@ import { aggregateToolName } from '../../src/data-plane/virtualization.js';
 import { SecretBox } from '../../src/security/secret-box.js';
 import { SqliteStore } from '../../src/storage/sqlite-store.js';
 import {
+  discoveryRegressions,
   retrievalTasks,
   robustnessInputs,
   seedCompactCatalog,
@@ -93,9 +94,11 @@ describe('compact servers directory', () => {
       'figma',
       'fixture-app',
       'github',
+      'mosaic',
+      'resend',
       'shadcn',
     ]);
-    expect(payload.total).toBe(6);
+    expect(payload.total).toBe(8);
     expect(servers.find((server) => server.server === 'figma')).toMatchObject({
       catalog: 'unindexed',
       visibleTools: null,
@@ -125,16 +128,17 @@ describe('compact servers directory', () => {
 
   it('paginates with catalog cursors and rejects stale cursors', () => {
     const { catalog } = setup();
-    const first = data(catalog.search({ action: 'servers', limit: 2 }));
-    expect((first.servers as unknown[]).length).toBe(2);
+    const first = data(catalog.search({ action: 'servers', limit: 3 }));
+    expect((first.servers as unknown[]).length).toBe(3);
     expect(typeof first.nextCursor).toBe('string');
 
     const second = data(
-      catalog.search({ action: 'servers', limit: 2, cursor: first.nextCursor as string }),
+      catalog.search({ action: 'servers', limit: 3, cursor: first.nextCursor as string }),
     );
     const third = data(
-      catalog.search({ action: 'servers', limit: 2, cursor: second.nextCursor as string }),
+      catalog.search({ action: 'servers', limit: 3, cursor: second.nextCursor as string }),
     );
+    expect((third.servers as unknown[]).length).toBe(2);
     expect(third.nextCursor).toBeNull();
 
     const raw = JSON.parse(
@@ -155,6 +159,77 @@ describe('compact servers directory', () => {
 });
 
 describe('compact find over labeled tasks', () => {
+  it('ranks the first-use regression set first and recovers absent providers', () => {
+    const base = setup();
+    for (const regression of discoveryRegressions) {
+      const catalog = regression.entry === 'local' ? base.local : base.catalog;
+      const argumentsValue = {
+        action: 'find',
+        query: regression.query,
+        ...(regression.server === undefined ? {} : { server: regression.server }),
+      };
+      const result = catalog.search(argumentsValue);
+      const payload = data(result);
+
+      if (regression.expected !== null) {
+        expect(result.isError, regression.id).toBeUndefined();
+        const ranked = matches(result);
+        expect(ranked[0]?.tool, `${regression.id} first match`).toBe(regression.expected);
+        continue;
+      }
+
+      if (regression.server !== undefined) {
+        // A scoped absent provider is a deterministic error naming the choice.
+        expect(result.isError, regression.id).toBe(true);
+        expect(payload.code, regression.id).toBe('unknown_server');
+        expect(String(payload.message), regression.id).toContain(regression.server);
+        expect(payload.nextStep, regression.id).toMatchObject({
+          action: 'retry_search',
+          arguments: { action: 'servers' },
+        });
+        continue;
+      }
+
+      // An unscoped absent provider returns no unrelated tools plus recovery.
+      expect(matches(result), regression.id).toEqual([]);
+      expect(String(payload.guidance), regression.id).toContain('action=servers');
+      if (regression.absentProvider === undefined) continue;
+      expect(payload.unsupportedProvider, regression.id).toBe(regression.absentProvider);
+      expect(payload.availableServers, regression.id).toContain('github');
+    }
+  });
+
+  it('recovers a near-miss find in one corrected call', () => {
+    const { catalog } = setup();
+
+    const missingQuery = expectError(catalog.search({ action: 'find', limit: 5 }));
+    expect(missingQuery.code).toBe('invalid_arguments');
+    expect(String(missingQuery.message)).toContain('query is required');
+    expect((missingQuery.nextStep as { action: string }).action).toBe('fix_arguments');
+
+    const oversized = expectError(catalog.search({ action: 'find', query: 'bot', limit: 20 }));
+    expect(String(oversized.message)).toContain('between 1 and 10');
+    expect(oversized.details).toMatchObject({ maximum: 10 });
+
+    const corrected = catalog.search({ action: 'find', query: 'list bots', limit: 10 });
+    expect(matches(corrected)[0]?.tool).toBe(toolId('mosaic', 'bots_list'));
+  });
+
+  it('names available servers on an unknown server and accepts the corrected slug', () => {
+    const { catalog } = setup();
+    const unknown = expectError(
+      catalog.search({ action: 'find', query: 'send email', server: 'cloudflare' }),
+    );
+    expect(unknown.code).toBe('unknown_server');
+    expect(unknown.details).toMatchObject({ server: 'cloudflare' });
+    const details = unknown.details as { availableServers?: string[] };
+    expect(details.availableServers).toContain('resend');
+    expect(String(unknown.message)).toContain('Call search with action=servers');
+
+    const corrected = catalog.search({ action: 'find', query: 'send email', server: 'resend' });
+    expect(matches(corrected)[0]?.tool).toBe(toolId('resend', 'send-email'));
+  });
+
   it('ranks every English and rewritten task target in the top 5, top 1 for clear targets', () => {
     const base = setup();
     const targeted = retrievalTasks.filter(
@@ -555,7 +630,6 @@ describe('compact fingerprint, App boundary and BM25', () => {
   });
 });
 
-
 /** Mirrors the fixture's server settings; the fixture keeps its copy private. */
 const settings = {
   connectTimeoutMs: 15_000,
@@ -581,7 +655,9 @@ describe('compact describe degradation and entry prefixes', () => {
               {
                 type: 'string',
                 description:
-                  `Field ${inner} accepts a documented value; see the upstream reference for the full list of accepted forms and their interaction with other blocks. `.repeat(2),
+                  `Field ${inner} accepts a documented value; see the upstream reference for the full list of accepted forms and their interaction with other blocks. `.repeat(
+                    2,
+                  ),
               },
             ]),
           ),
@@ -652,7 +728,10 @@ describe('compact describe degradation and entry prefixes', () => {
     expect(payload.kind).toBe('definition');
     expect((payload.inputSchema as Record<string, unknown>)['x-toolhome-schema']).toBe('truncated');
     // Every top-level argument survives the shrink, with its type and required list.
-    const schema = payload.inputSchema as { properties: Record<string, unknown>; required: string[] };
+    const schema = payload.inputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
     expect(Object.keys(schema.properties)).toHaveLength(12);
     expect(schema.required).toEqual(['option0']);
     // The instructions are truncated with a marker, never silently dropped.
@@ -745,9 +824,9 @@ describe('compact describe degradation and entry prefixes', () => {
       expect(payload.server).toBe('bigtool');
     }
     // A plain name is never mangled by the same tolerance.
-    expect(data(catalog.search({ action: 'describe', tool: toolId('github', 'create_issue') })).server).toBe(
-      'github',
-    );
+    expect(
+      data(catalog.search({ action: 'describe', tool: toolId('github', 'create_issue') })).server,
+    ).toBe('github');
   });
 
   it('executes through the prefixed name', async () => {

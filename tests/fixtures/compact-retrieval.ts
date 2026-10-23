@@ -229,6 +229,31 @@ const shadcnTools: Tool[] = [
   ),
 ];
 
+const resendTools: Tool[] = [
+  tool(
+    'create-domain-claim',
+    'Create a domain claim for sending email from a verified domain.',
+    objectSchema({ domain: { type: 'string' } }, ['domain']),
+  ),
+  tool(
+    'send-email',
+    'Send an email through a verified domain.',
+    objectSchema(
+      { from: { type: 'string' }, to: { type: 'string' }, subject: { type: 'string' } },
+      ['from', 'to', 'subject'],
+    ),
+  ),
+];
+
+const mosaicTools: Tool[] = [
+  tool('bots_list', 'List all configured bots with their personality presets.', objectSchema({})),
+  tool(
+    'bots_create',
+    'Create a new bot from a personality preset.',
+    objectSchema({ name: { type: 'string' }, preset: { type: 'string' } }, ['name']),
+  ),
+];
+
 const context7Tools: Tool[] = [
   tool(
     'resolve-library-id',
@@ -369,6 +394,26 @@ function serverSpecs(includeDuplicateProvider: boolean): FixtureServerSpec[] {
       indexed: true,
       instructions: 'Context7 library documentation.',
       tools: context7Tools,
+    },
+    {
+      slug: 'resend',
+      name: 'Resend',
+      kind: 'remote',
+      nodeId: null,
+      enabled: true,
+      indexed: true,
+      instructions: 'Resend transactional email and domain management.',
+      tools: resendTools,
+    },
+    {
+      slug: 'mosaic',
+      name: 'Mosaic',
+      kind: 'remote',
+      nodeId: null,
+      enabled: true,
+      indexed: true,
+      instructions: 'Mosaic bot presets and character configuration.',
+      tools: mosaicTools,
     },
     {
       slug: 'browser',
@@ -756,6 +801,115 @@ export const retrievalTasks: RetrievalTask[] = [
     expected: null,
     group: 'no-answer',
     note: 'No tool overlap.',
+  },
+];
+
+// ── First-use regressions (derived from real agent sessions) ──────────────
+
+export interface DiscoveryRegression {
+  id: string;
+  query: string;
+  /** Optional provider scope, the same value a caller passes as `server`. */
+  server?: string;
+  /** 'host' or 'local' catalog entry; browser tools live on the local node. */
+  entry: 'host' | 'local';
+  /** First match must be exactly this identifier; null requires no unrelated matches. */
+  expected: string | null;
+  /** Expected recovery metadata for absent-provider queries. */
+  absentProvider?: string;
+  note: string;
+}
+
+export const discoveryRegressions: DiscoveryRegression[] = [
+  {
+    id: 'exact-upstream-name-with-underscores',
+    query: 'list_console_messages',
+    entry: 'local',
+    expected: toolId('browser', 'list_console_messages'),
+    note: 'Agents paste the exact upstream name; underscores must tokenize like spaces.',
+  },
+  {
+    id: 'exact-upstream-name-aggregate',
+    query: 'github_search_code',
+    entry: 'host',
+    expected: toolId('github', 'search_code'),
+    note: 'Exact aggregate identifier resolves through the identity channel.',
+  },
+  {
+    id: 'provider-scoped-task',
+    query: 'cloudflare list zones and DNS records',
+    server: 'nonexistent-provider',
+    entry: 'host',
+    expected: null,
+    absentProvider: 'nonexistent-provider',
+    note: 'An absent provider is an explicit error with recovery, never unrelated matches.',
+  },
+  {
+    id: 'provider-scoped-query-without-server',
+    query: 'cloudflare list zones',
+    entry: 'host',
+    expected: null,
+    absentProvider: 'cloudflare',
+    note: 'Naming a provider absent from the catalog yields no unrelated matches plus recovery.',
+  },
+  {
+    id: 'provider-name-absent',
+    query: 'vercel deployments',
+    entry: 'host',
+    expected: null,
+    absentProvider: 'vercel',
+    note: 'Absent provider followed by a generic task word must not fall back to other servers.',
+  },
+  {
+    id: 'provider-prefixed-present',
+    query: 'resend send email',
+    entry: 'host',
+    expected: toolId('resend', 'send-email'),
+    note: 'A present provider prefix narrows instead of breaking the task match.',
+  },
+  {
+    id: 'provider-prefixed-present-identifier',
+    query: 'mosaic bots list',
+    entry: 'host',
+    expected: toolId('mosaic', 'bots_list'),
+    note: 'A present provider plus upstream words keeps the intended tool first.',
+  },
+  {
+    id: 'unknown-leading-word-still-searches',
+    query: 'kubernetes pod logs',
+    entry: 'host',
+    expected: null,
+    note: 'A long task that is not provider-shaped keeps ordinary ranking behavior.',
+  },
+  {
+    id: 'provider-scoped-present',
+    query: 'send email',
+    server: 'resend',
+    entry: 'host',
+    expected: toolId('resend', 'send-email'),
+    note: 'Provider-scoped tasks rank within the requested server.',
+  },
+  {
+    id: 'provider-scoped-mosaic',
+    query: 'list bot presets',
+    server: 'mosaic',
+    entry: 'host',
+    expected: toolId('mosaic', 'bots_list'),
+    note: 'The recent Mosaic session needed four attempts; the scoped query must be first.',
+  },
+  {
+    id: 'natural-browser-navigate',
+    query: 'navigate the browser to a url',
+    entry: 'local',
+    expected: toolId('browser', 'navigate_page'),
+    note: 'Natural phrasing keeps the browser verb.',
+  },
+  {
+    id: 'natural-browser-console',
+    query: 'list browser console messages',
+    entry: 'local',
+    expected: toolId('browser', 'list_console_messages'),
+    note: 'Inflected console tasks must not drop to a different tool.',
   },
 ];
 

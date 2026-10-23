@@ -165,6 +165,16 @@ describe('compact HTTP gateway', () => {
         'search',
         'exec',
       ]);
+      const tools = (await client.client.listTools()).tools;
+      const searchText = `${tools[0]!.title ?? ''} ${tools[0]!.description ?? ''}`;
+      const execText = `${tools[1]!.title ?? ''} ${tools[1]!.description ?? ''}`;
+      expect(searchText).toContain('ToolHome');
+      for (const action of ['servers', 'find', 'describe']) {
+        expect(searchText).toContain(`action=${action}`);
+      }
+      expect(searchText).toContain('exec');
+      expect(execText).toContain('ToolHome');
+      expect(execText).toContain('search');
       expect(
         payload(await client.client.callTool({ name: 'search', arguments: { action: 'servers' } }))
           .servers,
@@ -179,9 +189,7 @@ describe('compact HTTP gateway', () => {
     const env = await setup();
     try {
       const id = aggregateToolName('math', 'add_value');
-      const result = payload(
-        await env.client.client.callTool({ name: id, arguments: {} }),
-      );
+      const result = payload(await env.client.client.callTool({ name: id, arguments: {} }));
       expect(result.code).toBe('unknown_tool');
       expect(result.callEffect).toBe('not_started');
       expect(result.nextStep).toMatchObject({

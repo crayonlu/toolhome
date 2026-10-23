@@ -179,10 +179,91 @@ export function invalidArguments(message: string, details?: Record<string, unkno
   return new CompactError('invalid_arguments', message, { details });
 }
 
-export function unknownServerError(server: string): CompactError {
-  return new CompactError('unknown_server', `Unknown server: ${server}`, {
-    details: { server },
+/** Per-action requirements, surfaced verbatim in validation errors. */
+export const SEARCH_ACTION_REQUIREMENTS: Record<SearchAction, string> = {
+  servers: 'action=servers accepts limit (1-50, default 20) and cursor only.',
+  find: 'action=find requires query; limit is 1-10 for summary (default 5) and 1-3 for detail=definition; optional server and detail.',
+  describe: 'action=describe requires tool, the identifier returned by action=find.',
+};
+
+function invalidSearchArguments(
+  action: SearchAction,
+  message: string,
+  details?: Record<string, unknown>,
+): CompactError {
+  return invalidArguments(message, {
+    action,
+    requirement: SEARCH_ACTION_REQUIREMENTS[action],
+    ...details,
   });
+}
+
+export function unknownServerError(
+  server: string,
+  available: readonly string[] = [],
+): CompactError {
+  const suggestion = suggestClosest(server, available);
+  const choices = available.slice(0, 20);
+  const listed = choices.length === 0 ? '' : ` Available servers: ${choices.join(', ')}.`;
+  return new CompactError(
+    'unknown_server',
+    `Unknown server "${server}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}${listed} Call search with action=servers for the current directory.`,
+    {
+      details: {
+        server,
+        ...(suggestion === null ? {} : { suggestedServer: suggestion }),
+        // Bounded so a large directory still fits the error budget.
+        availableServers: available.slice(0, 50),
+        availableServerCount: available.length,
+        requirement: SEARCH_ACTION_REQUIREMENTS.find,
+      },
+      nextStep: {
+        action: 'retry_search',
+        arguments:
+          suggestion === null
+            ? { action: 'servers' }
+            : { action: 'find', query: '<task keywords>', server: suggestion },
+        guidance:
+          suggestion === null
+            ? 'Call search with action=servers to list usable servers.'
+            : `Retry with server="${suggestion}", or call action=find with a task query and no server to search every server.`,
+      },
+    },
+  );
+}
+
+/** Levenshtein distance, used only to name a likely provider on an unknown server. */
+function editDistance(left: string, right: string): number {
+  const a = Array.from(left);
+  const b = Array.from(right);
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0]!;
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const stored = previous[j]!;
+      previous[j] = Math.min(
+        previous[j]! + 1,
+        previous[j - 1]! + 1,
+        diagonal + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      diagonal = stored;
+    }
+  }
+  return previous[b.length]!;
+}
+
+function suggestClosest(value: string, choices: readonly string[]): string | null {
+  let best: string | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const choice of choices) {
+    const distance = editDistance(value.toLowerCase(), choice.toLowerCase());
+    if (distance < bestDistance) {
+      best = choice;
+      bestDistance = distance;
+    }
+  }
+  return best !== null && bestDistance <= 2 ? best : null;
 }
 
 export function unknownToolError(tool: string): CompactError {
@@ -336,7 +417,8 @@ export const searchInputSchema: Tool['inputSchema'] = {
       type: 'integer',
       minimum: 1,
       maximum: 50,
-      description: 'servers default 20/max 50; find default 5/max 10 (definition max 3).',
+      description:
+        'Result count. servers: 1-50 (default 20); find: 1-10 summary (default 5) or 1-3 with detail=definition.',
     },
     cursor: {
       type: 'string',
@@ -357,11 +439,12 @@ export const execInputSchema: Tool['inputSchema'] = {
   properties: {
     tool: {
       type: 'string',
-      description: 'Exact tool identifier returned by find/describe.',
+      description:
+        'Exact catalog identifier returned by search action=find or action=describe (for example "github_search-5fcode"). Use it here, never as a tool name on this endpoint.',
     },
     arguments: {
       ...parameterSchema,
-      description: 'Arguments matching the describe-returned inputSchema.',
+      description: 'Arguments matching the inputSchema returned by search action=describe.',
     },
     definition: {
       type: 'string',
@@ -374,18 +457,18 @@ export const execInputSchema: Tool['inputSchema'] = {
 
 export const searchTool: Tool = {
   name: SEARCH_TOOL_NAME,
-  title: 'Search tools',
+  title: 'ToolHome discovery: search',
   description:
-    'Find upstream MCP tools by task without knowing server names. Use action=servers to inspect this gateway, action=find for ranked summaries (optionally detail=definition), and action=describe for a selected tool\u2019s complete arguments schema. For Chinese tasks, include English action/object keywords. Execute the exact returned identifier with exec. Cached entries do not guarantee live availability.',
+    'ToolHome gateway discovery. This endpoint exposes only `search` and `exec`, not each upstream tool. Use action=servers to list ToolHome servers, action=find with an English task query (optionally server=<slug>) for ranked matches, and action=describe with a returned `tool` identifier for its complete inputSchema. Then call `exec` with { tool: <that exact identifier>, arguments: <per inputSchema> }. Discovery identifiers are not callable tool names. When a task names a provider, pass its slug as server to narrow results; if unsupported, action=servers shows what is available.',
   inputSchema: searchInputSchema,
   annotations: { readOnlyHint: true },
 };
 
 export const execTool: Tool = {
   name: EXEC_TOOL_NAME,
-  title: 'Execute tool',
+  title: 'ToolHome execution: exec',
   description:
-    'Execute one discovered MCP tool with arguments matching its complete inputSchema. Use the definition fingerprint to detect changes. This tool may perform reads or writes depending on its target; upstream annotations appear in discovery results.',
+    'ToolHome gateway execution. Run one upstream tool previously returned by `search` action=find/describe: pass its exact `tool` identifier and an `arguments` object matching that tool\u2019s `inputSchema`. Calling an identifier as a tool name on this endpoint fails; `exec` is the only execution path here. This tool may read or write depending on the target; upstream annotations appear in discovery results.',
   inputSchema: execInputSchema,
   annotations: { openWorldHint: true },
 };
@@ -458,7 +541,11 @@ function assertNoUnknownKeys(
 ): void {
   for (const key of Object.keys(input)) {
     if (!allowed.has(key)) {
-      throw invalidArguments(`Argument "${key}" is not valid for action "${action}"`);
+      throw invalidSearchArguments(
+        action,
+        `Argument "${key}" is not valid for action "${action}".`,
+        { argument: key },
+      );
     }
   }
 }
@@ -472,18 +559,23 @@ export function parseSearchArgs(input: unknown): SearchArgs {
   if (action === null || !(SEARCH_ACTIONS as readonly string[]).includes(action)) {
     throw invalidArguments(`action must be one of ${SEARCH_ACTIONS.join(', ')}`, {
       action: actionValue,
+      ...Object.fromEntries(
+        SEARCH_ACTIONS.map((entry) => [`action=${entry}`, SEARCH_ACTION_REQUIREMENTS[entry]]),
+      ),
     });
   }
   const typedAction = action as SearchAction;
   assertNoUnknownKeys(input, allowedKeysByAction[typedAction], typedAction);
 
   if (typedAction === 'servers') {
-    const limit = parseLimit(input.limit, 20, 50);
+    const limit = parseLimit(typedAction, input.limit, 20, 50);
     const cursorValue = input.cursor;
     if (cursorValue !== undefined) {
       const cursor = readString(cursorValue);
       if (cursor === null || cursor.length === 0) {
-        throw invalidArguments('cursor must be a non-empty string');
+        throw invalidSearchArguments(typedAction, 'cursor must be a non-empty string.', {
+          cursor: cursorValue,
+        });
       }
     }
     return {
@@ -497,16 +589,23 @@ export function parseSearchArgs(input: unknown): SearchArgs {
   if (typedAction === 'find') {
     const query = readString(input.query);
     if (query === null || query.trim().length === 0) {
-      throw invalidArguments('query is required for action=find');
+      throw invalidSearchArguments(
+        typedAction,
+        'query is required for action=find. Provide the task in English action/object words, for example {"action":"find","query":"list dns zones"}.',
+      );
     }
     if (query.length > 512) {
-      throw invalidArguments('query must be at most 512 characters', { length: query.length });
+      throw invalidSearchArguments(typedAction, 'query must be at most 512 characters.', {
+        length: query.length,
+      });
     }
     const serverValue = input.server;
     if (serverValue !== undefined) {
       const server = readString(serverValue);
       if (server === null || server.length === 0) {
-        throw invalidArguments('server must be a non-empty string');
+        throw invalidSearchArguments(typedAction, 'server must be a non-empty string.', {
+          server: serverValue,
+        });
       }
     }
     const detailValue = input.detail;
@@ -514,13 +613,17 @@ export function parseSearchArgs(input: unknown): SearchArgs {
     if (detailValue !== undefined) {
       const parsedDetail = readString(detailValue);
       if (parsedDetail === null || !(SEARCH_DETAILS as readonly string[]).includes(parsedDetail)) {
-        throw invalidArguments(`detail must be one of ${SEARCH_DETAILS.join(', ')}`);
+        throw invalidSearchArguments(
+          typedAction,
+          `detail must be one of ${SEARCH_DETAILS.join(', ')}.`,
+          { detail: detailValue },
+        );
       }
       detail = parsedDetail as SearchDetail;
     }
     const maxLimit = detail === 'definition' ? 3 : 10;
     const defaultLimit = detail === 'definition' ? 3 : 5;
-    const limit = parseLimit(input.limit, defaultLimit, maxLimit);
+    const limit = parseLimit(typedAction, input.limit, defaultLimit, maxLimit);
     return {
       action: 'find',
       query,
@@ -532,16 +635,28 @@ export function parseSearchArgs(input: unknown): SearchArgs {
 
   const tool = readString(input.tool);
   if (tool === null || tool.length === 0) {
-    throw invalidArguments('tool is required for action=describe');
+    throw invalidSearchArguments(
+      typedAction,
+      'tool is required for action=describe. Pass the exact identifier returned by action=find.',
+    );
   }
   return { action: 'describe', tool, limit: 1, detail: 'summary' };
 }
 
-function parseLimit(value: unknown, defaultValue: number, max: number): number {
+function parseLimit(
+  action: SearchAction,
+  value: unknown,
+  defaultValue: number,
+  max: number,
+): number {
   if (value === undefined) return defaultValue;
   const limit = readInteger(value);
   if (limit === null || limit < 1 || limit > max) {
-    throw invalidArguments(`limit must be an integer between 1 and ${max}`, { limit: value });
+    throw invalidSearchArguments(
+      action,
+      `limit must be an integer between 1 and ${max} for action=${action}.`,
+      { limit: value, minimum: 1, maximum: max },
+    );
   }
   return limit;
 }

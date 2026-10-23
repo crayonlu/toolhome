@@ -213,8 +213,10 @@ Aggregate tool names are `{server_slug}_{encoded_tool_name}`; non-alphanumeric U
 
 By default the aggregate `/mcp` endpoint lists every enabled server's tools (`full`). An opt-in `compact` mode instead exposes exactly two tools — `search` and `exec` — so an agent discovers tools on demand:
 
-- `search`: `action=servers` (server catalog), `action=find` (ranked tools for a task), `action=describe` (a selected tool's complete input schema).
-- `exec`: run one exact tool returned by `search`.
+- `search`: `action=servers` (server catalog), `action=find` (ranked tools for a task; pass `server=<slug>` to narrow), `action=describe` (a selected tool's complete input schema).
+- `exec`: run one exact identifier returned by `search` — call `exec` with `{ tool: <identifier>, arguments: <per inputSchema> }`. The identifier is not a callable tool name on this endpoint.
+
+An unknown `server` returns `unknown_server` with the available slugs; a query that names an absent provider returns zero matches with `unsupportedProvider` and `availableServers`; a missing `query` or an out-of-range `limit` returns `invalid_arguments` with the action requirement. Correct the named field and retry once.
 
 Enable it per entry (afterwards reconnect the client, which may cache `tools/list`):
 

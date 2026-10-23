@@ -67,6 +67,70 @@ export const FIELD_WEIGHTS = {
 export const MIN_COVERED_TOKENS = 2;
 export const MIN_COVERAGE_RATIO = 0.5;
 
+/** Leading verbs that describe a task; a leading non-verb may name a provider. */
+const TASK_VERBS = new Set([
+  'add',
+  'answer',
+  'ask',
+  'book',
+  'browse',
+  'call',
+  'check',
+  'click',
+  'close',
+  'configure',
+  'create',
+  'delete',
+  'describe',
+  'download',
+  'edit',
+  'evaluate',
+  'execute',
+  'fetch',
+  'fill',
+  'find',
+  'get',
+  'inspect',
+  'list',
+  'load',
+  'look',
+  'make',
+  'navigate',
+  'open',
+  'query',
+  'read',
+  'remove',
+  'render',
+  'resolve',
+  'retrieve',
+  'run',
+  'save',
+  'schedule',
+  'search',
+  'send',
+  'show',
+  'start',
+  'stop',
+  'take',
+  'type',
+  'update',
+  'upload',
+  'view',
+  'wait',
+  'write',
+]);
+
+/** First word of a task, used only to tell a provider slug from a verb. */
+function leadingWord(query: string): string {
+  return tokenizeQuery(query)[0] ?? '';
+}
+
+/** A provider-shaped task: a short label, or a label followed by a verb. */
+function hasProviderShape(tokens: readonly string[]): boolean {
+  const [, second] = tokens;
+  return tokens.length <= 2 || (second !== undefined && TASK_VERBS.has(second));
+}
+
 const STOPWORDS = new Set([
   'a',
   'an',
@@ -325,7 +389,12 @@ export class ToolCatalog {
     let scoped = records;
     if (args.server !== undefined) {
       const server = records.find((candidate) => candidate.slug === args.server);
-      if (!server) throw unknownServerError(args.server);
+      if (!server) {
+        throw unknownServerError(
+          args.server,
+          records.map((candidate) => candidate.slug),
+        );
+      }
       scoped = [server];
     }
 
@@ -337,9 +406,9 @@ export class ToolCatalog {
     const queryTokens = tokenizeQuery(query);
     const phrase = normalizeForPhrase(query);
     const scored: ScoredTool[] = [];
+    const docs: CandidateDoc[] = [];
 
     if (queryTokens.length > 0) {
-      const docs: CandidateDoc[] = [];
       for (const server of scoped) {
         const snapshot = this.#store.getSnapshot(server.id);
         if (!snapshot) continue;
@@ -380,6 +449,24 @@ export class ToolCatalog {
       }
     }
 
+    // A task that leads with an unknown provider would otherwise drop that token
+    // and match a generic verb from an unrelated server. Zero the matches and
+    // return the concrete recovery when the leading word hits no catalog field
+    // and the query has provider shape: a short label, or a label plus a verb.
+    const tokens = tokenizeQuery(query);
+    const leading = leadingWord(query);
+    const absentProvider =
+      this.#coverageGate &&
+      args.server === undefined &&
+      leading.length > 0 &&
+      hasProviderShape(tokens) &&
+      !TASK_VERBS.has(leading) &&
+      !this.#namesProvider(records, leading) &&
+      !docs.some((doc) => this.#mentionsToken(doc, leading))
+        ? leading
+        : null;
+    if (absentProvider !== null) scored.length = 0;
+
     scored.sort(
       (left, right) =>
         left.tier - right.tier || right.score - left.score || left.id.localeCompare(right.id),
@@ -396,10 +483,16 @@ export class ToolCatalog {
       hasMore,
       ...(unindexedServers.length === 0 ? {} : { unindexedServers }),
       ...(matches.length === 0
-        ? {
-            guidance:
-              'No snapshot match. Try English action/object keywords, action=servers, or a more specific task.',
-          }
+        ? absentProvider === null
+          ? {
+              guidance:
+                'No snapshot match. Try English action/object keywords, action=servers, or a more specific task.',
+            }
+          : {
+              unsupportedProvider: absentProvider,
+              availableServers: records.map((server) => server.slug),
+              guidance: `Provider "${absentProvider}" is not in this catalog. Call search with action=servers for available servers, or retry action=find with a task query and no provider prefix.`,
+            }
         : {}),
       catalogVersion: version,
     });
@@ -552,6 +645,23 @@ export class ToolCatalog {
     return this.#projections.apply(server.id, snapshot.tools);
   }
 
+  /** Whether a leading task word names a hosted server by slug or displayed name. */
+  #namesProvider(records: readonly ServerRecord[], word: string): boolean {
+    return records.some(
+      (server) =>
+        server.slug === word ||
+        tokenizeField(server.name).includes(word) ||
+        tokenizeField(server.slug).includes(word),
+    );
+  }
+
+  /** Whether a leading task word appears in any searchable field of a candidate. */
+  #mentionsToken(doc: CandidateDoc, word: string): boolean {
+    return candidateFields(doc.server, doc.tool).some((field) =>
+      tokenizeField(field.text).includes(word),
+    );
+  }
+
   /**
    * Any App/UI metadata marks the whole server for the individual endpoint
    * until a specific companion tool can be linked reliably.
@@ -623,6 +733,13 @@ interface Summary {
 
 // ── tokenization and scoring ──────────────────────────────────────────────
 
+/** Light plural folding so "bots"/"presets" match "bot"/"preset" on both sides. */
+function foldToken(token: string): string {
+  return token.length >= 4 && token.endsWith('s') && !token.endsWith('ss')
+    ? token.slice(0, -1)
+    : token;
+}
+
 /** Unicode-aware tokenizer: NFKC, camelCase split, deduped meaningful tokens. */
 export function tokenizeQuery(input: string): string[] {
   const camelSplit = input.normalize('NFKC').replace(/([a-z0-9])([A-Z])/g, '$1 $2');
@@ -630,9 +747,11 @@ export function tokenizeQuery(input: string): string[] {
   const tokens: string[] = [];
   for (const match of camelSplit.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
     const token = match[0];
-    if (token.length === 0 || STOPWORDS.has(token) || seen.has(token)) continue;
-    seen.add(token);
-    tokens.push(token);
+    if (token.length === 0 || STOPWORDS.has(token)) continue;
+    const folded = foldToken(token);
+    if (seen.has(folded)) continue;
+    seen.add(folded);
+    tokens.push(folded);
   }
   return tokens;
 }
@@ -643,7 +762,9 @@ function normalizeForPhrase(input: string): string {
 
 function tokenizeField(input: string): string[] {
   const camelSplit = input.normalize('NFKC').replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-  return [...camelSplit.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((match) => match[0]);
+  return [...camelSplit.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((match) =>
+    foldToken(match[0]),
+  );
 }
 
 interface FieldScore {
@@ -856,7 +977,10 @@ function shrinkSchema(node: unknown, depth = 0): Record<string, unknown> {
   }
   if (isRecord(node.properties) && depth < 1) {
     out.properties = Object.fromEntries(
-      Object.entries(node.properties).map(([name, value]) => [name, shrinkSchema(value, depth + 1)]),
+      Object.entries(node.properties).map(([name, value]) => [
+        name,
+        shrinkSchema(value, depth + 1),
+      ]),
     );
   } else if (isRecord(node.properties)) {
     out.properties = Object.fromEntries(
