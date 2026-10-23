@@ -192,7 +192,14 @@ describe('compact find over labeled tasks', () => {
 
       // An unscoped absent provider returns no unrelated tools plus recovery.
       expect(matches(result), regression.id).toEqual([]);
-      expect(String(payload.guidance), regression.id).toContain('action=servers');
+      expect(String(payload.guidance), regression.id).toContain(
+        regression.scopedServer === undefined ? 'action=servers' : regression.scopedServer,
+      );
+      if (regression.scopedServer !== undefined) {
+        expect(payload.scopedServer, regression.id).toBe(regression.scopedServer);
+        expect(payload.unsupportedProvider, regression.id).toBeUndefined();
+        continue;
+      }
       if (regression.absentProvider === undefined) continue;
       expect(payload.unsupportedProvider, regression.id).toBe(regression.absentProvider);
       expect(payload.availableServers, regression.id).toContain('github');

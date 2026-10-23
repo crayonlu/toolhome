@@ -120,11 +120,6 @@ const TASK_VERBS = new Set([
   'write',
 ]);
 
-/** First word of a task, used only to tell a provider slug from a verb. */
-function leadingWord(query: string): string {
-  return tokenizeQuery(query)[0] ?? '';
-}
-
 /** A provider-shaped task: a short label, or a label followed by a verb. */
 function hasProviderShape(tokens: readonly string[]): boolean {
   const [, second] = tokens;
@@ -386,6 +381,16 @@ export class ToolCatalog {
       rankedBy: this.#rankAlgorithm,
     };
 
+    const tokens = tokenizeQuery(args.query ?? '');
+    const leading = tokens[0] ?? '';
+    // A task that leads with a provider slug is scoped to that provider, matching
+    // the way callers write "cloudflare list zones". Otherwise the provider token
+    // is a non-hit and unrelated servers win on a generic verb.
+    const namedProvider =
+      args.server === undefined && !TASK_VERBS.has(leading)
+        ? records.find((server) => this.#namesProvider([server], leading))
+        : undefined;
+
     let scoped = records;
     if (args.server !== undefined) {
       const server = records.find((candidate) => candidate.slug === args.server);
@@ -396,6 +401,8 @@ export class ToolCatalog {
         );
       }
       scoped = [server];
+    } else if (namedProvider !== undefined) {
+      scoped = [namedProvider];
     }
 
     const unindexedServers = scoped
@@ -453,11 +460,10 @@ export class ToolCatalog {
     // and match a generic verb from an unrelated server. Zero the matches and
     // return the concrete recovery when the leading word hits no catalog field
     // and the query has provider shape: a short label, or a label plus a verb.
-    const tokens = tokenizeQuery(query);
-    const leading = leadingWord(query);
     const absentProvider =
       this.#coverageGate &&
       args.server === undefined &&
+      namedProvider === undefined &&
       leading.length > 0 &&
       hasProviderShape(tokens) &&
       !TASK_VERBS.has(leading) &&
@@ -483,16 +489,21 @@ export class ToolCatalog {
       hasMore,
       ...(unindexedServers.length === 0 ? {} : { unindexedServers }),
       ...(matches.length === 0
-        ? absentProvider === null
+        ? absentProvider !== null
           ? {
-              guidance:
-                'No snapshot match. Try English action/object keywords, action=servers, or a more specific task.',
-            }
-          : {
               unsupportedProvider: absentProvider,
               availableServers: records.map((server) => server.slug),
               guidance: `Provider "${absentProvider}" is not in this catalog. Call search with action=servers for available servers, or retry action=find with a task query and no provider prefix.`,
             }
+          : namedProvider !== undefined
+            ? {
+                scopedServer: namedProvider.slug,
+                guidance: `Provider "${namedProvider.slug}" is in the catalog but no hosted tool matches this task. Retry action=find without the provider prefix, or call action=servers to inspect its tools.`,
+              }
+            : {
+                guidance:
+                  'No snapshot match. Try English action/object keywords, action=servers, or a more specific task.',
+              }
         : {}),
       catalogVersion: version,
     });

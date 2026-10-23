@@ -817,6 +817,8 @@ export interface DiscoveryRegression {
   expected: string | null;
   /** Expected recovery metadata for absent-provider queries. */
   absentProvider?: string;
+  /** Expected implicit scope when the query leads with a hosted provider slug. */
+  scopedServer?: string;
   note: string;
 }
 
@@ -888,6 +890,21 @@ export const discoveryRegressions: DiscoveryRegression[] = [
     entry: 'host',
     expected: toolId('resend', 'send-email'),
     note: 'Provider-scoped tasks rank within the requested server.',
+  },
+  {
+    id: 'provider-prefix-implies-scope',
+    query: 'resend send email',
+    entry: 'host',
+    expected: toolId('resend', 'send-email'),
+    note: 'A hosted provider prefix scopes discovery without an explicit server argument.',
+  },
+  {
+    id: 'provider-prefix-empty-scope',
+    query: 'mosaic deploy cluster',
+    entry: 'host',
+    expected: null,
+    scopedServer: 'mosaic',
+    note: 'A hosted provider prefix never falls through to another server when nothing matches.',
   },
   {
     id: 'provider-scoped-mosaic',

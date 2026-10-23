@@ -216,7 +216,7 @@ By default the aggregate `/mcp` endpoint lists every enabled server's tools (`fu
 - `search`: `action=servers` (server catalog), `action=find` (ranked tools for a task; pass `server=<slug>` to narrow), `action=describe` (a selected tool's complete input schema).
 - `exec`: run one exact identifier returned by `search` — call `exec` with `{ tool: <identifier>, arguments: <per inputSchema> }`. The identifier is not a callable tool name on this endpoint.
 
-An unknown `server` returns `unknown_server` with the available slugs; a query that names an absent provider returns zero matches with `unsupportedProvider` and `availableServers`; a missing `query` or an out-of-range `limit` returns `invalid_arguments` with the action requirement. Correct the named field and retry once.
+A query that starts with a hosted provider slug is scoped to it, so `cloudflare list zones` never returns another server's tool. An unknown `server` returns `unknown_server` with the available slugs; a query that names an absent provider returns zero matches with `unsupportedProvider` and `availableServers`; a missing `query` or an out-of-range `limit` returns `invalid_arguments` with the action requirement. Correct the named field and retry once.
 
 Enable it per entry (afterwards reconnect the client, which may cache `tools/list`):
 
