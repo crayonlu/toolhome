@@ -445,6 +445,11 @@ export class ToolCatalog {
           phrase,
           corpus,
           this.#coverageGate,
+          // Relax the multi-token gate inside an explicit scope only when the
+          // query carries a task word beyond provider names: "bot preset" in
+          // mosaic is a task, "shadcn context7" is only two provider names.
+          (args.server !== undefined || namedProvider !== undefined) &&
+            queryTokens.some((token) => !this.#namesProvider(records, token)),
         );
         if (ranked !== null)
           scored.push({
@@ -594,6 +599,16 @@ export class ToolCatalog {
     const tool = stripEntryPrefix(args.tool ?? '');
     const resolved = this.resolve(tool, observed);
     const { entry, tool: contract } = resolved;
+    if (args.server !== undefined && args.server !== entry.server.slug) {
+      throw new CompactError(
+        'unknown_tool',
+        `Tool "${tool}" belongs to server "${entry.server.slug}", not "${args.server}".`,
+        {
+          details: { tool, server: entry.server.slug, requestedServer: args.server },
+          nextStep: { action: 'describe', arguments: { action: 'describe', tool } },
+        },
+      );
+    }
     const snapshot = entry.snapshot;
     const annotations = smallAnnotations(contract);
     const app = appResourceUri(contract);
@@ -931,6 +946,7 @@ function scoreTool(
   phrase: string,
   corpus: CorpusStats | null,
   coverageGate: boolean,
+  scoped: boolean,
 ): { tier: number; score: number; matchedOn: string[] } | null {
   let score = 0;
   const matchedOn: string[] = [];
@@ -951,10 +967,12 @@ function scoreTool(
 
   const total = queryTokens.length;
   const covered = coverageHits.size;
+  // A caller that has already chosen a server is asking "which tool here?"; one
+  // matched task word is enough to rank inside that server. Across the whole
+  // directory the stricter multi-token gate still applies.
+  const minimum = scoped ? 1 : MIN_COVERED_TOKENS;
   const passes =
-    total === 1
-      ? covered >= 1
-      : covered >= MIN_COVERED_TOKENS && covered / total >= MIN_COVERAGE_RATIO;
+    total === 1 ? covered >= 1 : covered >= minimum && covered / total >= MIN_COVERAGE_RATIO;
   // A provider-slug-only overlap or a single common word must not pass.
   if (!passes) return null;
   return { tier: 2, score, matchedOn };

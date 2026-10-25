@@ -133,6 +133,27 @@ describe('compact argument validation', () => {
     expectInvalid(() => parseSearchArgs({ action: 'describe' }));
   });
 
+  it('accepts a redundant server on describe without changing the result', () => {
+    // Clients carry the slug forward from find; rejecting it costs a round trip.
+    expect(
+      parseSearchArgs({ action: 'describe', tool: 'cloudflare_execute', server: 'cloudflare' }),
+    ).toEqual({
+      action: 'describe',
+      tool: 'cloudflare_execute',
+      server: 'cloudflare',
+      limit: 1,
+      detail: 'summary',
+    });
+    expect(parseSearchArgs({ action: 'describe', tool: 'cloudflare_execute' })).toEqual({
+      action: 'describe',
+      tool: 'cloudflare_execute',
+      limit: 1,
+      detail: 'summary',
+    });
+    expectInvalid(() => parseSearchArgs({ action: 'describe', tool: 'x', server: '' }));
+    expectInvalid(() => parseSearchArgs({ action: 'describe', tool: 'x', limit: 2 }));
+  });
+
   it('validates exec arguments and requires the arguments object', () => {
     expect(parseExecArgs({ tool: 'github_search-5fcode', arguments: {} })).toEqual({
       tool: 'github_search-5fcode',

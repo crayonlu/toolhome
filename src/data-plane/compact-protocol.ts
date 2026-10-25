@@ -531,7 +531,9 @@ function readInteger(value: unknown): number | null {
 const allowedKeysByAction: Record<SearchAction, ReadonlySet<string>> = {
   servers: new Set(['action', 'limit', 'cursor']),
   find: new Set(['action', 'query', 'server', 'limit', 'detail']),
-  describe: new Set(['action', 'tool']),
+  // `server` is accepted on describe as an optional consistency check: clients
+  // often carry the slug forward from find, and rejecting it costs a round trip.
+  describe: new Set(['action', 'tool', 'server']),
 };
 
 function assertNoUnknownKeys(
@@ -640,7 +642,22 @@ export function parseSearchArgs(input: unknown): SearchArgs {
       'tool is required for action=describe. Pass the exact identifier returned by action=find.',
     );
   }
-  return { action: 'describe', tool, limit: 1, detail: 'summary' };
+  const describeServerValue = input.server;
+  if (describeServerValue !== undefined) {
+    const server = readString(describeServerValue);
+    if (server === null || server.length === 0) {
+      throw invalidSearchArguments(typedAction, 'server must be a non-empty string.', {
+        server: describeServerValue,
+      });
+    }
+  }
+  return {
+    action: 'describe',
+    tool,
+    limit: 1,
+    detail: 'summary',
+    ...(describeServerValue === undefined ? {} : { server: describeServerValue as string }),
+  };
 }
 
 function parseLimit(

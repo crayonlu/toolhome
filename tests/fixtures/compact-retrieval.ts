@@ -930,11 +930,19 @@ export const discoveryRegressions: DiscoveryRegression[] = [
     note: 'A hosted provider prefix never falls through to another server when nothing matches.',
   },
   {
-    id: 'name-coverage-beats-incidental-field',
-    query: 'resend send email',
+    id: 'provider-scoped-two-word-task',
+    query: 'bot list',
+    server: 'mosaic',
     entry: 'host',
-    expected: toolId('resend', 'send-email'),
-    note: 'send-batch-emails also hits parameters; name coverage must still win.',
+    expected: toolId('mosaic', 'bots_list'),
+    note: 'A scoped two-word task must not be gated out by the directory coverage rule.',
+  },
+  {
+    id: 'provider-prefix-two-word-task',
+    query: 'mosaic bot list',
+    entry: 'host',
+    expected: toolId('mosaic', 'bots_list'),
+    note: 'A provider prefix plus a two-word task stays scoped and matchable.',
   },
   {
     id: 'provider-scoped-mosaic',
@@ -950,7 +958,7 @@ export const discoveryRegressions: DiscoveryRegression[] = [
     server: 'resend',
     entry: 'host',
     expected: toolId('resend', 'send-email'),
-    note: 'send-batch-emails ties on words; the fully covered name must win.',
+    note: 'send-batch-emails also hits parameters; name coverage must still win.',
   },
   {
     id: 'natural-browser-navigate',

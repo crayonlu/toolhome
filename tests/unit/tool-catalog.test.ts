@@ -222,6 +222,26 @@ describe('compact find over labeled tasks', () => {
     expect(matches(corrected)[0]?.tool).toBe(toolId('mosaic', 'bots_list'));
   });
 
+  it('accepts a matching server on describe and rejects a mismatched one', () => {
+    const { catalog } = setup();
+    const realId = toolId('context7', 'get-library-docs');
+    const withServer = data(
+      catalog.search({ action: 'describe', tool: realId, server: 'context7' }),
+    );
+    expect(withServer.tool).toBe(realId);
+    expect(withServer.server).toBe('context7');
+
+    const mismatch = expectError(
+      catalog.search({ action: 'describe', tool: realId, server: 'github' }),
+    );
+    expect(mismatch.code).toBe('unknown_tool');
+    expect(String(mismatch.message)).toContain('belongs to server "context7"');
+    expect(mismatch.nextStep).toMatchObject({
+      action: 'describe',
+      arguments: { action: 'describe', tool: realId },
+    });
+  });
+
   it('names available servers on an unknown server and accepts the corrected slug', () => {
     const { catalog } = setup();
     const unknown = expectError(
