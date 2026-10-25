@@ -412,6 +412,17 @@ export class ToolCatalog {
     const query = args.query ?? '';
     const queryTokens = tokenizeQuery(query);
     const phrase = normalizeForPhrase(query);
+    // Provider words select the scope; they are not part of the task to match.
+    const providerTokens = new Set<string>();
+    if (args.server !== undefined || namedProvider !== undefined) {
+      for (const token of queryTokens) {
+        if (this.#namesProvider(records, token)) providerTokens.add(token);
+      }
+      if (namedProvider !== undefined) {
+        providerTokens.add(namedProvider.slug);
+        for (const token of tokenizeField(namedProvider.name)) providerTokens.add(token);
+      }
+    }
     const scored: ScoredTool[] = [];
     const docs: CandidateDoc[] = [];
 
@@ -445,11 +456,7 @@ export class ToolCatalog {
           phrase,
           corpus,
           this.#coverageGate,
-          // Relax the multi-token gate inside an explicit scope only when the
-          // query carries a task word beyond provider names: "bot preset" in
-          // mosaic is a task, "shadcn context7" is only two provider names.
-          (args.server !== undefined || namedProvider !== undefined) &&
-            queryTokens.some((token) => !this.#namesProvider(records, token)),
+          providerTokens,
         );
         if (ranked !== null)
           scored.push({
@@ -946,7 +953,7 @@ function scoreTool(
   phrase: string,
   corpus: CorpusStats | null,
   coverageGate: boolean,
-  scoped: boolean,
+  scopedTokens: ReadonlySet<string>,
 ): { tier: number; score: number; matchedOn: string[] } | null {
   let score = 0;
   const matchedOn: string[] = [];
@@ -965,12 +972,16 @@ function scoreTool(
   // Baseline: score-only ranking keeps every candidate, including zero-hit ones.
   if (!coverageGate) return { tier: 2, score, matchedOn };
 
-  const total = queryTokens.length;
-  const covered = coverageHits.size;
+  // Provider words in the query ("mosaic" in "mosaic bot list") are scope, not
+  // task: they must not count as covered or inflate the denominator, or a scoped
+  // two-word task is gated out for the very word that chose the server.
+  const taskTokens = queryTokens.filter((token) => !scopedTokens.has(token));
+  const total = taskTokens.length === 0 ? queryTokens.length : taskTokens.length;
+  const covered = taskTokens.filter((token) => coverageHits.has(token)).length;
   // A caller that has already chosen a server is asking "which tool here?"; one
   // matched task word is enough to rank inside that server. Across the whole
   // directory the stricter multi-token gate still applies.
-  const minimum = scoped ? 1 : MIN_COVERED_TOKENS;
+  const minimum = scopedTokens.size > 0 ? 1 : MIN_COVERED_TOKENS;
   const passes =
     total === 1 ? covered >= 1 : covered >= minimum && covered / total >= MIN_COVERAGE_RATIO;
   // A provider-slug-only overlap or a single common word must not pass.
