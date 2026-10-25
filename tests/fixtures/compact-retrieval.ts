@@ -939,10 +939,10 @@ export const discoveryRegressions: DiscoveryRegression[] = [
   },
   {
     id: 'provider-prefix-two-word-task',
-    query: 'mosaic bot list',
+    query: 'mosaic list presets',
     entry: 'host',
     expected: toolId('mosaic', 'bots_list'),
-    note: 'A provider prefix plus a two-word task stays scoped and matchable.',
+    note: 'A provider prefix plus a two-word task excludes the provider word from coverage.',
   },
   {
     id: 'provider-scoped-mosaic',

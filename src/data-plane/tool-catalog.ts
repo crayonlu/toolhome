@@ -456,6 +456,7 @@ export class ToolCatalog {
           phrase,
           corpus,
           this.#coverageGate,
+          args.server !== undefined || namedProvider !== undefined,
           providerTokens,
         );
         if (ranked !== null)
@@ -953,7 +954,8 @@ function scoreTool(
   phrase: string,
   corpus: CorpusStats | null,
   coverageGate: boolean,
-  scopedTokens: ReadonlySet<string>,
+  scoped: boolean,
+  providerTokens: ReadonlySet<string>,
 ): { tier: number; score: number; matchedOn: string[] } | null {
   let score = 0;
   const matchedOn: string[] = [];
@@ -975,13 +977,13 @@ function scoreTool(
   // Provider words in the query ("mosaic" in "mosaic bot list") are scope, not
   // task: they must not count as covered or inflate the denominator, or a scoped
   // two-word task is gated out for the very word that chose the server.
-  const taskTokens = queryTokens.filter((token) => !scopedTokens.has(token));
+  const taskTokens = queryTokens.filter((token) => !providerTokens.has(token));
   const total = taskTokens.length === 0 ? queryTokens.length : taskTokens.length;
   const covered = taskTokens.filter((token) => coverageHits.has(token)).length;
   // A caller that has already chosen a server is asking "which tool here?"; one
   // matched task word is enough to rank inside that server. Across the whole
   // directory the stricter multi-token gate still applies.
-  const minimum = scopedTokens.size > 0 ? 1 : MIN_COVERED_TOKENS;
+  const minimum = scoped ? 1 : MIN_COVERED_TOKENS;
   const passes =
     total === 1 ? covered >= 1 : covered >= minimum && covered / total >= MIN_COVERAGE_RATIO;
   // A provider-slug-only overlap or a single common word must not pass.
