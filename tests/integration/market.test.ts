@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { fingerprint } from '../../src/upstream/stable-json.js';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,7 +70,7 @@ function createFakeDocker(options: { pullDelaySeconds?: number } = {}): {
 echo "$@" >> "${argsLog}"
 case "$1 $2" in
   "image inspect") exit 1 ;;
-  "pull toolhome/gh-cli:2.97.0") ${pullDelay}exit 0 ;;
+  "pull toolhome/gh-cli:2.104.0") ${pullDelay}exit 0 ;;
 esac
 exit 0
 `,
@@ -217,7 +219,7 @@ describe('market', () => {
 echo "$@" >> "${argsLog}"
 case "$1 $2" in
   "image inspect") exit 1 ;;
-  "pull toolhome/gh-cli:2.97.0") exit 0 ;;
+  "pull toolhome/gh-cli:2.104.0") exit 0 ;;
 esac
 exit 0
 `,
@@ -229,7 +231,7 @@ exit 0
     try {
       const result = (await installEntry(runtime, controlKey, 'gh-cli', {})) as { cliId: string };
       expect(result.cliId).toBeTruthy();
-      expect(readFileSync(argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.97.0');
+      expect(readFileSync(argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.104.0');
     } finally {
       await close();
       process.env.PATH = previousPath;
@@ -688,7 +690,7 @@ exit 0
       expect(started.status).toBe('installing');
       await close();
       expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
-      expect(readFileSync(fakeDocker.argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.97.0');
+      expect(readFileSync(fakeDocker.argsLog, 'utf8')).toContain('pull toolhome/gh-cli:2.104.0');
     } finally {
       fakeDocker.close();
     }
@@ -1042,6 +1044,73 @@ exit 0
       expect(cli.allowList).toEqual({ allow: [['-c', 'echo']], deny: [] });
     } finally {
       entry.allowList = originalAllowList;
+      await close();
+    }
+  });
+
+  it('checks registry versions using installation recipes without changing catalog update semantics', async () => {
+    const { runtime, controlKey, close } = createTestRuntime();
+    const ids = ['lark-cli', 'resend', 'fetch', 'host-shell', 'firecrawl-cli', 'wrangler-cli'];
+    for (const id of ids) {
+      const entry = marketCatalog.find((item) => item.id === id)!;
+      runtime.store.createInstallation({
+        source: 'curated',
+        entryId: id,
+        entryVersion: entry.version ?? 'unpinned',
+        recipeRevision: fingerprint(entry),
+        targetType: 'cli',
+        targetId: randomUUID(),
+        credentialId: null,
+      });
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('%40larksuite%2Fcli')) return Response.json({ version: '2.0.0' });
+      if (url.includes('resend-mcp')) return Response.json({ version: '2.28.1' });
+      if (url.includes('mcp-server-fetch')) return Response.json({ info: { version: '2027.1.1' } });
+      if (url.includes('firecrawl-cli')) return new Response('', { status: 503 });
+      if (url.includes('wrangler')) return Response.json({});
+      throw new Error(`Unexpected registry request: ${url}`);
+    });
+    try {
+      const updates = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'GET', '/api/v1/market/updates'),
+      )) as {
+        entryId: string;
+        updateAvailable: boolean;
+        latestUpstream: string | null;
+        upstreamVersionDiffers: boolean | null;
+      }[];
+      const row = (id: string) => updates.find((item) => item.entryId === id)!;
+      expect(row('lark-cli')).toMatchObject({
+        updateAvailable: false,
+        latestUpstream: '2.0.0',
+        upstreamVersionDiffers: true,
+      });
+      expect(row('resend')).toMatchObject({
+        updateAvailable: false,
+        latestUpstream: '2.28.1',
+        upstreamVersionDiffers: false,
+      });
+      expect(row('fetch')).toMatchObject({
+        updateAvailable: false,
+        latestUpstream: '2027.1.1',
+        upstreamVersionDiffers: true,
+      });
+      for (const id of ['host-shell', 'firecrawl-cli', 'wrangler-cli']) {
+        expect(row(id)).toMatchObject({
+          updateAvailable: false,
+          latestUpstream: null,
+          upstreamVersionDiffers: null,
+        });
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      const result = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/lark-cli/update', {}),
+      )) as { status: string };
+      expect(result.status).toBe('up_to_date');
+    } finally {
+      vi.restoreAllMocks();
       await close();
     }
   });

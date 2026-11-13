@@ -115,6 +115,10 @@ export class MarketService {
     return Promise.all(
       entries.map(async ({ entry, installation }) => {
         const catalogVersion = entry.version ?? 'unpinned';
+        const artifact = installerForEntry(entry);
+        const pin =
+          artifact?.type === 'npm' || artifact?.type === 'uvx' ? artifact.version : undefined;
+        const latestUpstream = await this.#latestUpstream(entry);
         return {
           entryId: entry.id,
           installedVersion: installation!.entryVersion,
@@ -122,7 +126,9 @@ export class MarketService {
           updateAvailable:
             catalogVersion !== installation!.entryVersion ||
             fingerprint(entry) !== installation!.recipeRevision,
-          latestUpstream: await this.#latestUpstream(entry),
+          latestUpstream,
+          upstreamVersionDiffers:
+            latestUpstream !== null && pin !== undefined ? latestUpstream !== pin : null,
         };
       }),
     );
@@ -865,13 +871,12 @@ export class MarketService {
 
   /** Best-effort latest upstream version; null when unreachable or unsupported. */
   async #latestUpstream(entry: MarketEntry): Promise<string | null> {
-    const pkg = entry.package;
-    if (pkg === undefined) return null;
+    const artifact = installerForEntry(entry);
     const url =
-      entry.kind === 'uvx'
-        ? `https://pypi.org/pypi/${pkg}/json`
-        : entry.kind === 'home-stdio'
-          ? `https://registry.npmmirror.com/${pkg}/latest`
+      artifact?.type === 'uvx'
+        ? `https://pypi.org/pypi/${encodeURIComponent(artifact.package)}/json`
+        : artifact?.type === 'npm'
+          ? `https://registry.npmmirror.com/${encodeURIComponent(artifact.package)}/latest`
           : null;
     if (url === null) return null;
     try {
@@ -884,7 +889,7 @@ export class MarketService {
           : typeof body.info?.version === 'string'
             ? body.info.version
             : null;
-      return version;
+      return version !== null && version.trim() !== '' ? version : null;
     } catch {
       return null;
     }

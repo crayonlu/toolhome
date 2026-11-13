@@ -172,6 +172,8 @@ The data plane also implements OAuth 2.1: a harness can discover the authorizati
 
 Downstream Dynamic Client Registration returns a stateless Client ID signed with the master key — no in-process registry, valid across restarts with the same key. HTTPS URL-based Client Metadata is also supported, with limits on response size, redirects, and non-public targets.
 
+Market versions are pinned in the catalog. `toolhome market updates` reports installed-versus-catalog changes in `updateAvailable`, and separately reports registry versions and `upstreamVersionDiffers` when the upstream supports them. A difference does not automatically change the catalog pin or install anything. The `Market upstream versions` GitHub Actions workflow checks pinned npm and PyPI catalog entries daily and stores a report; remote services and other installer types are marked unsupported. Registry errors remain visible as errors.
+
 ## Tool Exposure Modes
 
 The aggregate `POST /mcp` endpoint supports two exposure modes. `full` is the default and lists every enabled server's tools directly. `compact` is opt-in and exposes exactly two tools:

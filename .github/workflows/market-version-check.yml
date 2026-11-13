@@ -1,0 +1,37 @@
+name: Market upstream versions
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Check upstream registries
+        run: |
+          set -o pipefail
+          npx tsx scripts/check-market-versions.ts | tee market-versions.json
+      - name: Summarize version differences
+        if: always()
+        run: |
+          if [ -s market-versions.json ]; then
+            node -e 'const r = require("./market-versions.json").results; console.log("## Market upstream versions\n\n| Entry | Status | Pin | Upstream |\n| --- | --- | --- | --- |"); for (const x of r.filter(x => x.status !== "equal")) console.log(`| ${x.id} | ${x.status} | ${x.pinned ?? "—"} | ${x.latest ?? x.error ?? "—"} |`)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Preserve version report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-versions
+          path: market-versions.json
+          if-no-files-found: ignore

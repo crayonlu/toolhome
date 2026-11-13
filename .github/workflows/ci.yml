@@ -126,7 +126,7 @@ jobs:
         run: |
           cat > /tmp/gh.Dockerfile <<'EOF'
           FROM alpine:3.20
-          ARG GH_VERSION=2.97.0
+          ARG GH_VERSION=2.104.0
           # No GH_HOST: the deployment host reaches api.github.com directly
           # (verified from inside a container on it), while the Cloudflare Worker
           # relay that used to be baked in here stopped answering and made every
@@ -138,8 +138,8 @@ jobs:
            && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
            && rm -rf /tmp/gh.tgz "/tmp/gh_${GH_VERSION}_linux_amd64"
           EOF
-          docker build -f /tmp/gh.Dockerfile -t toolhome/gh-cli:2.97.0 /tmp
-          docker save toolhome/gh-cli:2.97.0 | gzip > gh-cli-image.tar.gz
+          docker build -f /tmp/gh.Dockerfile -t toolhome/gh-cli:2.104.0 /tmp
+          docker save toolhome/gh-cli:2.104.0 | gzip > gh-cli-image.tar.gz
       # The app image is built on the server instead of being shipped: it is
       # ~1.4 GB, and only dist/, web/dist/ and the manifest change per deploy, so
       # the npm/apk/uv layers stay cached there and a few MB cross the network.

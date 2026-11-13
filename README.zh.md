@@ -172,6 +172,8 @@ ToolHome 的数据面也实现 OAuth 2.1：Harness 可通过 RFC 9728 元数据�
 
 下游 Dynamic Client Registration 返回由主密钥签名的无状态 Client ID，不依赖进程内注册表；使用同一主密钥重启后仍然有效。同时支持 HTTPS URL-based Client Metadata，并限制响应大小、重定向和非公网目标。
 
+Market 的版本固定在目录中。`toolhome market updates` 的 `updateAvailable` 表示已安装版本或配方与目录的差异，并在支持查询时单独提供上游版本和 `upstreamVersionDiffers`。上游版本不同不会自动修改目录或安装。GitHub Actions 的 `Market upstream versions` 工作流每天检查目录中固定版本的 npm 和 PyPI 条目并保存报告；远程服务及其他安装方式标为不支持，查询失败会明确显示。
+
 ## 工具暴露模式
 
 聚合入口 `POST /mcp` 支持两种工具暴露模式。`full` 为默认，直接列出每个启用 Server 的工具；`compact` 需显式启用，只暴露两个工具：

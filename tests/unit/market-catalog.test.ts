@@ -35,7 +35,7 @@ describe('platform CLI Market catalog', () => {
     const azure = marketCatalog.find((entry) => entry.id === 'azure-cli');
     const github = marketCatalog.find((entry) => entry.id === 'gh-cli');
     expect(azure?.image).toBe('mcr.microsoft.com/azure-cli:2.89.0');
-    expect(github?.image).toBe('toolhome/gh-cli:2.97.0');
+    expect(github?.image).toBe('toolhome/gh-cli:2.104.0');
     expect(azure?.credentialBindings).toEqual({
       AZURE_CLIENT_ID: 'env:AZURE_CLIENT_ID',
       AZURE_CLIENT_SECRET: 'env:AZURE_CLIENT_SECRET',
@@ -85,7 +85,7 @@ describe('platform CLI Market catalog', () => {
         kind: 'cli-binary',
         platform: 'lark',
         installer: 'npm',
-        version: '1.0.92',
+        version: '1.0.100',
       },
       {
         id: 'firecrawl-cli',
@@ -93,7 +93,7 @@ describe('platform CLI Market catalog', () => {
         kind: 'cli-binary',
         platform: 'firecrawl',
         installer: 'npm',
-        version: '1.23.3',
+        version: '1.29.0',
       },
       {
         id: 'wrangler-cli',
@@ -101,7 +101,7 @@ describe('platform CLI Market catalog', () => {
         kind: 'cli-binary',
         platform: 'cloudflare',
         installer: 'npm',
-        version: '4.127.0',
+        version: '4.161.0',
       },
       {
         id: 'vercel-cli',

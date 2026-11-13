@@ -39,17 +39,17 @@ describe('Market installer backends', () => {
       const { context, calls } = createContext([1, 1, 0]);
       const runtime = await installArtifact(artifact, { ...context, marketDir: directory });
       expect(calls).toEqual([
-        ['docker', 'image', 'inspect', 'toolhome/gh-cli:2.97.0'],
-        ['docker', 'pull', 'toolhome/gh-cli:2.97.0'],
-        ['docker', 'build', '-t', 'toolhome/gh-cli:2.97.0', join(directory, 'dockerfiles/gh-cli')],
+        ['docker', 'image', 'inspect', 'toolhome/gh-cli:2.104.0'],
+        ['docker', 'pull', 'toolhome/gh-cli:2.104.0'],
+        ['docker', 'build', '-t', 'toolhome/gh-cli:2.104.0', join(directory, 'dockerfiles/gh-cli')],
       ]);
       expect(runtime).toEqual({
-        command: 'toolhome/gh-cli:2.97.0',
+        command: 'toolhome/gh-cli:2.104.0',
         executionMode: 'docker',
         entrypoint: 'gh',
       });
       const dockerfile = readFileSync(join(directory, 'dockerfiles/gh-cli/Dockerfile'), 'utf8');
-      expect(dockerfile).toContain('releases/download/v2.97.0/');
+      expect(dockerfile).toContain('releases/download/v2.104.0/');
       expect(dockerfile).toContain('${arch}');
       expect(dockerfile).not.toContain('GH_HOST=');
     } finally {

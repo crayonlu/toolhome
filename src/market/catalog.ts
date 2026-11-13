@@ -328,7 +328,7 @@ export const marketCatalog: MarketEntry[] = [
     category: 'email',
     kind: 'home-stdio',
     package: 'resend-mcp',
-    version: '2.12.0',
+    version: '2.28.1',
     bin: 'resend-mcp',
     credential: { type: 'env' },
     requires: [
@@ -563,27 +563,27 @@ ENTRYPOINT ["markitdown-mcp"]`,
     plane: 'cli',
     platform: 'github',
     kind: 'cli-image',
-    version: '2.97.0',
+    version: '2.104.0',
     installer: {
       type: 'docker',
       // gh ships no official image; CI builds toolhome/gh-cli from the release
       // tarball and preloads it onto the server (ghcr/docker Hub are blocked
       // from the deployment network).
-      image: 'toolhome/gh-cli:2.97.0',
+      image: 'toolhome/gh-cli:2.104.0',
       entrypoint: 'gh',
       // Fresh self-hosted instances can build the same pinned CLI without
       // depending on the deployment-specific image preload or GitHub relay.
       dockerfile: `FROM alpine:3.20
 RUN apk add --no-cache ca-certificates curl git \\
  && case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) exit 1 ;; esac \\
- && curl -fsSL "https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_linux_\${arch}.tar.gz" -o /tmp/gh.tgz \\
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_\${arch}.tar.gz" -o /tmp/gh.tgz \\
  && tar -xzf /tmp/gh.tgz -C /tmp \\
- && install -m 0755 "/tmp/gh_2.97.0_linux_\${arch}/bin/gh" /usr/local/bin/gh \\
- && rm -rf /tmp/gh.tgz "/tmp/gh_2.97.0_linux_\${arch}"
+ && install -m 0755 "/tmp/gh_2.104.0_linux_\${arch}/bin/gh" /usr/local/bin/gh \\
+ && rm -rf /tmp/gh.tgz "/tmp/gh_2.104.0_linux_\${arch}"
 ENTRYPOINT ["gh"]
 `,
     },
-    image: 'toolhome/gh-cli:2.97.0',
+    image: 'toolhome/gh-cli:2.104.0',
     entrypoint: 'gh',
     // Installs without credentials; authenticate afterwards via the device-flow
     // login persisted in the toolhome-gh-cli-state volume.
@@ -678,10 +678,10 @@ ENTRYPOINT ["gh"]
     plane: 'cli',
     platform: 'lark',
     kind: 'cli-binary',
-    version: '1.0.92',
+    version: '1.0.100',
     // The npm package is a launcher: the platform binary downloads on first
     // execution and caches inside the persistent market volume.
-    installer: { type: 'npm', package: '@larksuite/cli', bin: 'lark-cli', version: '1.0.92' },
+    installer: { type: 'npm', package: '@larksuite/cli', bin: 'lark-cli', version: '1.0.100' },
     bin: 'lark-cli',
     credential: { type: 'env' },
     credentialBindings: {},
@@ -744,8 +744,8 @@ ENTRYPOINT ["gh"]
     plane: 'cli',
     platform: 'firecrawl',
     kind: 'cli-binary',
-    version: '1.23.3',
-    installer: { type: 'npm', package: 'firecrawl-cli', bin: 'firecrawl', version: '1.23.3' },
+    version: '1.29.0',
+    installer: { type: 'npm', package: 'firecrawl-cli', bin: 'firecrawl', version: '1.29.0' },
     bin: 'firecrawl',
     credential: { type: 'bearer', tokenKey: 'FIRECRAWL_API_KEY' },
     credentialBindings: { FIRECRAWL_API_KEY: 'token' },
@@ -781,8 +781,8 @@ ENTRYPOINT ["gh"]
     plane: 'cli',
     platform: 'cloudflare',
     kind: 'cli-binary',
-    version: '4.127.0',
-    installer: { type: 'npm', package: 'wrangler', bin: 'wrangler', version: '4.127.0' },
+    version: '4.161.0',
+    installer: { type: 'npm', package: 'wrangler', bin: 'wrangler', version: '4.161.0' },
     bin: 'wrangler',
     credential: { type: 'bearer', tokenKey: 'CLOUDFLARE_API_TOKEN' },
     credentialBindings: { CLOUDFLARE_API_TOKEN: 'token' },
