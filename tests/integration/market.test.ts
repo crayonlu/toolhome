@@ -1017,6 +1017,36 @@ exit 0
     }
   });
 
+  it('uses a preloaded version-tagged image when upgrading a hosted CLI', async () => {
+    const fakeBin = mkdtempSync(join(tmpdir(), 'toolhome-market-preloaded-'));
+    const dockerPath = join(fakeBin, 'docker');
+    const argsLog = join(fakeBin, 'docker-args.log');
+    writeFileSync(dockerPath, `#!/bin/sh\necho "$@" >> "${argsLog}"\nexit 0\n`);
+    chmodSync(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const { runtime, controlKey, close } = createTestRuntime();
+    try {
+      await installEntry(runtime, controlKey, 'gh-cli');
+      const installation = runtime.store.getInstallation('gh-cli')!;
+      runtime.store.updateInstallation(installation.id, { entryVersion: '2.97.0' });
+      writeFileSync(argsLog, '');
+      const started = (await jsonResponse(
+        await controlRequest(runtime, controlKey, 'POST', '/api/v1/market/gh-cli/update', {}),
+      )) as { jobId: string };
+      const job = await waitForInstallJob(runtime, controlKey, started.jobId);
+      expect(job.status).toBe('completed');
+      const commands = readFileSync(argsLog, 'utf8');
+      expect(commands).toContain('image inspect toolhome/gh-cli:2.104.0');
+      expect(commands).not.toContain('pull ');
+      expect(runtime.store.getInstallation('gh-cli')?.entryVersion).toBe('2.104.0');
+    } finally {
+      await close();
+      process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
   it('updates hosted CLI runtime metadata when its recipe changes without a version bump', async () => {
     const { runtime, controlKey, close } = createTestRuntime();
     const entry = (await import('../../src/market/catalog.js')).marketCatalog.find(

@@ -772,10 +772,17 @@ export class MarketService {
   async #runUpdate(entry: MarketEntry, installation: MarketInstallation, job: LiveJob) {
     try {
       const artifact = installerForEntry(entry);
+      const usePreloadedVersionedImage =
+        artifact?.type === 'docker' &&
+        entry.version !== undefined &&
+        entry.version !== installation.entryVersion &&
+        artifact.image.endsWith(`:${entry.version}`);
       const installedRuntime =
         artifact === null
           ? null
-          : await installArtifact(artifact, this.#installerContext(job), { force: true });
+          : await installArtifact(artifact, this.#installerContext(job), {
+              force: !usePreloadedVersionedImage,
+            });
 
       if (installation.targetType === 'server') {
         const server = this.#store.getServer(installation.targetId);
