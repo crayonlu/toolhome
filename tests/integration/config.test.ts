@@ -435,6 +435,66 @@ describe('configuration backup', () => {
       await runtime.close();
     }
   });
+
+  it('reads pasted harness text as TOML or as JSON with a VS Code `servers` key', async () => {
+    const runtime = createTestRuntime();
+    try {
+      const toml = `[mcp_servers.pasted-docs]\nurl = "https://pasted.example.test/mcp"\n\n[mcp_servers.pasted-stdio]\ncommand = "npx"\nargs = ["-y", "some-mcp"]\n\n[ui]\ntheme = "terminal"\n`;
+      const fromToml = z
+        .object({
+          preview: z.literal(true),
+          entries: z.array(z.object({ slug: z.string(), kind: z.string() }).passthrough()),
+        })
+        .parse(
+          await jsonResponse(
+            await controlRequest(
+              runtime.runtime,
+              runtime.controlKey,
+              'POST',
+              '/api/v1/config/import-harness',
+              { text: toml, preview: true },
+            ),
+          ),
+        );
+      expect(fromToml.entries.map((entry) => entry.slug).sort()).toEqual([
+        'pasted-docs',
+        'pasted-stdio',
+      ]);
+      expect(fromToml.entries.find((entry) => entry.slug === 'pasted-stdio')?.kind).toBe('home');
+
+      // VS Code keeps its servers under `servers`; the reader picks that key.
+      const vscode = JSON.stringify({
+        servers: { 'pasted-code': { url: 'https://code.example.test/mcp' } },
+        inputs: [],
+      });
+      const fromJson = z
+        .object({ entries: z.array(z.object({ slug: z.string() }).passthrough()) })
+        .parse(
+          await jsonResponse(
+            await controlRequest(
+              runtime.runtime,
+              runtime.controlKey,
+              'POST',
+              '/api/v1/config/import-harness',
+              { text: vscode, preview: true },
+            ),
+          ),
+        );
+      expect(fromJson.entries.map((entry) => entry.slug)).toEqual(['pasted-code']);
+
+      // Text that is neither shape is a 400, not a silent empty import.
+      const response = await controlRequest(
+        runtime.runtime,
+        runtime.controlKey,
+        'POST',
+        '/api/v1/config/import-harness',
+        { text: 'not a config at all' },
+      );
+      expect(response.status).toBe(400);
+    } finally {
+      await runtime.close();
+    }
+  });
 });
 
 const importReportSchema = z

@@ -15,7 +15,6 @@ import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js
 import { readNodeStatus } from '../node/status.js';
 import { reportNodeStatus } from '../node/report.js';
 import { adoptCliCredentials } from './adopt.js';
-import { readHarnessFile, describePath } from '../config/harness-formats.js';
 import { listHarnesses, runHarnessImport } from './harness.js';
 import { migrateConfiguration } from './migrate.js';
 
@@ -660,9 +659,8 @@ config
   .action(
     run((client, file: string, options: { preview?: boolean; upsert?: boolean; node?: string }) => {
       const text = file === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(file), 'utf8');
-      const content = readHarnessFile(file, text, describePath(file, text));
       return client.request('POST', '/api/v1/config/import-harness', {
-        config: { mcpServers: content.servers },
+        text,
         preview: options.preview ?? false,
         ...(options.upsert ? { mode: 'upsert' } : {}),
         ...(options.node === undefined ? {} : { node: options.node }),

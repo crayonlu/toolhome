@@ -145,8 +145,12 @@ export function SettingsPage() {
     setHarnessBusy(true)
     setHarnessResult(null)
     try {
-      const config = JSON.parse(harnessText)
-      const result = await api.post('/api/v1/config/import-harness', { config, preview })
+      // The server reads the pasted text with the same JSON/TOML readers the
+      // CLI uses, so a TOML block pastes as-is.
+      const result = await api.post('/api/v1/config/import-harness', {
+        text: harnessText,
+        preview,
+      })
       setHarnessResult(result as HarnessImportResult)
       if (!preview) toast('imported', 'success')
     } catch (error) {

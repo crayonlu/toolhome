@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import { nodeIdSchema } from '../domain/models.js';
+import { describePath, readHarnessFile } from '../config/harness-formats.js';
 import type { Logger } from '../observability/logger.js';
 import type { AuthService } from '../security/auth-service.js';
 import { bearerToken } from '../security/auth-service.js';
@@ -407,17 +408,43 @@ export function mountControlApi(
     adminRoute(async (context) => {
       const body = (await context.req.json()) as {
         config?: unknown;
+        text?: unknown;
         preview?: boolean;
         mode?: 'create' | 'upsert';
         node?: unknown;
         includeGateways?: boolean;
       };
-      if (body.config === undefined) {
-        throw new AppError('invalid_input', 'Missing "config" (the mcpServers object)', 400);
+      // `text` is the config as the user has it: the shipped readers decide
+      // between JSON (`mcpServers`, VS Code's `servers`) and TOML
+      // (`[mcp_servers.*]`), so a console paste and a CLI file share one path.
+      const config =
+        typeof body.text === 'string'
+          ? {
+              mcpServers: readHarnessFile('pasted', body.text, describePath('pasted', body.text))
+                .servers,
+            }
+          : body.config;
+      if (config === undefined) {
+        throw new AppError(
+          'invalid_input',
+          'Missing "config" (the mcpServers object) or "text" (the harness config as written)',
+          400,
+        );
+      }
+      // A paste that yields no servers is a mistake, not an import of nothing.
+      if (
+        typeof config === 'object' &&
+        config !== null &&
+        'mcpServers' in config &&
+        typeof config.mcpServers === 'object' &&
+        config.mcpServers !== null &&
+        Object.keys(config.mcpServers).length === 0
+      ) {
+        throw new AppError('invalid_input', 'No MCP servers found in the harness config', 400);
       }
       const nodeId =
         body.node === undefined || body.node === null ? null : nodeIdSchema.parse(body.node);
-      return options.service.importHarnessConfig(body.config, {
+      return options.service.importHarnessConfig(config, {
         preview: body.preview === true,
         mode: body.mode === 'upsert' ? 'upsert' : 'create',
         nodeId,
