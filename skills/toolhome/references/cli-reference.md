@@ -128,10 +128,32 @@ toolhome config export <file> --include-secrets  # full backup (0600)
 toolhome config import <file>                 # restore (atomic transaction)
 toolhome config import <file> --mode merge [--upsert] [--dry-run]
                                               # merge keeps what the target already has
-toolhome config import-harness <file> [--preview] [--upsert]
-                                              # import a Claude Desktop / Cursor mcpServers JSON;
-                                              # secrets become encrypted credentials (never echoed)
+toolhome config import-harness <file> [--preview] [--upsert] [--node <id>]
+                                              # import a harness config (JSON mcpServers / TOML
+                                              # mcp_servers); secrets become encrypted credentials
+                                              # (never echoed); --node places stdio entries on a node
 ```
+
+## harness
+
+```bash
+toolhome harness list                         # known harnesses and whether their config exists here
+toolhome harness import [files...]            # one step: read → preview → apply → verify → snippet
+  --harness <id...>                           # claude, claude-desktop, cursor, codex, grok, pi, vscode
+  --node <id>                                 # place stdio entries on this machine's node label
+  --preview                                   # stop before writing
+  --upsert                                    # update existing servers instead of reporting conflicts
+  --issue-access-key <name>                   # issue an MCP Access Key for the harness entry
+  --write-back                                # replace migrated entries with one /mcp entry (keeps a .bak)
+  --include-gateways                          # proxy another instance's endpoint instead of skipping it
+```
+
+`harness import` reads every named file (or every known harness whose config exists), merges
+the entries, and posts the same `POST /api/v1/config/import-harness` the console uses. Entries
+that already reach ToolHome — `toolhome mcp stdio`, `mcp launch <slug>`, a URL carrying a
+`tch_mcp_` key, or the target's own origin — come back as gateways and are left out. The
+report names remote entries that still need `credential authorize`, the host-hosted servers
+that are not ready, and prints the JSON and TOML snippets for the new entry.
 
 An export covers `credentials`, `servers` (including `nodeId` placement), `clis` (the hosted
 CLI plane) and `installations` (Market provenance, reported but not written by the import).
@@ -143,7 +165,9 @@ unless `--upsert` is given, so a re-run is a no-op rather than a silent overwrit
 
 ```json
 {
-  "mode": "merge", "upsert": false, "dryRun": false,
+  "mode": "merge",
+  "upsert": false,
+  "dryRun": false,
   "credentials": [{ "name": "Azure SP", "status": "reused" }],
   "servers": [{ "slug": "firecrawl", "status": "created" }],
   "clis": [{ "slug": "gh-cli", "status": "skipped", "changes": [] }],
@@ -328,12 +352,12 @@ Copies this instance into another one. The source is whatever the command alread
 (`--url`/`--key`, `TOOLHOME_URL`/`TOOLHOME_CONTROL_KEY`, or `~/.config/toolhome/config.json`);
 the target is `--to`/`--to-key`. Both keys must be admin-scoped.
 
-| Option | Effect |
-| --- | --- |
-| `--planes <mcp,cli>` | Which planes to move (default both) |
-| `--dry-run` | Report what would change without writing to the target |
-| `--with-state` | Also move each hosted CLI's state volume (contains credentials) |
-| `--reset-oauth-clients` | Clear OAuth client registrations that point at the source origin |
+| Option                      | Effect                                                              |
+| --------------------------- | ------------------------------------------------------------------- |
+| `--planes <mcp,cli>`        | Which planes to move (default both)                                 |
+| `--dry-run`                 | Report what would change without writing to the target              |
+| `--with-state`              | Also move each hosted CLI's state volume (contains credentials)     |
+| `--reset-oauth-clients`     | Clear OAuth client registrations that point at the source origin    |
 | `--issue-access-key <name>` | Issue an MCP Access Key on the target and print the harness snippet |
 
 Order is deliberate: Market entries are **reinstalled first** (each one provisions its own
@@ -354,8 +378,13 @@ a secret or failed, and every OAuth credential whose registration was left in pl
   "target": { "servers": 0, "clis": 0, "credentials": 0 },
   "reinstalls": [{ "entryId": "gh-cli", "plane": "cli", "status": "installed" }],
   "imported": { "counts": { "created": 2, "skipped": 1 } },
-  "stateTransfers": [{ "slug": "gh-cli", "volume": "toolhome-gh-cli-state", "status": "moved", "bytes": 412 }],
-  "verification": { "clis": [{ "slug": "gh-cli", "installed": true, "version": "gh 2.97.0", "loggedIn": true }], "mcpOk": true },
+  "stateTransfers": [
+    { "slug": "gh-cli", "volume": "toolhome-gh-cli-state", "status": "moved", "bytes": 412 }
+  ],
+  "verification": {
+    "clis": [{ "slug": "gh-cli", "installed": true, "version": "gh 2.97.0", "loggedIn": true }],
+    "mcpOk": true
+  },
   "oauthRegistrationsReset": [],
   "accessKey": null,
   "manual": ["Access keys are stored as digests and cannot be moved: …"]

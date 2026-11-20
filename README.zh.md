@@ -286,6 +286,21 @@ npm run cli -- migrate --to https://cloud.example.com --to-key "$TOOLHOME_CONTRO
 
 二进制不参与迁移，也不需要参与：macOS 上的 `gh` 是 Mach-O 可执行文件，而 gateway 运行 Alpine Linux，目标实例会按 catalog 重建自己的 pin 版本制品。逐条结果是 `adopted`、`already-authenticated`、`credential-only`（取值随导出一起走）、`manual`（条目会给出目标端要执行的命令）或 `failed`。
 
+### 从本地 harness 配置迁入
+
+`toolhome harness import` 读取 harness 已有的 MCP 服务器，一步放到本实例上，不需要手工粘贴 JSON：
+
+```bash
+toolhome harness list                                  # 已知 harness，以及本机存在哪些配置文件
+toolhome harness import --harness grok --preview       # 将创建什么，密钥已打码
+toolhome harness import --harness grok --harness cursor \
+  --node R9000P --issue-access-key laptop --write-back
+```
+
+JSON（`mcpServers`，以及 VS Code 的 `servers`）和 TOML（`[mcp_servers.*]`，Grok Build 与 Codex 的写法）由同一个通用读取器处理；新增 harness 只是位置表里的一行，不是适配器。`--node <label>` 把 stdio 条目放到你自己的机器上，而不是 gateway 宿主机——本机能力型服务器（本机 Chrome、本机 Ghidra）必须这样放。已经指向 ToolHome 的条目（`toolhome mcp stdio`、`mcp launch <slug>`、带 `tch_mcp_` 密钥的 URL、目标实例自身的 origin）会作为 gateway 报告并跳过，避免 gateway 包装自己（`--include-gateways` 用于刻意代理另一个实例的端点；本实例自身的端点始终跳过）。
+
+`--write-back` 会把各文件里已迁走的条目替换成一条 `/mcp` 条目（保留 `.bak-<时间戳>` 备份），下次 harness 启动即直连实例。报告会列出仍需 `credential authorize` 的远端条目、宿主机连不上的服务器，并打印 JSON 与 TOML 两种可直接粘贴的片段。
+
 ## 配置
 
 | 环境变量                         | 说明                                              | 默认值                  |

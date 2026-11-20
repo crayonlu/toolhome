@@ -81,6 +81,7 @@ toolhome mcp launch <slug>              # run a server placed on this machine (s
 toolhome endpoint aggregate             # show the aggregate endpoint URL
 toolhome market list                    # browse the Market catalog
 toolhome market install resend         # supply the secret at the one-time browser URL
+toolhome harness import --harness grok --node laptop         # move local harness servers here
 toolhome migrate --to https://cloud.example.com --to-key ...  # copy this instance there
 toolhome cli adopt gh-cli               # move a local CLI login into the instance
 toolhome calls list --limit 10                              # recent tool calls
@@ -274,6 +275,26 @@ How it works: the launcher reads the server's transport and its credential value
 
 Deployment note: because the launcher resolves its config through ToolHome, a client-machine server is unavailable while the ToolHome server or the network path to it is down. Placement also does not create a private channel — a `node` server still runs with the user's own privileges on that machine.
 
+### Move Local Harness Servers onto the Instance
+
+`toolhome harness import` takes the MCP servers a harness already has and puts them on the
+instance in one step:
+
+```bash
+toolhome harness list                                  # which harness configs exist on this machine
+toolhome harness import --harness grok --preview       # masked preview first
+toolhome harness import --harness grok --harness cursor \
+  --node R9000P --issue-access-key laptop --write-back
+```
+
+It reads JSON (`mcpServers`, VS Code's `servers`) and TOML (`[mcp_servers.*]`) through one
+generic reader; harnesses are rows in a location table (Claude Code, Claude Desktop, Cursor,
+Codex, Grok, Pi, VS Code), not adapters. `--node <label>` places stdio entries on the client
+machine, which local-capability servers need. Entries that already reach ToolHome are reported
+as gateways and left out, so the gateway never wraps itself (`--include-gateways` opts into
+proxying another instance deliberately). `--write-back` leaves each file
+with a single `/mcp` entry and a `.bak-<timestamp>` copy; the report prints the exact snippet.
+
 ### Move Everything to Another Instance
 
 `toolhome migrate` copies both planes from the instance the command already points at into a
@@ -329,20 +350,20 @@ toolhome events --limit 100 # recent events, including cli.exec
 
 ## Configuration
 
-| Env                               | Description                                        | Default                        |
-| --------------------------------- | -------------------------------------------------- | ------------------------------ |
-| `TOOLHOME_PUBLIC_URL`             | External HTTPS origin                              | required                       |
-| `TOOLHOME_MASTER_KEY`             | Secret encryption key (32+ chars)                  | required                       |
-| `TOOLHOME_BOOTSTRAP_CONTROL_KEY`  | First-boot Control Key                             | required on first boot         |
-| `TOOLHOME_HOST` / `TOOLHOME_PORT` | Listen address                                     | `127.0.0.1:3344`               |
-| `TOOLHOME_DATA_DIR`               | SQLite + market data                               | `/data`                        |
-| `TOOLHOME_MARKET_DIR`             | Market npm install dir                             | `<dataDir>/market`             |
-| `TOOLHOME_WEB_DIR`                | Web console static files                           | disabled (set in Docker image) |
-| `TOOLHOME_OAUTH_URL_CLIENT_ID`    | Global OAuth client registration                   | `true` (URL-based)             |
-| `TOOLHOME_UV_INDEX_URL`           | PyPI mirror for uvx Market installs                | unset (pypi.org)               |
-| `TOOLHOME_CALLS_RETENTION_DAYS`   | Tool call record retention in days (metadata only) | `30`                           |
-| `NODE_OPTIONS`                    | Baked into the image as `--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000` so dual-stack upstreams (Notion, Penpot) connect over IPv4 on hosts without IPv6 while still falling back across multiple A records | image default |
-| `TOOLHOME_MCP_TOOL_MODE`          | Aggregate `/mcp` exposure: `full` or `compact`     | `full`                         |
+| Env                               | Description                                                                                                                                                                                                                                    | Default                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `TOOLHOME_PUBLIC_URL`             | External HTTPS origin                                                                                                                                                                                                                          | required                       |
+| `TOOLHOME_MASTER_KEY`             | Secret encryption key (32+ chars)                                                                                                                                                                                                              | required                       |
+| `TOOLHOME_BOOTSTRAP_CONTROL_KEY`  | First-boot Control Key                                                                                                                                                                                                                         | required on first boot         |
+| `TOOLHOME_HOST` / `TOOLHOME_PORT` | Listen address                                                                                                                                                                                                                                 | `127.0.0.1:3344`               |
+| `TOOLHOME_DATA_DIR`               | SQLite + market data                                                                                                                                                                                                                           | `/data`                        |
+| `TOOLHOME_MARKET_DIR`             | Market npm install dir                                                                                                                                                                                                                         | `<dataDir>/market`             |
+| `TOOLHOME_WEB_DIR`                | Web console static files                                                                                                                                                                                                                       | disabled (set in Docker image) |
+| `TOOLHOME_OAUTH_URL_CLIENT_ID`    | Global OAuth client registration                                                                                                                                                                                                               | `true` (URL-based)             |
+| `TOOLHOME_UV_INDEX_URL`           | PyPI mirror for uvx Market installs                                                                                                                                                                                                            | unset (pypi.org)               |
+| `TOOLHOME_CALLS_RETENTION_DAYS`   | Tool call record retention in days (metadata only)                                                                                                                                                                                             | `30`                           |
+| `NODE_OPTIONS`                    | Baked into the image as `--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000` so dual-stack upstreams (Notion, Penpot) connect over IPv4 on hosts without IPv6 while still falling back across multiple A records | image default                  |
+| `TOOLHOME_MCP_TOOL_MODE`          | Aggregate `/mcp` exposure: `full` or `compact`                                                                                                                                                                                                 | `full`                         |
 
 ## Deep Dives
 

@@ -302,6 +302,21 @@ Two things cannot cross on their own, and the command reports both rather than p
 
 Binaries are not part of a migration and do not need to be: a macOS `gh` is a Mach-O binary while the gateway runs Alpine Linux, so the target rebuilds its own pinned artifact from the catalog. Per-entry outcomes are one of `adopted`, `already-authenticated`, `credential-only` (values travel with the export), `manual` (the entry names the command to run on the target), or `failed`.
 
+### From local harness configs
+
+`toolhome harness import` reads the MCP servers a harness already has and puts them on this instance in one step — no pasting JSON by hand:
+
+```bash
+toolhome harness list                                  # known harnesses, and which files exist here
+toolhome harness import --harness grok --preview       # what would be created, secrets masked
+toolhome harness import --harness grok --harness cursor \
+  --node R9000P --issue-access-key laptop --write-back
+```
+
+It reads JSON (`mcpServers`, and VS Code's `servers`) and TOML (`[mcp_servers.*]`, as Grok Build and Codex write it) through one generic reader; a harness is a row in a location table, not an adapter. `--node <label>` places stdio entries on your machine instead of the gateway host, which is what local-capability servers (a local Chrome, a local Ghidra) need. Entries that already reach ToolHome — `toolhome mcp stdio`, `mcp launch <slug>`, a URL carrying a `tch_mcp_` key, or the target's own origin — are reported as gateways and left out, so the gateway never wraps itself (`--include-gateways` imports another instance's endpoint on purpose; this instance's own endpoint is always left out).
+
+`--write-back` replaces the migrated entries in each file with a single `/mcp` entry (a `.bak-<timestamp>` copy is kept), so the next harness start talks to the instance directly. The report names any remote entry that still needs `credential authorize`, the servers the host could not connect to, and prints the exact snippet for JSON and TOML harnesses.
+
 ## Configuration
 
 | Environment variable             | Description                                                                   | Default                 |
