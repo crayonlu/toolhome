@@ -236,6 +236,7 @@ export const zh: Dict = {
   'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
   'settings.harnessPreview': '预览',
   'settings.harnessImportButton': '导入',
+  'settings.harnessGateways': '已经是 ToolHome — 未重复导入',
   'settings.harnessCredential': '凭据',
   'settings.harnessStatus.created': '已创建',
   'settings.harnessStatus.conflict': '已存在',

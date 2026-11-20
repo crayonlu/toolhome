@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { Command } from 'commander';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,8 @@ import { prepareLocalGateway, startLocalGateway } from '../node/local-gateway.js
 import { readNodeStatus } from '../node/status.js';
 import { reportNodeStatus } from '../node/report.js';
 import { adoptCliCredentials } from './adopt.js';
+import { readHarnessFile, describePath } from '../config/harness-formats.js';
+import { listHarnesses, runHarnessImport } from './harness.js';
 import { migrateConfiguration } from './migrate.js';
 
 function packageVersion(): string {
@@ -650,17 +652,98 @@ config
 config
   .command('import-harness <file>')
   .description(
-    'Import a harness mcpServers config (Claude Desktop / Cursor JSON); secrets become encrypted credentials',
+    'Import a harness config (JSON mcpServers or TOML mcp_servers); secrets become encrypted credentials',
   )
   .option('--preview', 'show what would be imported without writing anything')
   .option('--upsert', 'update existing servers (transport/env) instead of reporting conflicts')
+  .option('--node <id>', 'place stdio entries on this node label instead of the ToolHome host')
   .action(
-    run((client, file: string, options: { preview?: boolean; upsert?: boolean }) =>
-      client.request('POST', '/api/v1/config/import-harness', {
-        config: readJson(file),
+    run((client, file: string, options: { preview?: boolean; upsert?: boolean; node?: string }) => {
+      const text = file === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(file), 'utf8');
+      const content = readHarnessFile(file, text, describePath(file, text));
+      return client.request('POST', '/api/v1/config/import-harness', {
+        config: { mcpServers: content.servers },
         preview: options.preview ?? false,
         ...(options.upsert ? { mode: 'upsert' } : {}),
-      }),
+        ...(options.node === undefined ? {} : { node: options.node }),
+      });
+    }),
+  );
+
+const harness = program
+  .command('harness')
+  .description('Move the MCP servers of local harness configs onto this instance');
+harness
+  .command('list')
+  .description('List known harness configs and whether they exist on this machine')
+  .action(
+    run(() =>
+      listHarnesses(process.env, homedir()).map((entry) => ({
+        ...entry,
+        exists: entry.path !== null,
+      })),
+    ),
+  );
+harness
+  .command('import [files...]')
+  .description(
+    'Read harness configs (JSON mcpServers or TOML mcp_servers), import their servers, verify, and print the /mcp snippet',
+  )
+  .option('--harness <id...>', 'known harness to read (claude, claude-desktop, cursor, codex, grok, pi, vscode)')
+  .option('--node <id>', 'place stdio entries on this node label instead of the ToolHome host')
+  .option('--preview', 'show what would be imported without writing anything')
+  .option('--upsert', 'update existing servers instead of reporting conflicts')
+  .option('--write-back', 'replace the migrated entries in each harness file with one /mcp entry')
+  .option('--include-gateways', 'import another ToolHome instance endpoint instead of leaving it out')
+  .option('--issue-access-key <name>', 'issue an MCP Access Key for the harness entry')
+  .action(
+    run(
+      async (
+        client,
+        files: string[],
+        options: {
+          harness?: string[];
+          node?: string;
+          preview?: boolean;
+          upsert?: boolean;
+          writeBack?: boolean;
+          issueAccessKey?: string;
+          includeGateways?: boolean;
+        },
+      ) => {
+        const connection = resolveConnection(program.opts<GlobalOptions>());
+        return runHarnessImport(
+          {
+            client,
+            baseUrl: connection.url,
+            readFile: (path) => readFileSync(resolve(path), 'utf8'),
+            writeFile: (path, text) => {
+              writeFileSync(path, text, { mode: 0o600 });
+              chmodSync(path, 0o600);
+            },
+            backup: (path) => {
+              const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+              const target = `${path}.bak-${stamp}`;
+              copyFileSync(path, target);
+              chmodSync(target, 0o600);
+              return target;
+            },
+            env: process.env,
+            home: homedir(),
+            log: (line) => process.stderr.write(`${line}\n`),
+          },
+          {
+            files,
+            harnesses: options.harness ?? [],
+            nodeId: options.node ?? null,
+            preview: options.preview === true,
+            writeBack: options.writeBack === true,
+            issueAccessKey: options.issueAccessKey ?? null,
+            mode: options.upsert === true ? 'upsert' : 'create',
+            includeGateways: options.includeGateways === true,
+          },
+        );
+      },
     ),
   );
 
@@ -707,6 +790,7 @@ program
           ...(options.issueAccessKey === undefined
             ? {}
             : { accessKeyName: options.issueAccessKey }),
+          targetUrl: options.to,
           log: (line) => process.stderr.write(`${line}\n`),
         });
         process.stderr.write(`source ${connection.url} → target ${options.to}\n`);

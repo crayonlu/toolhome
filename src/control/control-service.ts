@@ -20,7 +20,7 @@ import {
   type TransportConfig,
 } from '../domain/models.js';
 import {
-  parseHarnessConfig,
+  parseHarnessConfigDetailed,
   toPreview,
   type HarnessImportedEntry,
 } from '../config/harness-import.js';
@@ -939,11 +939,29 @@ export class ControlService {
     validateCliCredentialBindings(payload, bindings);
   }
 
-  async importHarnessConfig(value: unknown, preview = false, mode: 'create' | 'upsert' = 'create') {
-    const entries = parseHarnessConfig(value);
+  async importHarnessConfig(
+    value: unknown,
+    options: {
+      preview?: boolean;
+      mode?: 'create' | 'upsert';
+      nodeId?: string | null;
+      targetUrl?: string | null;
+      includeGateways?: boolean;
+    } = {},
+  ) {
+    const preview = options.preview === true;
+    const mode = options.mode ?? 'create';
+    const nodeId = options.nodeId ?? null;
+    const { entries, gateways } = parseHarnessConfigDetailed(value, {
+      nodeId,
+      targetUrl: options.targetUrl ?? this.#publicUrl.toString(),
+      includeGateways: options.includeGateways === true,
+    });
     if (preview) {
       return {
         preview: true,
+        nodeId,
+        gateways,
         entries: entries.map((entry) => this.#harnessPreview(entry, mode)),
       };
     }
@@ -985,6 +1003,7 @@ export class ControlService {
               slug: entry.slug,
               name: entry.name,
               kind: entry.kind,
+              nodeId: entry.nodeId,
               transport: entry.transport,
               credentialId,
               enabled: true,
@@ -1003,7 +1022,7 @@ export class ControlService {
         };
       }),
     );
-    return { preview: false, entries: results };
+    return { preview: false, nodeId, gateways, entries: results };
   }
 
   /** Preview with per-entry status (created/changed/unchanged/conflict) — secrets masked. */
@@ -1026,6 +1045,7 @@ export class ControlService {
   /** Field-level diff between a parsed entry and the stored server — names only, never values. */
   #harnessDiff(entry: HarnessImportedEntry, existing: ServerRecord): string[] {
     const changes: string[] = [];
+    if (entry.kind !== existing.kind || entry.nodeId !== existing.nodeId) changes.push('placement');
     const current = existing.transport;
     const next = entry.transport;
     if (next.type === 'streamable-http' && current.type === 'streamable-http') {
@@ -1058,14 +1078,31 @@ export class ControlService {
     name: string;
     slug: string;
     status: string;
-    serverId: string;
+    serverId?: string;
     changes: string[];
     warnings: string[];
+    message?: string;
   }> {
     return (async () => {
-      if (changes.some((change) => change !== 'credential')) {
-        await this.updateServer(existing.id, { transport: entry.transport });
+      if (changes.includes('placement') && entry.kind !== existing.kind) {
+        // Moving a server between the host and a machine is a delete + create:
+        // its runtime belongs to a different process owner. Say so instead of
+        // leaving a home server that should run on a node.
+        return {
+          name: entry.name,
+          slug: entry.slug,
+          status: 'conflict',
+          changes,
+          warnings: entry.warnings,
+          message: `The stored server is ${existing.kind}; the harness entry would be ${entry.kind}. Delete it and re-import to move it.`,
+        };
       }
+      const patch: { transport?: TransportConfig; nodeId?: string | null } = {};
+      if (changes.some((change) => change !== 'credential' && change !== 'placement')) {
+        patch.transport = entry.transport;
+      }
+      if (changes.includes('placement')) patch.nodeId = entry.nodeId;
+      if (Object.keys(patch).length > 0) await this.updateServer(existing.id, patch);
       if (changes.includes('credential')) {
         if (existing.credentialId && entry.credential) {
           await this.updateCredential(existing.credentialId, { payload: entry.credential.payload });

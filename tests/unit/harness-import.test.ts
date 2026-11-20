@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseHarnessConfig,
+  parseHarnessConfigDetailed,
   toPreview,
   toSlug,
 } from '../../src/config/harness-import.js';
@@ -131,5 +132,124 @@ describe('harness config parser', () => {
     expect(previews[0]?.credential?.fields.map((f) => f.name)).toEqual(['MOSAIC_PASSWORD']);
     expect(previews[1]?.credential?.fields.map((f) => f.name)).toEqual(['token']);
     expect(entry).toBeDefined();
+  });
+});
+
+describe('gateway entries and placement', () => {
+  it('keeps a `toolhome mcp stdio` launcher out of the servers and reports it', () => {
+    const result = parseHarnessConfigDetailed({
+      mcpServers: {
+        gateway: { command: 'toolhome', args: ['mcp', 'stdio'] },
+        docs: { url: 'https://docs.example.test/mcp' },
+      },
+    });
+    expect(result.entries.map((entry) => entry.slug)).toEqual(['docs']);
+    expect(result.gateways).toEqual([
+      expect.objectContaining({ slug: 'gateway', via: 'stdio', target: null }),
+    ]);
+    expect(result.gateways[0]?.message).toContain('wrap ToolHome inside ToolHome');
+  });
+
+  it('recognizes `mcp launch <slug>` through a package runner and names the server', () => {
+    const result = parseHarnessConfigDetailed({
+      mcpServers: {
+        chrome: { command: 'npx', args: ['-y', 'toolhome', 'mcp', 'launch', 'chrome-devtools'] },
+      },
+    });
+    expect(result.entries).toEqual([]);
+    expect(result.gateways[0]).toMatchObject({
+      via: 'launch',
+      target: 'chrome-devtools',
+    });
+  });
+
+  it('treats a remote entry that authenticates with a ToolHome Access Key as another instance', () => {
+    const result = parseHarnessConfigDetailed({
+      mcpServers: {
+        other: {
+          url: 'https://other.example.test/mcp',
+          headers: { Authorization: 'Bearer tch_mcp_abcdef' },
+        },
+      },
+    });
+    expect(result.entries).toEqual([]);
+    expect(result.gateways[0]).toMatchObject({ via: 'remote', target: 'https://other.example.test/mcp' });
+  });
+
+  it('treats an entry pointing at the instance being imported into as the gateway itself', () => {
+    const result = parseHarnessConfigDetailed(
+      {
+        mcpServers: {
+          self: { url: 'https://tool.example.test/mcp' },
+          docs: { url: 'https://docs.example.test/mcp' },
+        },
+      },
+      { targetUrl: 'https://tool.example.test' },
+    );
+    expect(result.entries.map((entry) => entry.slug)).toEqual(['docs']);
+    expect(result.gateways[0]?.via).toBe('remote');
+  });
+
+  it('places stdio entries on the named node and says so', () => {
+    const [entry] = parseHarnessConfig(
+      { mcpServers: { chrome: { command: 'npx', args: ['-y', 'chrome-devtools-mcp'] } } },
+      { nodeId: 'R9000P' },
+    );
+    expect(entry?.kind).toBe('node');
+    expect(entry?.nodeId).toBe('R9000P');
+    expect(entry?.warnings.join(' ')).toContain('R9000P');
+    expect(toPreview(entry!).nodeId).toBe('R9000P');
+  });
+
+  it('warns when a stdio entry names a path only this machine has', () => {
+    const [entry] = parseHarnessConfig({
+      mcpServers: {
+        chrome: { command: 'node', args: ['/home/me/node_modules/chrome-devtools-mcp/index.js'] },
+      },
+    });
+    expect(entry?.kind).toBe('home');
+    expect(entry?.warnings.join(' ')).toContain('--node');
+  });
+
+  it('keeps cwd, which harnesses use for project-scoped servers', () => {
+    const [entry] = parseHarnessConfig({
+      mcpServers: { local: { command: 'node', args: ['server.js'], cwd: '/srv/project' } },
+    });
+    expect(entry?.transport).toMatchObject({ type: 'stdio', cwd: '/srv/project' });
+  });
+
+  it('rejects a node label that is not a label', () => {
+    expect(() =>
+      parseHarnessConfig(
+        { mcpServers: { a: { command: 'npx', args: ['pkg'] } } },
+        { nodeId: 'not a label!' },
+      ),
+    ).toThrow();
+  });
+  it('imports another instance only when asked, and never this one', () => {
+    const config = {
+      mcpServers: {
+        other: {
+          url: 'https://other.example.test/mcp',
+          headers: { Authorization: 'Bearer tch_mcp_abcdef' },
+        },
+        self: { url: 'https://tool.example.test/mcp' },
+      },
+    };
+    const skipped = parseHarnessConfigDetailed(config, { targetUrl: 'https://tool.example.test' });
+    expect(skipped.entries).toEqual([]);
+    expect(skipped.gateways.map((gateway) => gateway.self)).toEqual([false, true]);
+
+    const included = parseHarnessConfigDetailed(config, {
+      targetUrl: 'https://tool.example.test',
+      includeGateways: true,
+    });
+    expect(included.entries.map((entry) => entry.slug)).toEqual(['other']);
+    expect(included.entries[0]?.credential?.payload).toEqual({
+      type: 'bearer',
+      token: 'tch_mcp_abcdef',
+    });
+    // The self-reference stays out even then.
+    expect(included.gateways.map((gateway) => gateway.slug)).toEqual(['self']);
   });
 });

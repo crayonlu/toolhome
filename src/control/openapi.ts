@@ -318,7 +318,7 @@ export function controlOpenApi(publicUrl: URL): Record<string, unknown> {
   });
   add('/api/v1/config/import-harness', 'post', 'importHarnessConfig', {
     summary:
-      'Import a harness mcpServers config (Claude Desktop / Cursor JSON); secrets become encrypted credentials (admin)',
+      'Import a harness mcpServers config (JSON or TOML mcp_servers); secrets become encrypted credentials, entries that already reach ToolHome are returned as gateways, and body.node places stdio entries on a node (admin)',
     body: true,
   });
   add('/api/v1/endpoints/aggregate', 'get', 'getAggregateEndpoint', {

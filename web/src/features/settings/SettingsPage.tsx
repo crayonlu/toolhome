@@ -38,6 +38,8 @@ interface HarnessPreviewEntry {
 
 interface HarnessImportResult {
   preview: boolean
+  nodeId?: string | null
+  gateways?: { name: string; slug: string; via: string; message: string }[]
   entries: (HarnessPreviewEntry & {
     status?: string
     message?: string
@@ -352,6 +354,21 @@ export function SettingsPage() {
             {t('settings.harnessImportButton')}
           </Button>
         </div>
+        {harnessResult?.gateways && harnessResult.gateways.length > 0 && (
+          <div className="flex flex-col gap-1 border border-ink-3/20 bg-surface px-4 py-3">
+            <span className="text-xs font-medium text-ink">
+              {t('settings.harnessGateways')}
+            </span>
+            {harnessResult.gateways.map((gateway) => (
+              <div key={gateway.slug} className="flex flex-col gap-0.5">
+                <code className="font-mono text-xs text-ink-2">
+                  {gateway.name} · {gateway.via}
+                </code>
+                <span className="text-xs text-ink-3">{gateway.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {harnessResult && (
           <div className="flex flex-col divide-y divide-ink-3/10 bg-surface">
             {harnessResult.entries.map((entry) => (

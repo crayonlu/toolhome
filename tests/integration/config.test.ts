@@ -352,6 +352,89 @@ describe('configuration backup', () => {
       await runtime.close();
     }
   });
+
+  it('places stdio entries on a node and leaves entries that already reach ToolHome out', async () => {
+    const runtime = createTestRuntime();
+    try {
+      const config = {
+        mcpServers: {
+          chrome: { command: 'npx', args: ['-y', 'chrome-devtools-mcp'] },
+          // The local gateway: importing it would wrap ToolHome in itself.
+          gateway: { command: 'toolhome', args: ['mcp', 'stdio'] },
+          // A remote entry pointing at this very instance.
+          self: { url: `${runtime.runtime.config.publicUrl.origin}/mcp` },
+          docs: { url: 'https://docs.example.test/mcp' },
+        },
+      };
+
+      const preview = z
+        .object({
+          preview: z.literal(true),
+          nodeId: z.string().nullable(),
+          gateways: z.array(
+            z.object({ slug: z.string(), via: z.enum(['stdio', 'launch', 'remote']) }).passthrough(),
+          ),
+          entries: z.array(
+            z
+              .object({ slug: z.string(), kind: z.enum(['remote', 'home', 'node']), nodeId: z.string().nullable() })
+              .passthrough(),
+          ),
+        })
+        .parse(
+          await jsonResponse(
+            await controlRequest(
+              runtime.runtime,
+              runtime.controlKey,
+              'POST',
+              '/api/v1/config/import-harness',
+              { config, preview: true, node: 'R9000P' },
+            ),
+          ),
+        );
+
+      expect(preview.nodeId).toBe('R9000P');
+      expect(preview.gateways.map((gateway) => gateway.slug).sort()).toEqual(['gateway', 'self']);
+      expect(preview.entries.map((entry) => entry.slug).sort()).toEqual(['chrome', 'docs']);
+      expect(preview.entries.find((entry) => entry.slug === 'chrome')).toMatchObject({
+        kind: 'node',
+        nodeId: 'R9000P',
+      });
+
+      const applied = z
+        .object({
+          entries: z.array(z.object({ slug: z.string(), status: z.string() }).passthrough()),
+          gateways: z.array(z.object({ slug: z.string() }).passthrough()),
+        })
+        .parse(
+          await jsonResponse(
+            await controlRequest(
+              runtime.runtime,
+              runtime.controlKey,
+              'POST',
+              '/api/v1/config/import-harness',
+              { config, node: 'R9000P' },
+            ),
+          ),
+        );
+      expect(applied.entries.map((entry) => entry.status)).toEqual(['created', 'created']);
+
+      const servers = z
+        .array(z.object({ slug: z.string(), kind: z.string(), nodeId: z.string().nullable() }).passthrough())
+        .parse(
+          await jsonResponse(
+            await controlRequest(runtime.runtime, runtime.controlKey, 'GET', '/api/v1/servers'),
+          ),
+        );
+      expect(servers.find((server) => server.slug === 'chrome')).toMatchObject({
+        kind: 'node',
+        nodeId: 'R9000P',
+      });
+      // Neither the gateway nor the self-reference became a server.
+      expect(servers.map((server) => server.slug).sort()).toEqual(['chrome', 'docs']);
+    } finally {
+      await runtime.close();
+    }
+  });
 });
 
 const importReportSchema = z

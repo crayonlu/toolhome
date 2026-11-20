@@ -245,6 +245,7 @@ export const en: Dict = {
   'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
   'settings.harnessPreview': 'Preview',
   'settings.harnessImportButton': 'Import',
+  'settings.harnessGateways': 'Already ToolHome — left out of the import',
   'settings.harnessCredential': 'credential',
   'settings.harnessStatus.created': 'created',
   'settings.harnessStatus.conflict': 'already exists',

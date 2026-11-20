@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
+import { nodeIdSchema } from '../domain/models.js';
 import type { Logger } from '../observability/logger.js';
 import type { AuthService } from '../security/auth-service.js';
 import { bearerToken } from '../security/auth-service.js';
@@ -408,15 +409,20 @@ export function mountControlApi(
         config?: unknown;
         preview?: boolean;
         mode?: 'create' | 'upsert';
+        node?: unknown;
+        includeGateways?: boolean;
       };
       if (body.config === undefined) {
         throw new AppError('invalid_input', 'Missing "config" (the mcpServers object)', 400);
       }
-      return options.service.importHarnessConfig(
-        body.config,
-        body.preview === true,
-        body.mode === 'upsert' ? 'upsert' : 'create',
-      );
+      const nodeId =
+        body.node === undefined || body.node === null ? null : nodeIdSchema.parse(body.node);
+      return options.service.importHarnessConfig(body.config, {
+        preview: body.preview === true,
+        mode: body.mode === 'upsert' ? 'upsert' : 'create',
+        nodeId,
+        includeGateways: body.includeGateways === true,
+      });
     }),
   );
   app.post(
