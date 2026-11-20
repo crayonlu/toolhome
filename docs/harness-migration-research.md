@@ -13,42 +13,46 @@
 
 ## 0. TL;DR
 
-| Migration source                                                                                       | Supported today                                                                                                                                                                                                 | What one-click still needs                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| JSON `mcpServers` file (`~/.pi/agent/mcp.json`, Claude Desktop, Cursor)                                | Yes — preview + apply (`toolhome config import-harness`, `src/cli/main.ts:651`)                                                                                                                                 | Placement hint (`node` vs `home`), detection of entries that already point at a ToolHome gateway, write-back of the harness file, OAuth re-authorization on the target                          |
-| Harness entries that launch `toolhome mcp stdio` / `toolhome mcp launch`                               | No — importing such an entry creates a _home_ stdio server that would run the CLI on the ToolHome host (`src/config/harness-import.ts:165`), which double-wraps and needs a Control Key the child does not have | Recognize gateway entries and _rewrite_ them to the hosted aggregate URL instead of importing them as servers                                                                                   |
-| CLI-native formats other than JSON `mcpServers` (e.g. Grok/Codex `config.toml` with `[mcp_servers.*]`) | No — `harnessConfigSchema` requires a JSON object with the exact key `mcpServers` (`src/config/harness-import.ts:28-30`); a TOML file is rejected (`Unexpected token 'm', "[mcp_server"... is not valid JSON`)  | A TOML reader for the _same generic shape_ (`command`/`args`/`env`, `url`/`headers`), which is a format capability, not a per-harness adapter (respecting the product boundary, `README.md:12`) |
+Rows 2 and 3 are what this research found broken before the implementation; §5 lists where
+each now lives.
 
-The moving parts for "one step" all exist except the front door: a CLI verb that reads the
-local file(s), calls the existing preview/apply route, re-authorizes OAuth upstreams against
-the hosted origin, issues an MCP Access Key, verifies, and prints the exact snippet to paste
-into every harness.
+| Migration source                                                                                       | Before this work                                                                                                                                                    | Now                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON `mcpServers` file (`~/.pi/agent/mcp.json`, Claude Desktop, Cursor)                                | Preview + apply existed (`toolhome config import-harness`, `src/cli/main.ts:652`); no placement hint, no gateway detection, no write-back                           | `toolhome harness import` covers read → preview → apply → verify → snippet → `--write-back` (`src/cli/harness.ts`)                                    |
+| Harness entries that launch `toolhome mcp stdio` / `toolhome mcp launch`                               | Importing one created a _home_ stdio server running the CLI on the ToolHome host, which double-wraps and needs a Control Key the child does not have                | Recognized as gateways and skipped (`stdioGateway`, `src/config/harness-import.ts:176-217`); `--include-gateways` opts into proxying another instance |
+| CLI-native formats other than JSON `mcpServers` (e.g. Grok/Codex `config.toml` with `[mcp_servers.*]`) | `harnessConfigSchema` required a JSON object with the exact key `mcpServers` (`src/config/harness-import.ts:26-43`); a TOML file failed with `Unexpected token 'm'` | Read by `src/config/harness-formats.ts` (JSON `mcpServers` / `servers`, TOML `[mcp_servers.*]`), the same reader behind the console paste box         |
+
+The moving parts for "one step" are all in the tree now: one verb reads the local file(s),
+calls the existing preview/apply route, reports the OAuth entries to authorize against the
+hosted origin, issues an MCP Access Key, verifies, and prints the exact snippet to paste into
+every harness.
 
 ## 1. What ships today (verified against this tree)
 
 ### 1.1 Generic harness import — JSON `mcpServers`
 
-- Parser: `src/config/harness-import.ts:28-30` — `harnessConfigSchema` accepts exactly one
-  top-level key, `mcpServers`, mapped to a record of entries. Zod strips unknown per-entry
-  keys (`type`, `disabled`, `alwaysAllow` pass silently — verified by running the shipped
-  parser on such an entry).
-- Entry split (`parseHarnessConfig`, `src/config/harness-import.ts:68-84`): an entry with
-  `url` becomes a `remote` server (`parseRemote`, :88-131); otherwise `command` is required
-  and it becomes a `home` stdio server (`parseStdio`, :133-171, `kind: 'home'` at :165).
+- Parser: `src/config/harness-import.ts:26-43` — `harnessServerSchema` plus
+  `harnessConfigSchema` accept one top-level key, `mcpServers`, mapped to a record of entries.
+  Zod strips unknown per-entry keys (`alwaysAllow`, `timeout` pass silently — verified by
+  running the shipped parser on such an entry).
+- Entry split (`parseHarnessConfigDetailed`, `src/config/harness-import.ts:124-174`): an entry
+  with `url` becomes a `remote` server (`parseRemote`, `:265-308`) unless it is the gateway
+  itself; otherwise `command` is required and it becomes a stdio server on `home` or on a
+  named `node` (`parseStdio`, `:311-377`, `kind` at `:361`).
 - Secrets:
   - `Authorization: Bearer X` → encrypted `bearer` credential, stripped from the plaintext
-    transport (`src/config/harness-import.ts:100-108`);
-  - any other headers → encrypted `headers` credential (`:109-115`);
+    transport (`src/config/harness-import.ts:278-290`);
+  - any other headers → encrypted `headers` credential (`:291-295`);
   - stdio `env` keys matching `SECRET_KEY_RE` (`/password|token|secret|key|authorization/i`,
-    `:33`) → encrypted `env` credential (`:142-146`, `:168-170`).
+    `:45`) → encrypted `env` credential (`:330-334`, `:371-374`).
 - Market hints: `npx`/`uvx`/`bunx`/… entries whose package matches the curated catalog warn
-  that a Market install is more reliable (`:147-159`, `src/market/catalog.ts`).
+  that a Market install is more reliable (`:345-356`, `src/market/catalog.ts`).
 - HTTP route: `POST /api/v1/config/import-harness` (admin), body `{ config, preview?, mode? }`
   (`src/control/control-api.ts:404-421`); service `importHarnessConfig`
   (`src/control/control-service.ts:942-1005`) with per-entry `created / changed / unchanged /
 conflict` outcomes in `create` vs `upsert` mode.
 - CLI: `toolhome config import-harness <file> [--preview] [--upsert]`
-  (`src/cli/main.ts:650-666`); web console has the same flow
+  (`src/cli/main.ts:652-668`); web console has the same flow
   (`web/src/features/settings/SettingsPage.tsx:142-147, 341-349`).
 - Tests: `tests/integration/config.test.ts:137` (preview + import, stdio and remote) and
   `:262` (upsert diffing).
@@ -56,7 +60,7 @@ conflict` outcomes in `create` vs `upsert` mode.
 ### 1.2 Instance-to-instance migration
 
 - `toolhome migrate --to <url> --to-key <key> [--dry-run] [--with-state]
-[--reset-oauth-clients] [--issue-access-key <name>]` (`src/cli/main.ts:668-714`).
+[--reset-oauth-clients] [--issue-access-key <name>]` (`src/cli/main.ts:749-796`).
 - Engine `migrateConfiguration` (`src/cli/migrate.ts:146-418`): exports the source
   (`GET /api/v1/config/export?includeSecrets=true`, `:157`), reinstalls Market entries on the
   target first (provenance, `:239-276`), imports the rest in `merge` mode
@@ -72,14 +76,15 @@ conflict` outcomes in `create` vs `upsert` mode.
 
 - **Placement.** A server is `remote`, `home` (runs in the gateway container on the ToolHome
   host) or `node` (runs on a labeled client machine) — `src/domain/models.ts:72`,
-  `nodeId` required only for `node` (`src/domain/models.ts:108-113`). The harness importer always maps
-  stdio → `home` (`src/config/harness-import.ts:165`); `node` placement is a post-import edit today
-  (`toolhome server update`, `src/cli/main.ts:81-86`).
+  `nodeId` required only for `node` (`src/domain/models.ts:105-116`). The harness importer maps
+  stdio → `home`, or → `node` when the caller names one (`--node`, body `node`;
+  `src/config/harness-import.ts:361`), and a stored server of a different kind is reported as a
+  conflict rather than left mis-placed (`src/control/control-service.ts`, `#applyHarnessUpdate`).
 - **Local gateway.** `toolhome mcp stdio` fronts every `node`-placed server of one machine
   over one stdio connection (`src/cli/main.ts:363-424`); `toolhome mcp launch <slug>` runs a
   single one with original tool names (`:343-361`). The local CLI config
-  (`~/.config/toolhome/config.json`, `src/cli/main.ts:968-970`) holds `url`, `controlKey`, `nodeId`
-  (`src/cli/main.ts:35-55`, verified on this machine: `url=https://tool.cyncyn.xyz`,
+  (`~/.config/toolhome/config.json`, `src/cli/main.ts:1050-1052`) holds `url`, `controlKey`, `nodeId`
+  (`src/cli/main.ts:36-56`, verified on this machine: `url=https://tool.cyncyn.xyz`,
   `nodeId=R9000P`).
 - **Keys.** Control Keys administer; MCP Access Keys authenticate a harness to `/mcp`
   (`toolhome access-key create`, `src/cli/main.ts:604` (mount defined at `:898-911`); issuance in
@@ -89,9 +94,9 @@ conflict` outcomes in `create` vs `upsert` mode.
   to the instance origin: the client metadata URL and the redirect URI are built from
   `TOOLHOME_PUBLIC_URL` (`src/upstream/oauth-provider.ts:41-46` and `:53-55`); the code documents
   that a credential imported from another instance therefore needs its registration reset
-  (`src/upstream/oauth-service.ts:195-204`) via
+  (`src/upstream/oauth-service.ts:196-205`) via
   `POST /api/v1/credentials/{id}/reset-oauth-registration`
-  (`src/control/control-api.ts:352-357`, `src/control/control-service.ts:486-489`), then
+  (`src/control/control-api.ts:354-359`, `src/control/control-service.ts:486-489`), then
   `toolhome credential authorize <name>` on the target.
 - **OAuth, inbound side.** Harnesses authorize against the target origin via the data plane's
   OAuth 2.1 server (`src/security/oauth-server.ts:129-135` registration endpoint derived from
@@ -120,14 +125,15 @@ What they are: entries whose `command` is `toolhome` with `args ["mcp","stdio"]`
 `skills/toolhome/SKILL.md:79-80, 265` recommend. The Grok config on this machine carries a
 `toolhome` entry (`url` + `Authorization` header; structure verified).
 
-Why they must not be imported as servers: `parseStdio` would create a _home_ server whose
-transport is `toolhome mcp stdio` (`src/config/harness-import.ts:133-171`), i.e. the hosted gateway
+Why they must not be imported as servers: `parseStdio` would create a stdio server whose
+transport is `toolhome mcp stdio` (`src/config/harness-import.ts:311-377`), i.e. the hosted gateway
 would try to spawn the CLI on the ToolHome host. That (i) double-wraps the aggregate (a
 ToolHome inside ToolHome), (ii) requires a Control Key the child cannot be given
-(`TOOLHOME_*` variables are withheld from children, `src/node/launch.ts:4-5, 28-32`), and (iii) is
-exactly what a preview of `{"command":"toolhome","args":["mcp","stdio"]}` returns today:
-`kind: home`, `warnings: []` — the gateway is not recognized. The right action is to
-_recognize_ the entry, drop it from the import, and rewrite it to the hosted aggregate URL.
+(`TOOLHOME_*` variables are withheld from children, `src/node/launch.ts:4-5, 28-32`), and (iii) was
+exactly what a preview of `{"command":"toolhome","args":["mcp","stdio"]}` returned before the
+fix: `kind: home`, `warnings: []` — the gateway was not recognized. It is now classified by
+`stdioGateway` (`:176-217`) and skipped, so the import drops it and the harness is re-pointed
+at the hosted aggregate URL.
 
 ### (c) CLI-native harness configs in other formats
 
@@ -136,22 +142,24 @@ What they are: harnesses that keep the same logical shape in TOML, e.g.
 (structure verified on this machine; values redacted), and Codex's `~/.codex/config.toml`
 (same `[mcp_servers.*]` convention; file absent on this machine).
 
-Today they are rejected outright — `harnessConfigSchema` has no `mcp_servers` key and the CLI
-reads the file with `JSON.parse` (`src/cli/main.ts:972-975`), so a TOML file fails with
-`Unexpected token 'm'` before the parser is reached. VS Code's `servers`-keyed JSON is
-rejected by the schema itself (`mcpServers: Invalid input: expected record, received
-undefined`).
+Before this work they were rejected outright — `harnessConfigSchema` had no `mcp_servers` key
+and the CLI read the file with `JSON.parse` (`src/cli/main.ts:1054-1057`), so a TOML file failed
+with `Unexpected token 'm'` before the parser was reached, and VS Code's `servers`-keyed JSON
+was rejected by the schema (`mcpServers: Invalid input: expected record, received undefined`).
+Both are read now: `describePath` sniffs the format, `parseTomlServers` reads
+`[mcp_servers.*]`, and `jsonKey` accepts `servers`
+(`src/config/harness-formats.ts:163-186` for the format sniff and JSON key, `:316-347` for the TOML reader).
 
 ## 3. What is lost, or needs a hand, per source
 
-| Dimension                       | (a) JSON `mcpServers`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | (b) gateway entries                                                                                                                                                                                                   | (c) TOML / other formats                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Secrets**                     | Bearer/headers/env values become encrypted credentials (`src/config/harness-import.ts:100-115, 142-146, 168-170`). Values written as `${VAR}` placeholders are imported literally — there is no expansion step (`:68-84` takes strings as-is), and env vars that only exist in the harness process are unrecoverable.                                                                                                                                                                                                                                                                                               | None to move (the entry authenticates to ToolHome itself with an Access Key).                                                                                                                                         | Same rules as (a) _once a TOML reader exists_; until then the user moves secrets by hand. |
-| **OAuth registrations**         | A harness usually holds _no_ token for OAuth upstreams (the harness does its own OAuth); the import creates a credential-less `remote` server, so the target must authorize itself: `toolhome credential authorize <name>`, or `reset-oauth-registration` first when a registration was carried over (`src/upstream/oauth-service.ts:195-204`). Cloudflare additionally requires DCR (`urlClientId: false`) — URL-based client metadata fails behind a proxied origin (`skills/toolhome/references/oauth-guide.md:31` and `:86`).                                                                                   | The harness's own OAuth session against the local gateway is discarded; the harness re-authorizes against the hosted `/mcp` origin on first connect (inbound OAuth server, `src/security/oauth-server.ts:129-135`).   | Same as (a) after parsing.                                                                |
-| **Placement (node vs home)**    | Every stdio entry becomes `home` (`src/config/harness-import.ts:165`) — a server that must run on the user's machine (local Chrome, local Ghidra, this machine's `azure`/`outlook`/`chrome-devtools` entries) is silently placed on the ToolHome host and stops seeing the local resource. Needs a placement hint (`--node <id>` or a per-entry override, **proposed**).                                                                                                                                                                                                                                            | The entry itself is dropped and replaced by the hosted aggregate URL; the _node servers behind it_ are already registered on the target, so nothing is lost — provided the node label stays stable (`README.md:203`). | Same as (a).                                                                              |
-| **Access keys / endpoint swap** | The harness entry is replaced by one aggregate entry: `{"url":"<target>/mcp","headers":{"Authorization":"Bearer tch_mcp_…"}}`. The Access Key is issued on the target (`POST /api/v1/access-keys`, `src/control/control-api.ts:516-530`) and shown once. Note: `migrate --issue-access-key` parses the route response as `{key: string}` (`src/cli/migrate.ts:404-413`) while the route actually returns `{key: <record>, secret: <string>}` (`src/security/auth-service.ts:7-10`), and no test covers that branch — the new flow should build the snippet from `secret` and must be tested against the real route. | Same snippet, but this is the _destination_ state.                                                                                                                                                                    | Same as (a).                                                                              |
-| **Dependency availability**     | stdio commands must resolve inside the gateway container for `home` entries (`src/config/harness-import.ts:152-159` warns; Market installs are preferred). `cwd` in an entry is dropped (`:20-26` schema has no `cwd`), as are `disabled`, `timeout`, `alwaysAllow`.                                                                                                                                                                                                                                                                                                                                                | n/a                                                                                                                                                                                                                   | Same as (a).                                                                              |
-| **What is genuinely lost**      | Tool-side OAuth state held by the harness; `${VAR}` indirection; per-entry flags the harness adds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | The local stdio indirection (replaced by hosted HTTP — that is the point).                                                                                                                                            | Everything, until a reader exists.                                                        |
+| Dimension                       | (a) JSON `mcpServers`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | (b) gateway entries                                                                                                                                                                                                   | (c) TOML / other formats                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Secrets**                     | Bearer/headers/env values become encrypted credentials (`src/config/harness-import.ts:278-295`, `:330-334`, `:371-374`). Values written as `${VAR}` placeholders are imported literally — there is no expansion step (`parseHarnessConfigDetailed`, `:124-174`, takes strings as-is), and env vars that only exist in the harness process are unrecoverable.                                                                                                                                                                              | None to move (the entry authenticates to ToolHome itself with an Access Key).                                                                                                                                         | Same rules as (a) _once a TOML reader exists_; until then the user moves secrets by hand. |
+| **OAuth registrations**         | A harness usually holds _no_ token for OAuth upstreams (the harness does its own OAuth); the import creates a credential-less `remote` server, so the target must authorize itself: `toolhome credential authorize <name>`, or `reset-oauth-registration` first when a registration was carried over (`src/upstream/oauth-service.ts:195-204`). Cloudflare additionally requires DCR (`urlClientId: false`) — URL-based client metadata fails behind a proxied origin (`skills/toolhome/references/oauth-guide.md:31` and `:86`).         | The harness's own OAuth session against the local gateway is discarded; the harness re-authorizes against the hosted `/mcp` origin on first connect (inbound OAuth server, `src/security/oauth-server.ts:129-135`).   | Same as (a) after parsing.                                                                |
+| **Placement (node vs home)**    | A stdio entry defaults to `home`; with `--node <label>` it becomes a `node` server (`src/config/harness-import.ts:361`), and a command that is a local path warns when no node is named (`:380-390`). Without the hint, a server that must run on the user's machine (local Chrome, local Ghidra, this machine's `azure`/`outlook`/`chrome-devtools` entries) is placed on the ToolHome host and stops seeing the local resource.                                                                                                         | The entry itself is dropped and replaced by the hosted aggregate URL; the _node servers behind it_ are already registered on the target, so nothing is lost — provided the node label stays stable (`README.md:203`). | Same as (a).                                                                              |
+| **Access keys / endpoint swap** | The harness entry is replaced by one aggregate entry: `{"url":"<target>/mcp","headers":{"Authorization":"Bearer tch_mcp_…"}}`. The Access Key is issued on the target (`POST /api/v1/access-keys`, `src/control/control-api.ts:549-570`) and shown once: the route answers `{key: <record>, secret: <string>}` (`src/security/auth-service.ts:7-10`), and both `migrate --issue-access-key` (`src/cli/migrate.ts:404-427`) and `harness import` (`src/cli/harness.ts`) build the snippet from `secret` with the target's real `/mcp` URL. | Same snippet, but this is the _destination_ state.                                                                                                                                                                    | Same as (a).                                                                              |
+| **Dependency availability**     | stdio commands must resolve inside the gateway container for `home` entries (`src/config/harness-import.ts:345-356` warns; Market installs are preferred). `cwd` is carried into the transport (`:26-43` schema, `:364-371`), `enabled: false` is reported, and the remaining per-entry flags (`timeout`, `alwaysAllow`, `type`) are dropped.                                                                                                                                                                                             | n/a                                                                                                                                                                                                                   | Same as (a).                                                                              |
+| **What is genuinely lost**      | Tool-side OAuth state held by the harness; `${VAR}` indirection; per-entry flags the harness adds.                                                                                                                                                                                                                                                                                                                                                                                                                                        | The local stdio indirection (replaced by hosted HTTP — that is the point).                                                                                                                                            | Nothing beyond (a), now that the TOML reader exists.                                      |
 
 ## 4. One-step flow to the hosted instance
 
@@ -162,49 +170,59 @@ harnesses use afterwards — they are different keys and only the second appears
 configs.
 
 ```bash
-# 0. Connection (exists): either flags or the stored local config
-toolhome auth login --url https://tool.cyncyn.xyz --control-key tch_ctl_…   # writes ~/.config/toolhome/config.json (src/cli/main.ts:870-887)
+# 0. Connection: flags or the stored local config
+toolhome auth login --url https://tool.cyncyn.xyz --control-key tch_ctl_…   # writes ~/.config/toolhome/config.json (src/cli/main.ts:947-970)
 
-# 1. Preview (exists): what would be created, secrets masked
-toolhome config import-harness ~/.pi/agent/mcp.json --preview
-#   → per-entry {name, slug, kind, transportSummary, credential{type, masked fields}, warnings, status}
+# 1. Preview: which files are read, what would be created, secrets masked,
+#    and which entries are the gateway itself rather than servers
+toolhome harness import --harness grok --harness cursor --node R9000P --preview
 
-# 2. Apply (exists): secrets become encrypted credentials; upsert for re-runs
-toolhome config import-harness ~/.pi/agent/mcp.json --upsert
+# 2. Apply: secrets become encrypted credentials; --upsert for re-runs
+toolhome harness import --harness grok --harness cursor --node R9000P --upsert
 
-# 3. Placement fix-up (exists, manual today): stdio entries that must run locally
-toolhome server update <id> ./node-placement.json     # kind: "node", nodeId: "R9000P"   (src/domain/models.ts:108-113)
-
-# 4. OAuth against the hosted origin (exists):
+# 3. OAuth against the hosted origin (the report names the entries that need it)
 toolhome credential authorize cloudflare            # Cloudflare needs DCR on the server record (skills/toolhome/references/oauth-guide.md:31)
 toolhome credential authorize notion
 
-# 5. Access key + snippet (exists)
-toolhome access-key create laptop                   # prints tch_mcp_… once
+# 4. Access key + snippet + verification, and one /mcp entry per harness file
+toolhome harness import --harness grok --issue-access-key laptop --write-back
+#   → report.accessKey.snippet / .snippetToml, report.verification, report.writtenBack
 
-# 6. Verify (exists)
-toolhome doctor                                     # GET /api/v1/diagnostics → {ok, servers[]}
+# 5. Verify on the target
+toolhome doctor                                     # GET /api/v1/diagnostics → {ok, servers[], failing[]}
+```
 
-# 7. Rewrite the harness config (proposed: --write-back)
-#    replace migrated entries with:
+The resulting harness entry, identical in every file `--write-back` touched:
+
+```json
 {
   "mcpServers": {
-    "toolhome": { "url": "https://tool.cyncyn.xyz/mcp", "headers": { "Authorization": "Bearer tch_mcp_…" } }
+    "toolhome": {
+      "url": "https://tool.cyncyn.xyz/mcp",
+      "headers": { "Authorization": "Bearer tch_mcp_…"" }
+    }
   }
 }
 ```
 
-**What "one step" means concretely** — the proposed verb `toolhome harness import <file…>
---node <id>` collapses steps 1-5 into one command that: parses (a)+(c) with one reader,
-classifies (b) entries as _rewrite_ targets instead of servers, applies the import
-(`--preview` first), fixes placement per entry, prints the OAuth entries that need
-`credential authorize`, mints the Access Key, prints the verification report, and emits the
-snippet. The harness file itself is rewritten only with `--write-back` (a `.bak` copy is
-kept); without it the command only prints.
+```toml
+[mcp_servers.toolhome]
+url = "https://tool.cyncyn.xyz/mcp"
 
-**Dry-run → apply → verification semantics** already exist in the same shape in
-`migrateConfiguration` (`src/cli/migrate.ts:228-235` dry-run flag, `:374-402` verification, `:476-521`
-manual follow-ups) — the new verb should reuse that reporting style rather than invent one.
+[mcp_servers.toolhome.headers]
+Authorization = "Bearer tch_mcp_…"
+```
+
+**What "one step" means concretely** — `toolhome harness import <file…> --node <id>` (shipped)
+collapses steps 1-4 into one command that: parses (a)+(c) with one reader, classifies (b)
+entries as gateways instead of servers, applies the import, sets placement per entry, prints
+the OAuth entries that need `credential authorize`, mints the Access Key, prints the
+verification report, and emits both snippets. The harness file itself is rewritten only with
+`--write-back` (a `.bak-<timestamp>` copy is kept); without it the command only prints.
+
+**Dry-run → apply → verification semantics** follow `migrateConfiguration`
+(`src/cli/migrate.ts:228-235` dry-run flag, `:374-402` verification, `:476-521` manual
+follow-ups) so both verbs report the same way.
 
 ## 5. What shipped, and the repo mechanisms it builds on
 
@@ -337,7 +355,7 @@ therefore cross-checked over `ssh Aliyun` (BatchMode, key-based, works from this
 6. **Multi-file imports.** A user's harnesses disagree (this machine: `~/.pi/agent/mcp.json`
    plus `~/.grok/config.toml`); the same server can appear in both with different commands.
    The flow needs deterministic conflict handling — the existing `upsert` diff
-   (`src/control/control-service.ts:964-996`) is per-file, so a two-file import needs either a merge
+   (`src/control/control-service.ts:1046-1070`) is per-file, so a two-file import needs either a merge
    preview or a documented last-wins rule.
 
 ## 8. Non-goals
