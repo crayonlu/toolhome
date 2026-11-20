@@ -163,11 +163,10 @@ Both are read now: `describePath` sniffs the format, `parseTomlServers` reads
 
 ## 4. One-step flow to the hosted instance
 
-Target used in examples: the live instance (verified, §6). The flow below is expressed with
-existing pieces plus two clearly-marked proposed capabilities (§5). `--control-key` is the
-target **Control Key** (administers the instance); the Access Key minted in step 4 is what
-harnesses use afterwards — they are different keys and only the second appears in harness
-configs.
+Target used in examples: the live instance (verified, §6). Every command below ships; §5 maps
+each to its module. `--control-key` is the target **Control Key** (administers the instance);
+the Access Key minted in step 4 is what harnesses use afterwards — they are different keys,
+and only the second appears in harness configs.
 
 ```bash
 # 0. Connection: flags or the stored local config
