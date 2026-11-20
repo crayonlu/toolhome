@@ -42,9 +42,19 @@ async function uploadBackup(container: HTMLElement, index: number): Promise<void
   await userEvent.upload(input, new File([JSON.stringify(backup)], 'backup.json', { type: 'application/json' }));
 }
 
-function stubFetch(bodies: { export?: unknown; import?: unknown }): ReturnType<typeof vi.spyOn> {
+function stubFetch(bodies: {
+  export?: unknown;
+  import?: unknown;
+  harness?: unknown;
+}): ReturnType<typeof vi.spyOn> {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('/api/v1/config/import-harness')) {
+      return new Response(JSON.stringify(bodies.harness ?? harnessPreview), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     if (url.includes('/api/v1/config/import')) {
       return new Response(JSON.stringify(bodies.import ?? report), {
         status: 200,
@@ -62,6 +72,36 @@ function stubFetch(bodies: { export?: unknown; import?: unknown }): ReturnType<t
       headers: { 'content-type': 'application/json' },
     });
   });
+}
+
+const harnessPreview = {
+  preview: true,
+  nodeId: null,
+  gateways: [],
+  entries: [
+    {
+      name: 'pasted',
+      slug: 'pasted',
+      kind: 'remote',
+      nodeId: null,
+      transportSummary: 'https://pasted.example.test/mcp',
+      credential: null,
+      warnings: [],
+      status: 'created',
+      changes: [],
+    },
+  ],
+};
+
+function harnessBodies(fetchMock: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
+  return fetchMock.mock.calls
+    .filter(([input]: [RequestInfo | URL, RequestInit?]) =>
+      String(input).includes('/api/v1/config/import-harness'),
+    )
+    .map(
+      ([, init]: [RequestInfo | URL, RequestInit?]) =>
+        JSON.parse(String(init?.body)) as Record<string, unknown>,
+    );
 }
 
 function importBodies(fetchMock: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
@@ -131,5 +171,26 @@ describe('configuration transfer in the console', () => {
       ).toBe(true),
     );
     expect(await screen.findByText(/1 servers, 2 hosted CLIs, 1 credentials/)).toBeTruthy();
+  });
+
+  it('sends a pasted harness config as raw text so TOML reaches the reader', async () => {
+    const fetchMock = stubFetch({});
+    renderPage();
+
+    const toml = '[mcp_servers.pasted]\nurl = "https://pasted.example.test/mcp"\n';
+    const textarea = document.querySelector('textarea');
+    if (textarea === null) throw new Error('no harness textarea');
+    await userEvent.click(textarea);
+    await userEvent.paste(toml);
+
+    // The config section has its own Preview; the harness one is last on the page.
+    const previews = screen.getAllByRole('button', { name: /Preview/ });
+    await userEvent.click(previews[previews.length - 1]);
+
+    await waitFor(() => expect(harnessBodies(fetchMock)).toHaveLength(1));
+    // Raw text, not JSON.parse: a TOML block cannot be parsed in the browser.
+    expect(harnessBodies(fetchMock)[0]).toEqual({ text: toml, preview: true });
+    expect(await screen.findByText('pasted')).toBeTruthy();
+    expect(screen.getByText('https://pasted.example.test/mcp')).toBeTruthy();
   });
 });
