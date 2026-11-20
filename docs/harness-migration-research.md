@@ -235,7 +235,7 @@ follow-ups) so both verbs report the same way.
 | Placement hint at import time (`--node`, body `node`)                                                                                                                          | shipped | `src/config/harness-import.ts`, `src/control/control-service.ts`, `src/control/control-api.ts` |
 | Snippet from the real `secret` field + real target URL                                                                                                                         | shipped | `src/cli/migrate.ts`, `src/cli/harness.ts`                                                     |
 | Write-back of the harness file (JSON object or TOML tables), with a `.bak-<timestamp>` copy                                                                                    | shipped | `src/config/harness-formats.ts` (`renderHarnessFile`)                                          |
-| Web-console import UI, now naming gateway entries                                                                                                                              | shipped | `web/src/features/settings/SettingsPage.tsx`                                                   |
+| Web-console import UI: the paste box accepts JSON or TOML (the server parses the raw text with the same reader the CLI uses), and the result names gateway entries             | shipped | `web/src/features/settings/SettingsPage.tsx`, `src/control/control-api.ts`                     |
 
 The harness location table follows yetone/magpie's `internal/library/targets.go` (one file +
 one format per agent). It stays declarative: adding a harness is a row, and the readers are
@@ -243,8 +243,10 @@ format-level, so the product boundary in `README.md:12` ("no harness-specific ad
 still holds.
 
 Tests: `tests/unit/harness-formats.test.ts`, `tests/unit/harness-import.test.ts`,
-`tests/unit/harness-cli.test.ts`, `tests/integration/config.test.ts` (node placement +
-gateway skip), `tests/unit/migrate.test.ts` (Access Key snippet).
+`tests/unit/harness-cli.test.ts`, `tests/integration/config.test.ts` (node placement, gateway
+skip, and pasted TOML text), `tests/unit/migrate.test.ts` (Access Key snippet), and
+`web/src/features/settings/SettingsPage.test.tsx` (the console sends raw text — the case that
+fails against a `JSON.parse` handler).
 
 ## 6. Observed deployment state (2026-11-20)
 
