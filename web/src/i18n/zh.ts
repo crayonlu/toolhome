@@ -233,7 +233,7 @@ export const zh: Dict = {
   'settings.harnessImport': '从 harness 导入',
   'settings.harnessHint':
     '粘贴 harness 配置——JSON 的 mcpServers（Claude Desktop、Cursor、VS Code）或 TOML 的 [mcp_servers.*]（Grok、Codex）。本机已有的配置文件可直接运行 `toolhome harness import`。密钥类字段（password、token、key）会存为加密凭据；已经指向 ToolHome 的条目会跳过。',
-  'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
+  'settings.harnessPlaceholder': '{ "mcpServers": { … } }  或  [mcp_servers.<name>]',
   'settings.harnessPreview': '预览',
   'settings.harnessImportButton': '导入',
   'settings.harnessGateways': '已经是 ToolHome — 未重复导入',

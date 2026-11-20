@@ -242,7 +242,7 @@ export const en: Dict = {
   'settings.harnessImport': 'Import from harness',
   'settings.harnessHint':
     'Paste a harness config — JSON mcpServers (Claude Desktop, Cursor, VS Code) or TOML [mcp_servers.*] (Grok, Codex). For the files already on your machine run `toolhome harness import`. Secrets (passwords, tokens, keys) become encrypted credentials; entries that already reach ToolHome are left out.',
-  'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
+  'settings.harnessPlaceholder': '{ "mcpServers": { … } }  or  [mcp_servers.<name>]',
   'settings.harnessPreview': 'Preview',
   'settings.harnessImportButton': 'Import',
   'settings.harnessGateways': 'Already ToolHome — left out of the import',
