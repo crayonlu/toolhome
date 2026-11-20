@@ -138,6 +138,8 @@ export interface MigrationOptions {
   withState?: boolean;
   resetOauthClients?: boolean;
   accessKeyName?: string;
+  /** The target's public URL, used for the harness snippet. */
+  targetUrl?: string;
   pollIntervalMs?: number;
   sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
@@ -403,13 +405,33 @@ export async function migrateConfiguration(
   }
 
   if (options.accessKeyName !== undefined) {
-    const issued = z.object({ key: z.string() }).parse(
-      await target.request('POST', '/api/v1/access-keys', { name: options.accessKeyName }),
-    );
+    // The route answers `{ key: <record>, secret: <string> }` (the secret is
+    // shown once); an older shape returned the string as `key`.
+    const issued = z
+      .object({
+        key: z.union([z.string(), z.record(z.string(), z.unknown())]),
+        secret: z.string().optional(),
+      })
+      .parse(await target.request('POST', '/api/v1/access-keys', { name: options.accessKeyName }));
+    const secret =
+      issued.secret ?? (typeof issued.key === 'string' ? issued.key : undefined);
+    if (secret === undefined) {
+      throw new Error(
+        'The target did not return an Access Key secret; create one with `toolhome access-key create <name>`',
+      );
+    }
+    const url =
+      options.targetUrl === undefined
+        ? '<target>/mcp'
+        : new URL('/mcp', options.targetUrl).toString();
     report.accessKey = {
       name: options.accessKeyName,
-      key: issued.key,
-      snippet: JSON.stringify({ mcpServers: { toolhome: { url: '<target>/mcp', headers: { Authorization: `Bearer ${issued.key}` } } } }, null, 2),
+      key: secret,
+      snippet: JSON.stringify(
+        { mcpServers: { toolhome: { url, headers: { Authorization: `Bearer ${secret}` } } } },
+        null,
+        2,
+      ),
     };
   }
 

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  harvestValues,
-  migrateConfiguration,
-  type ControlApi,
-} from '../../src/cli/migrate.js';
+import { harvestValues, migrateConfiguration, type ControlApi } from '../../src/cli/migrate.js';
 
 const credentials = [
   {
@@ -118,7 +114,14 @@ function stubApi(
 }
 
 const restoredExport = {
-  credentials: [{ ref: 'ref-1', name: 'Azure SP', type: 'env', payload: { type: 'env', variables: { AZURE_CLIENT_SECRET: 's' } } }],
+  credentials: [
+    {
+      ref: 'ref-1',
+      name: 'Azure SP',
+      type: 'env',
+      payload: { type: 'env', variables: { AZURE_CLIENT_SECRET: 's' } },
+    },
+  ],
   servers: [],
   clis: [{ slug: 'azure-cli' }],
   installations: [
@@ -138,7 +141,12 @@ const azureEntry = {
 const emptyTarget = { servers: { total: 0 }, clis: { total: 0 }, credentials: 0 };
 
 function emptyImportReport(): unknown {
-  return { counts: { created: 1 }, servers: [], clis: [{ slug: 'azure-cli', status: 'created' }], credentials: [{ name: 'Azure SP', status: 'created' }] };
+  return {
+    counts: { created: 1 },
+    servers: [],
+    clis: [{ slug: 'azure-cli', status: 'created' }],
+    credentials: [{ name: 'Azure SP', status: 'created' }],
+  };
 }
 
 describe('migration orchestration', () => {
@@ -202,7 +210,12 @@ describe('migration orchestration', () => {
         return {
           ...restoredExport,
           installations: [
-            { entryId: 'azure-cli', targetType: 'cli', targetSlug: 'azure-cli', credentialRef: 'ref-1' },
+            {
+              entryId: 'azure-cli',
+              targetType: 'cli',
+              targetSlug: 'azure-cli',
+              credentialRef: 'ref-1',
+            },
             { entryId: 'github', targetType: 'server', targetSlug: 'github', credentialRef: null },
           ],
         };
@@ -290,5 +303,46 @@ describe('migration orchestration', () => {
     expect(report.dryRun).toBe(true);
     expect(report.reinstalls[0]?.status).toBe('pending');
     expect(target.calls.some((call) => call.path.includes('/install'))).toBe(false);
+  });
+  it('issues the Access Key from the route secret and writes the snippet with the real target URL', async () => {
+    const target = stubApi((path) => {
+      if (path === '/api/v1/market') return [];
+      if (path === '/api/v1/overview') return emptyTarget;
+      if (path === '/api/v1/config/import') return emptyImportReport();
+      if (path === '/api/v1/credentials') return [];
+      if (path === '/api/v1/access-keys') {
+        // The route answers the record under `key` and the one-time secret beside it.
+        return { key: { id: 'key-1', name: 'laptop' }, secret: 'tch_mcp_issued' };
+      }
+      throw new Error(`unexpected target call ${path}`);
+    });
+    const source = stubApi((path) => {
+      if (path.startsWith('/api/v1/config/export')) {
+        return { credentials: [], servers: [], clis: [], installations: [] };
+      }
+      if (path === '/api/v1/market') return [];
+      throw new Error(`unexpected source call ${path}`);
+    });
+
+    const report = await migrateConfiguration(source, target, {
+      planes: { mcp: true, cli: true },
+      accessKeyName: 'laptop',
+      targetUrl: 'https://target.example.test',
+      sleep: async () => {},
+    });
+
+    expect(report.accessKey?.key).toBe('tch_mcp_issued');
+    expect(report.accessKey?.snippet).toContain('https://target.example.test/mcp');
+    expect(report.accessKey?.snippet).toContain('tch_mcp_issued');
+    expect(report.accessKey?.snippet).not.toContain('[object Object]');
+    // The snippet is a harness config the user can paste as-is.
+    expect(JSON.parse(report.accessKey?.snippet ?? '{}')).toMatchObject({
+      mcpServers: {
+        toolhome: {
+          url: 'https://target.example.test/mcp',
+          headers: { Authorization: 'Bearer tch_mcp_issued' },
+        },
+      },
+    });
   });
 });
