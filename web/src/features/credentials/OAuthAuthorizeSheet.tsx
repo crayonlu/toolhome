@@ -21,7 +21,7 @@ export function OAuthAuthorizeSheet({
 }) {
   const { t, locale } = useI18n()
   const authorize = useAuthorizeCredential()
-  const { data: credential } = useCredential(open ? credentialId : '')
+  const { data: credential } = useCredential(open ? credentialId : '', { pollMs: 3000 })
   const [result, setResult] = useState<AuthorizeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)

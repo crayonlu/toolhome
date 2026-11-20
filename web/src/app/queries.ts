@@ -112,11 +112,20 @@ export function useCredentials() {
   });
 }
 
-export function useCredential(id: string) {
+export function useCredential(id: string, options: { pollMs?: number } = {}) {
   return useQuery({
     queryKey: ['credentials', id],
     queryFn: () => api.get<CredentialRecord>(`/api/v1/credentials/${id}`),
     enabled: Boolean(id),
+    // The authorize sheet waits on this record: the OAuth callback flips it to
+    // `ready` server-side, so a one-shot read would sit on "Authorizing…" until
+    // the sheet times out.
+    ...(options.pollMs === undefined
+      ? {}
+      : {
+          refetchInterval: (query: { state: { data?: CredentialRecord } }) =>
+            query.state.data?.status === 'ready' ? false : options.pollMs,
+        }),
   });
 }
 
