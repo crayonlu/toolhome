@@ -241,7 +241,7 @@ export const en: Dict = {
     'Access keys are stored as digests and cannot be copied; --issue-access-key prints a new one for the harness configs.',
   'settings.harnessImport': 'Import from harness',
   'settings.harnessHint':
-    'Paste a Claude Desktop / Cursor mcpServers JSON. Secrets (passwords, tokens, keys) become encrypted credentials; the rest goes into server config.',
+    'Paste a harness config — JSON mcpServers (Claude Desktop, Cursor, VS Code) or TOML [mcp_servers.*] (Grok, Codex). For the files already on your machine run `toolhome harness import`. Secrets (passwords, tokens, keys) become encrypted credentials; entries that already reach ToolHome are left out.',
   'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
   'settings.harnessPreview': 'Preview',
   'settings.harnessImportButton': 'Import',

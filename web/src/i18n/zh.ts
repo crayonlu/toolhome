@@ -232,7 +232,7 @@ export const zh: Dict = {
     'access key 只存摘要、无法复制；--issue-access-key 会在目标实例签发一个新的供 harness 使用。',
   'settings.harnessImport': '从 harness 导入',
   'settings.harnessHint':
-    '粘贴 Claude Desktop / Cursor 的 mcpServers JSON。密钥类字段（password、token、key）会存为加密凭据，其余进入服务器配置。',
+    '粘贴 harness 配置——JSON 的 mcpServers（Claude Desktop、Cursor、VS Code）或 TOML 的 [mcp_servers.*]（Grok、Codex）。本机已有的配置文件可直接运行 `toolhome harness import`。密钥类字段（password、token、key）会存为加密凭据；已经指向 ToolHome 的条目会跳过。',
   'settings.harnessPlaceholder': '{ "mcpServers": { ... } }',
   'settings.harnessPreview': '预览',
   'settings.harnessImportButton': '导入',
